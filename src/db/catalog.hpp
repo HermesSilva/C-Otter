@@ -80,6 +80,52 @@ struct SequenceMeta {
     std::string  comment;
 };
 
+// Tipo definido pelo usuario. O `typtype` do pg_type decide o que preencher:
+// enum tem valores, composto tem atributos, domain tem tipo base e restricoes.
+enum class TypeKind : std::uint8_t {
+    base,        // 'b' -- escalar do proprio PostgreSQL
+    composite,   // 'c' -- CREATE TYPE ... AS (campo tipo, ...)
+    domain,      // 'd' -- CREATE DOMAIN
+    enumeration, // 'e' -- CREATE TYPE ... AS ENUM
+    range,       // 'r' -- CREATE TYPE ... AS RANGE
+    pseudo,      // 'p' -- trigger, record, void
+};
+
+[[nodiscard]] std::string_view to_string(TypeKind kind) noexcept;
+
+struct TypeAttributeMeta {
+    std::string name;
+    std::string type_name;
+    bool        nullable = true;
+};
+
+struct DataTypeMeta {
+    std::string name;
+    TypeKind    kind = TypeKind::base;
+    std::string comment;
+    std::string owner;
+
+    // Enum: os rotulos na ordem de enumsortorder -- a ordem importa, porque e'
+    // ela que define a comparacao entre valores do tipo.
+    std::vector<std::string> enum_values;
+
+    // Composto: os campos declarados.
+    std::vector<TypeAttributeMeta> attributes;
+
+    // Domain: o tipo sobre o qual foi criado, mais as restricoes.
+    std::string base_type;
+    std::string default_value;
+    std::string check_constraint;
+    bool        not_null = false;
+
+    // Range: o subtipo sobre o qual o intervalo e' definido.
+    std::string subtype;
+
+    [[nodiscard]] bool has_children() const noexcept {
+        return !enum_values.empty() || !attributes.empty();
+    }
+};
+
 struct RoutineMeta {
     std::string name;
     ObjKind     kind = ObjKind::function;   // function ou procedure
@@ -150,10 +196,12 @@ struct SchemaMeta {
     std::vector<TableMeta>    tables;
     std::vector<SequenceMeta> sequences;
     std::vector<RoutineMeta>  routines;
+    std::vector<DataTypeMeta> types;
 
     bool tables_loaded    = false;
     bool sequences_loaded = false;
     bool routines_loaded  = false;
+    bool types_loaded     = false;
 };
 
 // Versao do servidor, para selecionar a consulta correta (ADR 0010).
@@ -206,6 +254,14 @@ public:
         std::string_view schema);
 
     [[nodiscard]] Result<std::vector<RoutineMeta>> load_routines(
+        std::string_view schema);
+
+    // Tipos definidos pelo usuario: enum, composto, domain e range.
+    //
+    // Os valores do enum e os atributos do composto vem na mesma passagem:
+    // sao poucos por tipo, e uma consulta por tipo expandido multiplicaria o
+    // custo sem ganho perceptivel.
+    [[nodiscard]] Result<std::vector<DataTypeMeta>> load_types(
         std::string_view schema);
 
     // Corpo de uma funcao, carregado so' quando pedido: pode ter milhares de

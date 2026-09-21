@@ -167,7 +167,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Corpo da view** | ✅ | `pg_get_viewdef` formatado, com Copiar / Abrir no editor |
 | Ícone próprio por tipo | ✅ | 18 tipos, nenhum compartilhado |
 | Corpo da função | 🟡 | `load_routine_definition()` pronto, sem UI |
-| Tipos de dados (enum, domain) | ⬜ | Ícone pronto, falta o loader |
+| **Tipos de dados** | ✅ | enum com valores ordenados, composto com campos, domain com CHECK |
 | Campo de filtro/busca | ⬜ | |
 | Menu de contexto | ⬜ | Sem "ver dados", "gerar DDL", "renomear" |
 | Duplo clique abre dados | ⬜ | |
@@ -442,7 +442,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (111, todos verdes):
+Testes automatizados (113, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

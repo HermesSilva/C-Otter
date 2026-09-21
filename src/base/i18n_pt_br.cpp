@@ -51,6 +51,7 @@ const char* const kPtBr[] = {
 
     // --- Arvore de objetos ---
     "Tables",                     "Tabelas",
+    "Data types",                 "Tipos de dados",
     "Views",                      "Views",
     "Materialized views",         "Views materializadas",
     "Definition",                 "Definição",

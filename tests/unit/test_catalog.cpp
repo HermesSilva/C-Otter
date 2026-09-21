@@ -15,6 +15,8 @@
 
 #include "db/catalog.hpp"
 
+#include <string>
+
 using namespace otter::db;
 
 namespace {
@@ -73,4 +75,50 @@ OTTER_TEST(catalog_partitioned_table_behaves_like_a_table) {
     OTTER_CHECK(partitioned.has_constraints());
     OTTER_CHECK(partitioned.has_indexes());
     OTTER_CHECK(partitioned.has_triggers());
+}
+
+// --- Tipos de dados --------------------------------------------------------
+
+OTTER_TEST(catalog_type_kind_names_are_stable) {
+    // Os nomes vao para a arvore ao lado de cada tipo; mudar um silenciosamente
+    // mudaria o que o usuario le'.
+    OTTER_CHECK_EQ(std::string(to_string(TypeKind::enumeration)),
+                   std::string{"enum"});
+    OTTER_CHECK_EQ(std::string(to_string(TypeKind::composite)),
+                   std::string{"composite"});
+    OTTER_CHECK_EQ(std::string(to_string(TypeKind::domain)),
+                   std::string{"domain"});
+    OTTER_CHECK_EQ(std::string(to_string(TypeKind::range)),
+                   std::string{"range"});
+}
+
+OTTER_TEST(catalog_only_enum_and_composite_expand) {
+    // has_children() decide se o tipo vira no' expansivel na arvore. Um
+    // domain sem filhos que virasse no' mostraria uma seta que nao abre nada.
+    DataTypeMeta enumeration;
+    enumeration.kind = TypeKind::enumeration;
+    enumeration.enum_values = {"aberto", "faturado"};
+    OTTER_CHECK(enumeration.has_children());
+
+    DataTypeMeta composite;
+    composite.kind = TypeKind::composite;
+    composite.attributes.push_back({"cep", "varchar(8)", true});
+    OTTER_CHECK(composite.has_children());
+
+    DataTypeMeta domain;
+    domain.kind = TypeKind::domain;
+    domain.base_type = "character varying(14)";
+    domain.check_constraint = "CHECK (VALUE ~ '^[0-9]{14}$')";
+    OTTER_CHECK(!domain.has_children());
+
+    DataTypeMeta range;
+    range.kind = TypeKind::range;
+    range.subtype = "timestamp";
+    OTTER_CHECK(!range.has_children());
+
+    // Um enum vazio nao existe no PostgreSQL, mas se a consulta falhar em
+    // trazer os valores, o no' nao deve mostrar seta para nada.
+    DataTypeMeta empty;
+    empty.kind = TypeKind::enumeration;
+    OTTER_CHECK(!empty.has_children());
 }

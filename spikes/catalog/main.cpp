@@ -106,6 +106,44 @@ int main(int argc, char** argv) {
         std::printf("FALHOU: %s\n", relations.error().to_string().c_str());
     }
 
+    // --- Tipos definidos pelo usuario ----------------------------------------
+    //
+    // O filtro e' a parte delicada: sem ele, cada tabela apareceria tambem
+    // como tipo (typrelid) e cada tipo traria seu gemeo de array (_nome).
+    section("Data types");
+    if (auto types = catalog.load_types(schema)) {
+        std::printf("%zu encontrado(s)\n", types->size());
+        for (const auto& t : *types) {
+            std::printf("  [%-9s] %s\n",
+                        std::string(otter::db::to_string(t.kind)).c_str(),
+                        t.name.c_str());
+
+            for (const auto& value : t.enum_values) {
+                std::printf("      valor: %s\n", value.c_str());
+            }
+            for (const auto& attribute : t.attributes) {
+                std::printf("      campo: %-14s %s%s\n",
+                            attribute.name.c_str(),
+                            attribute.type_name.c_str(),
+                            attribute.nullable ? "" : " NOT NULL");
+            }
+            if (!t.base_type.empty()) {
+                std::printf("      base:  %s%s%s\n", t.base_type.c_str(),
+                            t.not_null ? " NOT NULL" : "",
+                            t.default_value.empty()
+                                ? "" : (" DEFAULT " + t.default_value).c_str());
+            }
+            if (!t.check_constraint.empty()) {
+                std::printf("      check: %s\n", t.check_constraint.c_str());
+            }
+            if (!t.subtype.empty()) {
+                std::printf("      sub:   %s\n", t.subtype.c_str());
+            }
+        }
+    } else {
+        std::printf("FALHOU: %s\n", types.error().to_string().c_str());
+    }
+
     // --- Rotinas -------------------------------------------------------------
     section("Functions / Procedures");
     if (auto routines = catalog.load_routines(schema)) {

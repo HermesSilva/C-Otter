@@ -75,6 +75,7 @@ public:
     void load_view_definition_async(std::string schema, std::string view);
     void load_sequences_async(std::string schema);
     void load_routines_async(std::string schema);
+    void load_types_async(std::string schema);
 
     // --- Transacoes ---------------------------------------------------------
     //

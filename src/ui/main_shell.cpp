@@ -759,6 +759,7 @@ void MainShell::draw_navigator_panel() {
                                       TR("Materialized views"));
                 draw_sequences_folder(schema);
                 draw_routines_folder(schema);
+                draw_types_folder(schema);
                 ImGui::TreePop();
             }
             ImGui::PopID();
@@ -848,6 +849,12 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
     ImGui::TreePop();
 }
 
+// Cada linha da arvore e' envolvida em BeginGroup/EndGroup.
+//
+// Sem isso, ImGui::IsItemHovered() testa apenas o ULTIMO item desenhado: o
+// tooltip da coluna so' aparecia sobre o texto do tipo, o do indice so' sobre
+// o tamanho. O grupo faz o retangulo cobrir a linha toda, que e' o alvo que o
+// usuario enxerga.
 void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                     const db::TableMeta& table) {
     const Palette& p = colors();
@@ -863,6 +870,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
 
         for (const db::ColumnMeta& column : table.columns) {
+            ImGui::BeginGroup();
             icon_inline(column.primary_key ? Icon::key : Icon::column,
                         column.primary_key ? p.data_light : p.text_dim);
             ImGui::SameLine(0.0f, 4.0f);
@@ -874,6 +882,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                column.type_name.c_str(),
                                column.primary_key ? "  PK" : "",
                                column.nullable ? "" : "  NOT NULL");
+            ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
                 std::string tip = column.type_name;
@@ -900,6 +909,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
         for (const db::ConstraintMeta& constraint : table.constraints) {
             const bool is_pk = constraint.kind == db::ObjKind::primary_key;
+            ImGui::BeginGroup();
             icon_inline(is_pk ? Icon::key : Icon::constraint,
                         is_pk ? p.data_light : p.text_dim);
             ImGui::SameLine(0.0f, 4.0f);
@@ -909,6 +919,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "%s",
                                std::string(db::to_string(constraint.kind)).c_str());
+            ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", constraint.definition.c_str());
@@ -934,6 +945,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                         : index.primary ? p.data_light
                                                         : p.text;
 
+            ImGui::BeginGroup();
             icon_inline(Icon::index, color);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(color), "%s", index.name.c_str());
@@ -944,6 +956,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                index.size_pretty.c_str(),
                                index.unique ? "  UNIQUE" : "",
                                index.valid ? "" : "  INVALID");
+            ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", index.definition.c_str());
@@ -960,12 +973,14 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             session_.load_keys_async(schema.name, table.name);
         }
         for (const db::ForeignKeyMeta& key : table.foreign_keys) {
+            ImGui::BeginGroup();
             icon_inline(Icon::foreign_key, p.accent_light);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(p.text), "%s", key.source_column.c_str());
             ImGui::SameLine();
             ImGui::TextColored(col4(p.data), "→ %s.%s", key.target_table.c_str(),
                                key.target_column.c_str());
+            ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s\n\nON UPDATE %s\nON DELETE %s",
@@ -1010,6 +1025,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             session_.load_triggers_async(schema.name, table.name);
         }
         for (const db::TriggerMeta& trigger : table.triggers) {
+            ImGui::BeginGroup();
             icon_inline(Icon::trigger, trigger.enabled ? p.text_dim : p.error);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(trigger.enabled ? p.text : p.text_dim),
@@ -1018,6 +1034,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::TextColored(col4(p.text_dim), "%s %s%s",
                                trigger.timing.c_str(), trigger.events.c_str(),
                                trigger.enabled ? "" : "  [off]");
+            ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", trigger.definition.c_str());
@@ -1089,12 +1106,14 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
 
     const Palette& p = colors();
     for (const db::SequenceMeta& sequence : schema.sequences) {
+        ImGui::BeginGroup();
         icon_inline(Icon::sequence, p.text_dim);
         ImGui::SameLine(0.0f, 4.0f);
         ImGui::TextColored(col4(p.text), "%s", sequence.name.c_str());
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "= %lld",
                            static_cast<long long>(sequence.last_value));
+        ImGui::EndGroup();
 
         if (ImGui::IsItemHovered()) {
             std::string tip = "start " + std::to_string(sequence.start_value) +
@@ -1121,12 +1140,14 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
     for (const db::RoutineMeta& routine : schema.routines) {
         const bool is_procedure = routine.kind == db::ObjKind::procedure;
 
+        ImGui::BeginGroup();
         icon_inline(is_procedure ? Icon::procedure : Icon::function,
                     is_procedure ? p.data : p.text_dim);
         ImGui::SameLine(0.0f, 4.0f);
         ImGui::TextColored(col4(p.text), "%s", routine.name.c_str());
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "(%s)", routine.arguments.c_str());
+        ImGui::EndGroup();
 
         if (ImGui::IsItemHovered()) {
             std::string tip = routine.name + "(" + routine.arguments + ")";
@@ -1135,6 +1156,107 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
             if (!routine.comment.empty()) tip += "\n\n" + routine.comment;
             ImGui::SetTooltip("%s", tip.c_str());
         }
+    }
+    ImGui::TreePop();
+}
+
+void MainShell::draw_types_folder(const db::SchemaMeta& schema) {
+    // Escondida ate' saber que ha' tipos: a maioria dos schemas nao define
+    // nenhum, e um no "Tipos (0)" fixo seria ruido em toda arvore.
+    if (schema.types_loaded && schema.types.empty()) return;
+
+    if (!draw_folder_node(Icon::data_type, TR("Data types"), schema.types.size(),
+                          schema.types_loaded)) {
+        return;
+    }
+
+    if (!schema.types_loaded && !session_.busy()) {
+        session_.load_types_async(schema.name);
+    }
+
+    const Palette& p = colors();
+    for (const db::DataTypeMeta& type : schema.types) {
+        ImGui::PushID(type.name.c_str());
+
+        // O grupo faz o tooltip valer para a LINHA inteira.
+        //
+        // IsItemHovered() sozinho testa apenas o ultimo item desenhado -- que
+        // aqui e' o tipo base a' direita, nao o nome. Sem o grupo, o tooltip
+        // do domain so' aparecia sobre aquele pedaco do texto.
+        ImGui::BeginGroup();
+
+        icon_inline(Icon::data_type, p.data_light);
+        ImGui::SameLine(0.0f, 4.0f);
+
+        // Enum e composto tem filhos para mostrar; domain e range cabem
+        // inteiros no rotulo e no tooltip, entao nao viram no' expansivel.
+        bool open = false;
+        if (type.has_children()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col(p.text));
+            open = ImGui::TreeNode(type.name.c_str());
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::TextColored(col4(p.text), "%s", type.name.c_str());
+        }
+
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "%s",
+                           std::string(db::to_string(type.kind)).c_str());
+
+        // O detalhe que cabe numa linha vai ao lado; o resto, no tooltip.
+        if (!type.base_type.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.syntax_keyword), "  %s",
+                               type.base_type.c_str());
+        } else if (!type.subtype.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.syntax_keyword), "  of %s",
+                               type.subtype.c_str());
+        }
+
+        ImGui::EndGroup();
+
+        if (ImGui::IsItemHovered()) {
+            std::string tip = type.name + " (" +
+                              std::string(db::to_string(type.kind)) + ")";
+            if (!type.base_type.empty()) {
+                tip += "\n  " + type.base_type;
+                if (type.not_null) tip += " NOT NULL";
+                if (!type.default_value.empty()) {
+                    tip += " DEFAULT " + type.default_value;
+                }
+            }
+            if (!type.check_constraint.empty()) {
+                tip += "\n  " + type.check_constraint;
+            }
+            if (!type.subtype.empty()) tip += "\n  subtype " + type.subtype;
+            if (!type.owner.empty())   tip += "\n  owner " + type.owner;
+            if (!type.comment.empty()) tip += "\n\n" + type.comment;
+            ImGui::SetTooltip("%s", tip.c_str());
+        }
+
+        if (open) {
+            // Enum: a ordem e' a de enumsortorder, que define a comparacao
+            // entre valores. O indice a esquerda deixa isso explicito.
+            for (std::size_t i = 0; i < type.enum_values.size(); ++i) {
+                ImGui::TextColored(col4(p.text_dim), "  %zu", i + 1);
+                ImGui::SameLine(0.0f, 8.0f);
+                ImGui::TextColored(col4(p.syntax_string), "%s",
+                                   type.enum_values[i].c_str());
+            }
+
+            for (const db::TypeAttributeMeta& attribute : type.attributes) {
+                icon_inline(Icon::column, p.text_dim);
+                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::TextColored(col4(p.text), "%s", attribute.name.c_str());
+                ImGui::SameLine();
+                ImGui::TextColored(col4(p.text_dim), "%s%s",
+                                   attribute.type_name.c_str(),
+                                   attribute.nullable ? "" : "  NOT NULL");
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
     }
     ImGui::TreePop();
 }

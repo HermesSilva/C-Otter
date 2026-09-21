@@ -280,6 +280,19 @@ void Session::load_routines_async(std::string schema) {
     });
 }
 
+void Session::load_types_async(std::string schema) {
+    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+        auto types = catalog.load_types(schema);
+        if (!types) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::SchemaMeta* s = find_schema(schema)) {
+            s->types = std::move(*types);
+            s->types_loaded = true;
+        }
+    });
+}
+
 bool Session::auto_commit() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return holt_ ? holt_->auto_commit() : true;

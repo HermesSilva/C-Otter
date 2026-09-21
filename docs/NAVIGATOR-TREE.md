@@ -48,7 +48,9 @@ Connection
         │       ├── Indexes (do schema) ⬜
         │       ├── Sequences         ✅  last_value, owned_by
         │       ├── Procedures/Functions ✅  assinatura, retorno, linguagem
-        │       ├── Data Types        ⬜  enums, domains, compostos
+        │       ├── Data Types        ✅  enum, domain, composto, range
+        │       │   ├── Enum values        ✅  na ordem de enumsortorder
+        │       │   └── Attributes         ✅  campos do composto
         │       └── Aggregates        ⬜
         ├── Event Triggers            ⬜
         ├── Extensions                ⬜
@@ -76,7 +78,7 @@ Connection
 
 | | DBeaver | C-Otter |
 |---|---|---|
-| Tipos de nó na árvore | **~70** | **17** |
+| Tipos de nó na árvore | **~70** | **20** |
 | Classes de modelo `Postgre*` | **90** | 5 structs |
 
 ## Ordem de implementação
@@ -99,13 +101,12 @@ Por valor de uso, não por ordem na árvore.
 
 | # | Item | Por quê |
 |---|------|---------|
-| 1 | **Data Types** (enum, domain, composto) | Ícone pronto, falta o loader |
-| 2 | **Corpo de função** | `load_routine_definition()` pronto, sem UI |
-| 3 | **Partições e herança** | |
-| 4 | **Dependencies** | Grafo de dependências |
-| 5 | **Rules e Policies (RLS)** | |
-| 6 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
-| 7 | Encodings, Collations, Languages | Referência |
+| 1 | **Corpo de função** | `load_routine_definition()` pronto, sem UI |
+| 2 | **Partições e herança** | |
+| 3 | **Dependencies** | Grafo de dependências |
+| 4 | **Rules e Policies (RLS)** | |
+| 5 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
+| 6 | Encodings, Collations, Languages | Referência |
 
 ## Decisões de design
 
@@ -167,6 +168,13 @@ Quatro desenhos foram refeitos depois de olhar a captura, não o código:
 **Tooltip com detalhe.** Comentário do objeto, definição da constraint, expressão do
 índice — informação que não cabe no rótulo.
 
+**Cada linha vai dentro de `BeginGroup`/`EndGroup`.** `ImGui::IsItemHovered()`
+testa apenas o **último** item desenhado. Como as linhas da árvore são montadas com
+vários `TextColored` em `SameLine`, os tooltips respondiam só sobre o pedaço final:
+o da coluna só sobre o tipo, o do índice só sobre o tamanho. Sete linhas tinham o
+defeito e foram corrigidas juntas — ele só apareceu ao passar o mouse na aplicação
+rodando, nunca no build.
+
 **Pasta vazia fica escondida.** Um schema sem views não mostra `Views (0)`. O zero
 ocuparia uma linha para dizer que não há nada.
 
@@ -186,6 +194,22 @@ A materialized view tem linhas gravadas — por isso aceita índice — mas é a
 Mostrar `Constraints (0)` numa view seria pior que omitir: sugeriria que ela
 *poderia* ter uma. As regras estão em `TableMeta::has_constraints()`,
 `has_indexes()` e `has_triggers()`, com teste em `tests/unit/test_catalog.cpp`.
+
+**Tipos de dados: `typtype` decide o que mostrar.** Extraído de
+`PostgreDataType.java` e do `<tree>` (`folder … visibleIf="object.hasAttributes()"`):
+
+| `typtype` | O que é | Detalhe na árvore |
+|:---:|---|---|
+| `e` | ENUM | Valores, na ordem de `enumsortorder` |
+| `c` | Composto | Atributos, com tipo de cada um |
+| `d` | DOMAIN | Tipo base, `NOT NULL`, `DEFAULT`, `CHECK` |
+| `r` | RANGE | Subtipo |
+| `b` | Base | — (os escalares do próprio PostgreSQL) |
+| `p` | Pseudo | — (`trigger`, `record`, `void`) |
+
+Os tipos de tabela (`typrelid` de uma relação real) e os de array (`_nome`) ficam
+**fora**: cada tabela já cria um tipo homônimo, e listá-los duplicaria a árvore.
+O DBeaver filtra pelo mesmo critério.
 
 **Fixture do banco de teste.** `tests/integration/fixtures.sql` cria o schema
 `otter_test` com views, materialized view, trigger, tipos próprios, função e

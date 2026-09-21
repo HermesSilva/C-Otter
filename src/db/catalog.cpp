@@ -100,6 +100,18 @@ std::string_view to_string(ObjKind kind) noexcept {
     return "object";
 }
 
+std::string_view to_string(TypeKind kind) noexcept {
+    switch (kind) {
+        case TypeKind::base:        return "base";
+        case TypeKind::composite:   return "composite";
+        case TypeKind::domain:      return "domain";
+        case TypeKind::enumeration: return "enum";
+        case TypeKind::range:       return "range";
+        case TypeKind::pseudo:      return "pseudo";
+    }
+    return "type";
+}
+
 ServerVersion ServerVersion::parse(std::string_view text) {
     // Formatos: "18.2", "9.6.24", "13.4 (Debian ...)".
     ServerVersion version;
@@ -516,6 +528,163 @@ Result<std::vector<SequenceMeta>> PostgresCatalog::load_sequences(
         sequences.push_back(std::move(sequence));
     }
     return sequences;
+}
+
+Result<std::vector<DataTypeMeta>> PostgresCatalog::load_types(
+    std::string_view schema) {
+    // Filtros que definem "tipo que o usuario criou":
+    //
+    //  - typtype IN ('c','d','e','r'): so' composto, domain, enum e range.
+    //    Os tipos base ('b') e pseudo ('p') do proprio PostgreSQL nao sao do
+    //    schema do usuario, e listar centenas deles afogaria a arvore.
+    //
+    //  - typarray <> 0 OU typtype = 'd': todo tipo tem um tipo-array gemeo
+    //    chamado _nome. O gemeo tem typarray = 0, entao a condicao o exclui.
+    //    Dominios nao geram array e precisam da excecao.
+    //
+    //  - relkind ausente ou 'c': cada TABELA cria um tipo homonimo
+    //    (typrelid aponta para ela). Sem este filtro, cada tabela apareceria
+    //    duas vezes na arvore -- uma como tabela, outra como tipo.
+    //
+    // O DBeaver aplica os mesmos tres criterios em PostgreTypeCache.
+    const std::string sql =
+        "SELECT t.typname,"
+        "       t.typtype,"
+        "       COALESCE(obj_description(t.oid, 'pg_type'), ''),"
+        "       COALESCE(pg_get_userbyid(t.typowner), ''),"
+        "       COALESCE(format_type(t.typbasetype, t.typtypmod), ''),"
+        "       COALESCE(t.typdefault, ''),"
+        "       t.typnotnull,"
+        "       COALESCE((SELECT format_type(r.rngsubtype, NULL)"
+        "                   FROM pg_range r WHERE r.rngtypid = t.oid), '')"
+        "  FROM pg_type t"
+        "  JOIN pg_namespace n ON n.oid = t.typnamespace"
+        "  LEFT JOIN pg_class c ON c.oid = t.typrelid"
+        " WHERE n.nspname = " + quote_literal(schema) +
+        "   AND t.typtype IN ('c', 'd', 'e', 'r')"
+        "   AND (t.typarray <> 0 OR t.typtype = 'd')"
+        "   AND (c.relkind IS NULL OR c.relkind = 'c')"
+        " ORDER BY t.typname";
+
+    OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));
+
+    std::vector<DataTypeMeta> types;
+    types.reserve(rs.row_count());
+
+    for (std::size_t r = 0; r < rs.row_count(); ++r) {
+        DataTypeMeta type;
+        type.name    = std::string(rs.text(r, 0));
+        type.comment = std::string(rs.text(r, 2));
+        type.owner   = std::string(rs.text(r, 3));
+
+        const std::string_view typtype = rs.text(r, 1);
+        if      (typtype == "c") type.kind = TypeKind::composite;
+        else if (typtype == "d") type.kind = TypeKind::domain;
+        else if (typtype == "e") type.kind = TypeKind::enumeration;
+        else if (typtype == "r") type.kind = TypeKind::range;
+        else if (typtype == "p") type.kind = TypeKind::pseudo;
+        else                     type.kind = TypeKind::base;
+
+        if (type.kind == TypeKind::domain) {
+            type.base_type     = std::string(rs.text(r, 4));
+            type.default_value = std::string(rs.text(r, 5));
+            type.not_null      = rs.text(r, 6) == "t";
+        } else if (type.kind == TypeKind::range) {
+            type.subtype = std::string(rs.text(r, 7));
+        }
+
+        types.push_back(std::move(type));
+    }
+
+    if (types.empty()) return types;
+
+    // --- Valores dos enums ---------------------------------------------------
+    //
+    // Uma consulta para todos os enums do schema, nao uma por tipo: sao dezenas
+    // de linhas no total. enumsortorder define a ordem de comparacao do tipo --
+    // ordenar por rotulo mostraria uma sequencia que o banco nao reconhece.
+    {
+        const std::string enum_sql =
+            "SELECT t.typname, e.enumlabel"
+            "  FROM pg_enum e"
+            "  JOIN pg_type t ON t.oid = e.enumtypid"
+            "  JOIN pg_namespace n ON n.oid = t.typnamespace"
+            " WHERE n.nspname = " + quote_literal(schema) +
+            " ORDER BY t.typname, e.enumsortorder";
+
+        OTTER_ASSIGN_OR_RETURN(auto enum_rs, holt_.query(enum_sql));
+        for (std::size_t r = 0; r < enum_rs.row_count(); ++r) {
+            const std::string_view owner_name = enum_rs.text(r, 0);
+            for (DataTypeMeta& type : types) {
+                if (type.name == owner_name) {
+                    type.enum_values.emplace_back(enum_rs.text(r, 1));
+                    break;
+                }
+            }
+        }
+    }
+
+    // --- Atributos dos compostos ---------------------------------------------
+    {
+        const std::string attr_sql =
+            "SELECT t.typname,"
+            "       a.attname,"
+            "       format_type(a.atttypid, a.atttypmod),"
+            "       a.attnotnull"
+            "  FROM pg_attribute a"
+            "  JOIN pg_class c ON c.oid = a.attrelid"
+            "  JOIN pg_type t ON t.oid = c.reltype"
+            "  JOIN pg_namespace n ON n.oid = t.typnamespace"
+            " WHERE n.nspname = " + quote_literal(schema) +
+            "   AND c.relkind = 'c'"
+            "   AND a.attnum > 0"
+            "   AND NOT a.attisdropped"
+            " ORDER BY t.typname, a.attnum";
+
+        OTTER_ASSIGN_OR_RETURN(auto attr_rs, holt_.query(attr_sql));
+        for (std::size_t r = 0; r < attr_rs.row_count(); ++r) {
+            const std::string_view owner_name = attr_rs.text(r, 0);
+            for (DataTypeMeta& type : types) {
+                if (type.name != owner_name) continue;
+
+                TypeAttributeMeta attribute;
+                attribute.name      = std::string(attr_rs.text(r, 1));
+                attribute.type_name = std::string(attr_rs.text(r, 2));
+                attribute.nullable  = attr_rs.text(r, 3) != "t";
+                type.attributes.push_back(std::move(attribute));
+                break;
+            }
+        }
+    }
+
+    // --- CHECK dos domains ---------------------------------------------------
+    {
+        const std::string check_sql =
+            "SELECT t.typname, pg_get_constraintdef(con.oid)"
+            "  FROM pg_constraint con"
+            "  JOIN pg_type t ON t.oid = con.contypid"
+            "  JOIN pg_namespace n ON n.oid = t.typnamespace"
+            " WHERE n.nspname = " + quote_literal(schema) +
+            " ORDER BY t.typname, con.conname";
+
+        OTTER_ASSIGN_OR_RETURN(auto check_rs, holt_.query(check_sql));
+        for (std::size_t r = 0; r < check_rs.row_count(); ++r) {
+            const std::string_view owner_name = check_rs.text(r, 0);
+            for (DataTypeMeta& type : types) {
+                if (type.name != owner_name) continue;
+
+                // Um domain pode ter varios CHECK; junta com AND, que e' a
+                // semantica real da validacao.
+                if (!type.check_constraint.empty()) {
+                    type.check_constraint += " AND ";
+                }
+                type.check_constraint += std::string(check_rs.text(r, 1));
+                break;
+            }
+        }
+    }
+
+    return types;
 }
 
 Result<std::vector<RoutineMeta>> PostgresCatalog::load_routines(
