@@ -48,6 +48,7 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Menu → Item | Atalho | Estado | Observação |
 |-------------|--------|--------|------------|
 | **Arquivo** → Nova conexão... | `Ctrl+Shift+N` | ✅ | Item e atalho |
+| **Arquivo** → Importar do DBeaver... | — | ✅ | Lê os workspaces reais; nunca escreve neles |
 | **Arquivo** → Desconectar | — | ✅ | Desabilitado quando não há conexão |
 | **Arquivo** → Sair | `Alt+F4` | ✅ | |
 | **Arquivo** → Abrir script | `Ctrl+O` | ⬜ | |
@@ -122,8 +123,10 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Indicador pulsante durante a conexão | ✅ |
 | Erro detalhado / sucesso com contagens | ✅ |
 | Faixa colorida do tipo no topo | ✅ |
-| **Persistir a conexão em disco** | ⬜ **redigitar a cada execução** |
-| Senha no cofre do SO | ⬜ |
+| **Persistir a conexão em disco** | ✅ formato do DBeaver (ADR 0012) |
+| Senha salva | ✅ AES-128-CBC, chave do DBeaver — **proteção fraca, avisada na tela** |
+| Senha no cofre do SO (DPAPI) | ⬜ incompatível com o DBeaver por definição |
+| **Importar do DBeaver** | ✅ Arquivo → Importar; lê o workspace real, nunca escreve nele |
 
 ## 4. Painel Raft (conexões)
 
@@ -335,8 +338,9 @@ visualizador, não uma ferramenta de trabalho.
 
 | # | Onde | Problema |
 |---|------|----------|
-| 1 | Conexão | Não persiste — redigitar host/banco/usuário a cada execução |
+| 1 | Conexão | Senha em disco tem a proteção fraca do DBeaver (chave pública) — **avisado na tela**, ADR 0012 |
 | 2 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
+| 4 | Raft | Uma conexão por vez: as salvas existem, mas só a última reabre preenchida |
 | 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
 
 ### Corrigidos
@@ -455,7 +459,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (125, todos verdes):
+Testes automatizados (148, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

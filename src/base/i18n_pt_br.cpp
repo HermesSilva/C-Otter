@@ -49,7 +49,7 @@ const char* const kPtBr[] = {
     "loading...",                 "carregando...",
     "Copy name",                  "Copiar nome",
 
-    // --- Arvore de objetos ---
+    // --- Grade de resultado e paginacao ---
     "First page",                 "Primeira página",
     "Previous page",              "Página anterior",
     "Next page",                  "Próxima página",
@@ -67,6 +67,55 @@ const char* const kPtBr[] = {
     "See the executed SQL in the Queries tab.",
     "A consulta foi reescrita com LIMIT %zu.\n"
     "Veja o SQL executado na aba Queries.",
+
+    // --- Conexoes salvas e importacao (ADR 0012) ---
+    "this database is not supported yet",
+    "este banco ainda não é suportado",
+    "MySQL driver is not implemented yet",
+    "o driver MySQL ainda não foi implementado",
+    "MariaDB driver is not implemented yet",
+    "o driver MariaDB ainda não foi implementado",
+    "SQLite driver is not implemented yet",
+    "o driver SQLite ainda não foi implementado",
+    "Oracle driver is planned for a later phase",
+    "o driver Oracle está previsto para uma fase posterior",
+    "SQL Server driver is planned for a later phase",
+    "o driver SQL Server está previsto para uma fase posterior",
+    "generic JDBC has no equivalent without a JVM",
+    "JDBC genérico não tem equivalente sem uma JVM",
+    "Import from DBeaver...",     "Importar do DBeaver...",
+    "Import from DBeaver",        "Importar do DBeaver",
+    "Import selected",            "Importar selecionadas",
+    "Rescan",                     "Procurar de novo",
+    "Name",                       "Nome",
+    "Driver",                     "Driver",
+    "Server",                     "Servidor",
+    "Status",                     "Estado",
+    "with password",              "com senha",
+    "no password",                "sem senha",
+    "%zu connection(s) imported",  "%zu conexão(oes) importada(s)",
+    "weak encryption, for DBeaver compatibility",
+    "criptografia fraca, por compatibilidade com o DBeaver",
+    "No DBeaver workspace found on this machine.",
+    "Nenhum workspace do DBeaver encontrado nesta máquina.",
+    "%zu connection(s) found. Nothing is written back to DBeaver.",
+    "%zu conexão(oes) encontrada(s). Nada é gravado de volta no DBeaver.",
+    "Copy the selected connections into C-Otter",
+    "Copia as conexões selecionadas para o C-Otter",
+    "Look for DBeaver workspaces again",
+    "Procura workspaces do DBeaver de novo",
+    "The password is stored in credentials-config.json, encrypted the "
+    "same way DBeaver does it.\n\n"
+    "That encryption uses a fixed key published in DBeaver's source "
+    "code: it protects against a casual look at the file, and against "
+    "nothing more. Leave it off for credentials that matter.",
+    "A senha fica em credentials-config.json, cifrada do mesmo jeito que o "
+    "DBeaver faz.\n\n"
+    "Essa cifragem usa uma chave fixa publicada no código-fonte do "
+    "DBeaver: protege contra uma olhada casual no arquivo, e contra mais "
+    "nada. Deixe desligado para credenciais que importam.",
+
+    // --- Arvore de objetos ---
     "Tables",                     "Tabelas",
     "Data types",                 "Tipos de dados",
     "Views",                      "Views",

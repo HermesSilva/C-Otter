@@ -1,5 +1,6 @@
 #include "ui/connection_dialog.hpp"
 #include "base/i18n.hpp"
+#include "ui/icons.hpp"
 #include "ui/theme.hpp"
 
 #include "imgui.h"
@@ -364,9 +365,24 @@ void ConnectionDialog::draw_tab_main() {
                  ImGuiInputTextFlags_Password);
 
     ImGui::Checkbox(TR("Save password"), &profile_.save_password);
-    help_marker("A senha é guardada no cofre do sistema operacional "
-                "(DPAPI no Windows). Ainda não implementado — a senha só "
-                "vive nesta sessão.");
+
+    // O aviso e' literal de proposito: a criptografia do arquivo usa a chave
+    // fixa do DBeaver, que e' publica no codigo-fonte dele. Deixar o usuario
+    // supor que ha' um cofre por tras seria o tipo de campo que finge
+    // funcionar (diretiva 6; ADR 0012).
+    help_marker(TR(
+        "The password is stored in credentials-config.json, encrypted the "
+        "same way DBeaver does it.\n\n"
+        "That encryption uses a fixed key published in DBeaver's source "
+        "code: it protects against a casual look at the file, and against "
+        "nothing more. Leave it off for credentials that matter."));
+
+    if (profile_.save_password) {
+        icon_inline(Icon::warning, colors().warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(colors().warn),
+                           TR("weak encryption, for DBeaver compatibility"));
+    }
     ImGui::EndDisabled();
 
     ImGui::EndChild();

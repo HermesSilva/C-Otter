@@ -51,7 +51,8 @@ Funciona também: assistente de conexão com catálogo de drivers e 8 abas, múl
 editor com resultado isolado, transações (auto-commit, commit, rollback), árvore de objetos
 com tabelas, views e materialized views em pastas separadas — constraints, índices,
 FKs, referências, triggers, sequences, funções e o corpo da view — três temas e i18n
-(EN + pt-BR).
+(EN + pt-BR). As conexões persistem no formato do DBeaver e podem ser **importadas**
+do workspace dele.
 
 **Cobertura real frente ao DBeaver: ~2,5% dos 281 comandos.** O número é baixo porque o
 denominador é o DBeaver inteiro — ver [`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) para o
@@ -72,7 +73,7 @@ build\win-release\bin\c-otter.exe
 - [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — lacunas estruturais e ordem de implementação
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
 - [`docs/PLAN.md`](docs/PLAN.md) — roteiro em fases · [`docs/EFFORT.md`](docs/EFFORT.md) — esforço em homem-hora
-- [`docs/adr/`](docs/adr/) — 11 decisões arquiteturais, com as revogadas marcadas
+- [`docs/adr/`](docs/adr/) — 12 decisões arquiteturais, com as revogadas marcadas
 - [`lang/README.md`](lang/README.md) — como acrescentar um idioma
 
 ## Licença

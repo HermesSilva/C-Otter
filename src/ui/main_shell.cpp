@@ -145,17 +145,41 @@ MainShell::MainShell()
     // O assistente conecta e, ao concluir, tambem guarda o perfil ativo.
     connection_dialog_.set_on_connect([this](const db::ConnectionProfile& profile) {
         active_profile_ = profile;
+        remember_profile(profile);
         session_.connect_async(profile.to_conn_config());
     });
     connection_dialog_.set_on_save([this](const db::ConnectionProfile& profile) {
         active_profile_ = profile;
+        remember_profile(profile);
     });
+
+    // Conexoes salvas na execucao anterior (ADR 0012).
+    load_saved_profiles();
 
     // Abre primeiro: open_new() reinicia o perfil, e so' depois disso faz
     // sentido preencher a partir do ambiente (como psql faz).
-    connection_dialog_.open_new();
+    // A ultima conexao usavel salva reabre ja' na aba de configuracao, com os
+    // campos preenchidos. Era o defeito mais incomodo do uso diario:
+    // redigitar host, banco e usuario a cada execucao (ADR 0012).
+    //
+    // open_edit em vez de open_new: com um perfil conhecido, parar no
+    // catalogo de drivers obrigaria a escolher PostgreSQL de novo para so'
+    // entao ver o que ja' estava salvo.
+    const db::StoredProfile* last_usable = nullptr;
+    for (const db::StoredProfile& stored : saved_profiles_) {
+        if (stored.supported) { last_usable = &stored; break; }
+    }
+
+    if (last_usable != nullptr) {
+        connection_dialog_.open_edit(last_usable->profile);
+    } else {
+        connection_dialog_.open_new();
+    }
 
     db::ConnectionProfile& profile = connection_dialog_.profile();
+
+    // O ambiente ainda sobrepoe o que foi salvo: e' o que os scripts de
+    // captura usam, e e' a convencao do psql.
     auto from_env = [](const char* name, std::string& target) {
         if (const char* value = std::getenv(name)) target = value;
     };
@@ -187,6 +211,9 @@ MainShell::MainShell()
     // mao vale mais que um clique que talvez tenha acontecido.
     if (std::getenv("OTTER_AUTOCONNECT") != nullptr) {
         active_profile_ = profile;
+        // Mesmo caminho da conexao normal, incluindo o registro em disco: um
+        // atalho que pula etapas deixa de exercitar o que ele deveria testar.
+        remember_profile(profile);
         session_.connect_async(profile.to_conn_config());
         connection_dialog_.close();
     }
@@ -506,6 +533,7 @@ void MainShell::draw() {
     connection_dialog_.draw(feedback);
 
     if (show_about_) draw_about_window();
+    if (show_import_) draw_import_window();
     if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
 }
@@ -577,6 +605,11 @@ void MainShell::draw_menu_bar() {
         if (ImGui::MenuItem(TR("Edit connection..."), nullptr, false,
                             session_.state() == SessionState::connected)) {
             connection_dialog_.open_edit(active_profile_);
+        }
+        if (ImGui::MenuItem(TR("Import from DBeaver..."))) {
+            show_import_ = true;
+            import_scanned_ = false;
+            import_status_.clear();
         }
         ImGui::Separator();
         if (ImGui::MenuItem(TR("New SQL tab"), "Ctrl+T")) new_document();
@@ -1908,6 +1941,224 @@ void MainShell::draw_about_window() {
         ImGui::TextColored(col4(colors().text_dim),
                            "Dear ImGui %s  |  protocolo PostgreSQL v3 nativo",
                            IMGUI_VERSION);
+    }
+    ImGui::End();
+}
+
+void MainShell::load_saved_profiles() {
+    auto profiles = db::load_profiles(db::otter_store_location());
+    if (!profiles) {
+        // Arquivo corrompido nao pode impedir o programa de abrir. A mensagem
+        // vai para a barra de status; o usuario decide o que fazer.
+        saved_profiles_.clear();
+        return;
+    }
+    saved_profiles_ = std::move(*profiles);
+}
+
+void MainShell::persist_profiles() {
+    // Falha de gravacao e' relatada, nunca silenciosa: o usuario precisa saber
+    // que a conexao que ele acabou de criar nao vai estar la' amanha.
+    if (auto status = db::save_profiles(db::otter_store_location(),
+                                        saved_profiles_);
+        !status) {
+        import_status_ = status.error().to_string();
+    }
+}
+
+void MainShell::remember_profile(const db::ConnectionProfile& profile) {
+    // Mesmo host+porta+banco+usuario e' a MESMA conexao, mesmo que o nome
+    // tenha mudado: senao, editar o rotulo criaria uma entrada duplicada.
+    const auto same_target = [&profile](const db::StoredProfile& stored) {
+        return stored.profile.host == profile.host &&
+               stored.profile.port == profile.port &&
+               stored.profile.database == profile.database &&
+               stored.profile.user == profile.user;
+    };
+
+    for (db::StoredProfile& stored : saved_profiles_) {
+        if (!same_target(stored)) continue;
+
+        const std::string id = stored.id;   // preserva o id e o raw_json
+        stored.profile = profile;
+        stored.id      = id;
+        persist_profiles();
+        return;
+    }
+
+    db::StoredProfile fresh;
+    fresh.profile   = profile;
+    fresh.provider  = "postgresql";
+    fresh.driver    = "postgres-jdbc";
+    fresh.supported = true;
+
+    // Sem nome, a lista de conexoes mostraria uma linha em branco. O rotulo
+    // "banco@host" e' o mesmo que a barra de status ja' usa.
+    if (fresh.profile.name.empty()) {
+        fresh.profile.name = profile.database.empty()
+                                 ? profile.host
+                                 : profile.database + "@" + profile.host;
+    }
+    saved_profiles_.push_back(std::move(fresh));
+    persist_profiles();
+}
+
+void MainShell::draw_import_window() {
+    const Palette& p = colors();
+
+    // Larga o bastante para o motivo caber inteiro: "o driver MySQL ainda
+    // nao foi implementado" cortado no meio nao informa nada.
+    ImGui::SetNextWindowSize(ImVec2(1000, 560), ImGuiCond_Appearing);
+    if (ImGui::Begin(TRW("Import from DBeaver", "###ImportDBeaver"),
+                     &show_import_, ImGuiWindowFlags_NoDocking)) {
+
+        // Varre uma vez ao abrir; reabrir a janela nao deve reler o disco a
+        // cada quadro.
+        if (!import_scanned_) {
+            import_scanned_ = true;
+            import_candidates_.clear();
+            import_selected_.clear();
+
+            for (const db::StoreLocation& location :
+                 db::dbeaver_store_locations()) {
+                auto found = db::load_profiles(location);
+                if (!found) continue;
+
+                for (db::StoredProfile& stored : *found) {
+                    import_candidates_.push_back(std::move(stored));
+                }
+            }
+            // Vem marcado o que da' para usar; o resto fica desmarcado mas
+            // visivel, com o motivo.
+            for (const db::StoredProfile& stored : import_candidates_) {
+                import_selected_.push_back(stored.supported);
+            }
+        }
+
+        if (import_candidates_.empty()) {
+            ImGui::TextColored(col4(p.text_dim),
+                               TR("No DBeaver workspace found on this machine."));
+            ImGui::TextColored(col4(p.text_dim),
+                               TR("Looked under %APPDATA%\\DBeaverData."));
+            ImGui::End();
+            return;
+        }
+
+        ImGui::TextColored(col4(p.text_dim),
+                           TR("%zu connection(s) found. Nothing is written back "
+                              "to DBeaver."),
+                           import_candidates_.size());
+        ImGui::Separator();
+
+        constexpr ImGuiTableFlags flags =
+            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+
+        const float table_height = ImGui::GetContentRegionAvail().y -
+                                   ImGui::GetFrameHeightWithSpacing() * 2.2f;
+
+        if (ImGui::BeginTable("##import", 5, flags,
+                              ImVec2(0.0f, table_height))) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+            ImGui::TableSetupColumn(TR("Name"),
+                                    ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableSetupColumn(TR("Driver"), ImGuiTableColumnFlags_WidthFixed,
+                                    80.0f);
+            ImGui::TableSetupColumn(TR("Server"),
+                                    ImGuiTableColumnFlags_WidthStretch, 1.2f);
+            ImGui::TableSetupColumn(TR("Status"),
+                                    ImGuiTableColumnFlags_WidthStretch, 1.8f);
+            ImGui::TableHeadersRow();
+
+            for (std::size_t i = 0; i < import_candidates_.size(); ++i) {
+                const db::StoredProfile& stored = import_candidates_[i];
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::TableNextRow();
+
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!stored.supported);
+                bool selected = import_selected_[i];
+                if (ImGui::Checkbox("##pick", &selected)) {
+                    import_selected_[i] = selected;
+                }
+                ImGui::EndDisabled();
+
+                const std::uint32_t tint =
+                    stored.supported ? p.text : with_alpha(p.text_dim, 0.6f);
+
+                ImGui::TableNextColumn();
+                ImGui::TextColored(col4(tint), "%s",
+                                   stored.profile.name.c_str());
+
+                ImGui::TableNextColumn();
+                ImGui::TextColored(col4(p.text_dim), "%s",
+                                   stored.provider.c_str());
+
+                ImGui::TableNextColumn();
+                ImGui::TextColored(col4(tint), "%s:%u/%s",
+                                   stored.profile.host.c_str(),
+                                   static_cast<unsigned>(stored.profile.port),
+                                   stored.profile.database.c_str());
+
+                ImGui::TableNextColumn();
+                if (stored.supported) {
+                    // Dizer se a senha veio junto evita a surpresa de
+                    // importar e descobrir que ainda falta digitar.
+                    if (!stored.profile.password.empty()) {
+                        ImGui::TextColored(col4(p.ok), TR("with password"));
+                    } else {
+                        ImGui::TextColored(col4(p.text_dim), TR("no password"));
+                    }
+                } else {
+                    icon_inline(Icon::warning, p.warn);
+                    ImGui::SameLine(0.0f, 4.0f);
+                    // O motivo vem do store em ingles, que e' a chave de
+                    // traducao (diretiva 8). TR() no momento de desenhar, nao
+                    // na origem: o store nao conhece o idioma ativo.
+                    ImGui::TextColored(col4(p.warn), "%s",
+                                       TR(stored.unsupported_reason.c_str()));
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        std::size_t picked = 0;
+        for (const bool selected : import_selected_) {
+            if (selected) ++picked;
+        }
+
+        ImGui::Separator();
+        if (!import_status_.empty()) {
+            ImGui::TextColored(col4(p.ok), "%s", import_status_.c_str());
+        }
+
+        if (icon_text_button("##doimport", Icon::save, TR("Import selected"),
+                             TR("Copy the selected connections into C-Otter"),
+                             picked > 0)) {
+            std::size_t imported = 0;
+            for (std::size_t i = 0; i < import_candidates_.size(); ++i) {
+                if (!import_selected_[i]) continue;
+
+                // Id novo: o do DBeaver pertence ao arquivo dele, e reusa-lo
+                // criaria confusao se as duas ferramentas divergirem.
+                db::StoredProfile copy = import_candidates_[i];
+                copy.id.clear();
+                saved_profiles_.push_back(std::move(copy));
+                ++imported;
+            }
+            persist_profiles();
+            import_status_ = std::string(TRF("%zu connection(s) imported",
+                                             imported));
+        }
+
+        ImGui::SameLine();
+        if (icon_text_button("##rescan", Icon::refresh, TR("Rescan"),
+                             TR("Look for DBeaver workspaces again"))) {
+            import_scanned_ = false;
+            import_status_.clear();
+        }
     }
     ImGui::End();
 }

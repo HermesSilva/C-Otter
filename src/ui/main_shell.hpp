@@ -9,6 +9,7 @@
 #include "TextEditor.h"
 
 #include "db/holt.hpp"
+#include "db/connection_store.hpp"
 #include "db/result_set.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
@@ -74,6 +75,15 @@ private:
     void draw_status_bar();
     void draw_about_window();
 
+    // --- Conexoes salvas (ADR 0012) ------------------------------------------
+    void load_saved_profiles();
+    void persist_profiles();
+    void remember_profile(const db::ConnectionProfile& profile);
+
+    // Janela de importacao: lista o que ha' nos workspaces do DBeaver e deixa
+    // o usuario escolher. Nunca escreve no diretorio do DBeaver.
+    void draw_import_window();
+
     // Galeria de todos os icones, para conferir de relance se dois tipos de
     // objeto ficaram com desenhos parecidos demais (diretiva 5).
     void draw_icon_gallery();
@@ -114,6 +124,17 @@ private:
     bool show_about_         = false;
     bool show_demo_          = false;
     bool show_icons_         = false;
+    bool show_import_        = false;
+
+    // Conexoes conhecidas, lidas do disco ao iniciar.
+    std::vector<db::StoredProfile> saved_profiles_;
+
+    // Estado da janela de importacao: o que foi encontrado e o que esta'
+    // marcado para trazer.
+    std::vector<db::StoredProfile> import_candidates_;
+    std::vector<bool>              import_selected_;
+    std::string                    import_status_;
+    bool                           import_scanned_ = false;
 };
 
 } // namespace otter::ui
