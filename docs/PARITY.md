@@ -98,12 +98,12 @@ Distribuição dos 275 comandos por área:
 | Análise de escopo (FROM → tabelas) | ✅ | ✅ |
 | Filtro de colunas por `alias.` | ✅ | ✅ |
 | Minimap | ➖ | ✅ |
-| Executar script inteiro (`Alt+X`) | ✅ | ⬜ |
-| Múltiplas abas de editor | ✅ | ⬜ |
-| Abrir/salvar arquivo `.sql` | ✅ | ⬜ |
-| Formatar SQL (`Ctrl+Shift+F`) | ✅ | ⬜ |
+| Executar script inteiro (`Alt+X`) | ✅ | ✅ |
+| Múltiplas abas de editor | ✅ | ✅ |
+| Abrir/salvar arquivo `.sql` | ✅ | ✅ |
+| Formatar SQL (`Ctrl+Shift+F`) | ✅ | ✅ |
 | Comentar/descomentar (`Ctrl+/`) | ✅ | 🟡 do widget, sem mapeamento próprio |
-| Plano de execução (`Ctrl+Shift+E`) | ✅ | ⬜ |
+| Plano de execução (`Ctrl+Shift+E`) | ✅ | ✅ ADR 0013 |
 | Histórico de queries | ✅ | 🟡 painel Queries mostra a sessão atual |
 | Templates/snippets | ✅ | ⬜ |
 | Ir para declaração (`F3`) | ✅ | ⬜ |
@@ -120,30 +120,30 @@ Distribuição dos 275 comandos por área:
 | Redimensionar e reordenar colunas | ✅ | ✅ |
 | Alinhamento numérico à direita | ✅ | ✅ |
 | `[null]` distinto de string vazia | ✅ | ✅ |
-| Ordenar clicando no cabeçalho | ✅ | ⬜ |
-| Editar célula | ✅ | ⬜ |
-| Inserir/duplicar/excluir linha | ✅ | ⬜ |
-| Salvar alterações (`Ctrl+S`) | ✅ | ⬜ |
-| Filtro por coluna | ✅ | ⬜ |
+| Ordenar clicando no cabeçalho | ✅ | ✅ no servidor (ADR 0011) |
+| Editar célula | ✅ | ✅ ADR 0014 |
+| Inserir/duplicar/excluir linha | ✅ | 🟡 excluir sim; inserir e duplicar não |
+| Salvar alterações | ✅ | ✅ em transação |
+| Filtro por coluna | ✅ | ✅ no servidor |
 | Visão de registro único | ✅ | ⬜ |
-| Agrupamento e subtotais (ADR 0005) | ✅ | ⬜ |
-| Linha de totais | ✅ | ⬜ |
+| Agrupamento e subtotais (ADR 0005) | ✅ | ✅ |
+| Linha de totais | ✅ | ✅ |
 | Pivot | ✅ | ✅ local e no servidor |
 | Formatação condicional | ✅ | ✅ 12 operadores, célula ou linha, mapa de calor |
 | Editores de valor (JSON, hex, data) | ✅ | ⬜ |
-| Copiar como CSV/Markdown/SQL | ✅ | ⬜ |
-| Exportar resultado | ✅ | ⬜ |
-| Paginação / carregar mais | ✅ | ⬜ |
+| Copiar como CSV/Markdown/SQL | ✅ | ✅ via exportação |
+| Exportar resultado | ✅ | ✅ CSV/JSON/Markdown/INSERT |
+| Paginação / carregar mais | ✅ | ✅ ADR 0011 |
 | Gráficos do resultado | ✅ | ➖ |
 
 ## 5. Transações
 
 | Funcionalidade | DBeaver | C-Otter |
 |---|---|---|
-| Autocommit on/off | ✅ | ⬜ |
-| Commit / rollback manual | ✅ | ⬜ |
-| Savepoints | ✅ | ⬜ |
-| Indicador de transação aberta | ✅ | ⬜ |
+| Autocommit on/off | ✅ | ✅ |
+| Commit / rollback manual | ✅ | ✅ `Ctrl+Shift+C` / `Ctrl+Shift+R` |
+| Savepoints | ✅ | 🟡 no driver, sem UI |
+| Indicador de transação aberta | ✅ | ✅ na barra |
 | Log de transação | ✅ | ⬜ |
 
 ## 6. Diagnóstico e observabilidade (ADR 0008)
@@ -156,7 +156,7 @@ Distribuição dos 275 comandos por área:
 | Bytes do resultado em memória | ➖ | ✅ |
 | Cancelar query em execução | ✅ | 🟡 protocolo pronto, sem botão |
 | Erro apontado na posição do editor | ✅ | ⬜ |
-| Plano de execução visual | ✅ | ⬜ |
+| Plano de execução visual | ✅ | ✅ ADR 0013 |
 | Debugger PL/pgSQL | ✅ | ⬜ |
 
 ## 7. Fora do escopo da v1 (decisão consciente)
@@ -170,32 +170,48 @@ Office/Excel, e ~45 dos 50 SGBDs. Ver `docs/PLAN.md` §1.
 
 | Área | Itens listados | ✅ | 🟡 | ⬜ |
 |------|---------------|-----|-----|-----|
-| Conexão | 14 | 5 | 0 | 8 |
-| Navigator | 14 | 5 | 0 | 9 |
-| Editor SQL | 25 | 15 | 1 | 9 |
-| Grade | 21 | 6 | 0 | 14 |
-| Transações | 5 | 0 | 0 | 5 |
-| Diagnóstico | 8 | 4 | 1 | 3 |
-| **Total (sem os itens ➖)** | **87** | **35** | **2** | **48** |
+| Conexão | 15 | 9 | 0 | 6 |
+| Navigator | 17 | 13 | 2 | 2 |
+| Editor SQL | 25 | 19 | 2 | 4 |
+| Grade | 20 | 17 | 1 | 2 |
+| Transações | 5 | 3 | 1 | 1 |
+| Diagnóstico | 8 | 5 | 1 | 2 |
+| **Total (sem os itens ➖)** | **90** | **66** | **7** | **17** |
 
-**Cobertura atual: ~41% dos itens de escopo da v1** (35 de 87, contando parciais como meio).
+**Cobertura atual: 77% dos itens de escopo da v1** (66 de 90, contando parciais
+como meio).
+
+Contado em 2026-09-21 varrendo as tabelas acima, e **cada ✅ novo foi
+verificado no código** — não de memória. O número anterior (41%) estava
+desatualizado por vários commits: paginação, grade editável, agrupamento,
+exportação, formatação e plano de execução já funcionavam e ainda constavam
+como ⬜. Inventário atrasado dá falsa confiança, que é o que esta seção
+existe para evitar.
 
 Para o inventário elemento a elemento — cada botão, menu e atalho, com estado verificado na
 aplicação rodando — ver [`ELEMENTS.md`](ELEMENTS.md).
 
-Contra os **275 comandos** do DBeaver, o C-Otter implementa hoje cerca de **20**. A diferença
-entre 37% e 7% é que este inventário lista *funcionalidades*, não *comandos* — um comando do
-DBeaver como "copiar célula como Markdown" é uma variação de outro, e o inventário agrupa.
+Contra os **275 comandos** do DBeaver o número é bem menor, e a diferença não é
+contradição: este inventário lista *funcionalidades*, não *comandos* — "copiar
+célula como Markdown" é uma variação de "copiar", e aqui elas contam como uma.
+
+**A cobertura de SGBD é outra conta, e muito menor:** 2 de ~50, contra os quais
+esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
+`docs/NAVIGATOR-TREE.md` (21 de ~70 no PostgreSQL).
 
 ## Próximos passos, por impacto
 
-1. **Grade editável + transações** (19 itens) — é o que separa visualizador de ferramenta
-2. **Ordenação e filtro na grade** (2 itens) — alto uso, custo baixo
-3. **Múltiplas abas e abrir/salvar arquivo** (3 itens) — fluxo básico de trabalho
-4. **Persistir conexões + cofre de credenciais** (3 itens) — hoje se redigita a cada execução
-5. **Paginação da grade** — hoje um `SELECT` sem `LIMIT` carrega tudo de uma vez
+1. **Telas de `CREATE`** — os geradores de tabela, view, sequence, índice e
+   constraint já existem e são testados contra o servidor; falta o formulário
+2. **Inserir e duplicar linha na grade** — excluir já funciona; o buffer de
+   edição já comporta os três
+3. **TLS** — destrava o `caching_sha2_password` sem RSA e as conexões remotas
+4. **Editores de valor** (JSON, hex, data) — hoje toda célula é texto
+5. **Savepoints na UI** — o driver já os implementa
 
 ~~Ligar `analyze_scope` à UI~~ — **concluído em 2026-09-21**.
+~~Grade editável, transações, paginação, ordenação, filtro, abas, arquivo~~ —
+**concluídos em 2026-09-21**.
 
 ## Manutenção deste arquivo
 
