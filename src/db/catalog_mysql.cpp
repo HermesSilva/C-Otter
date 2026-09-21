@@ -750,5 +750,70 @@ Result<std::vector<ServerVariable>> MysqlCatalog::load_charsets() {
     }
     return out;
 }
+// --- Usuarios e privilegios -------------------------------------------------------
+
+Result<std::vector<UserMeta>> MysqlCatalog::load_users() {
+    // A coluna de senha NAO e' selecionada -- nem `authentication_string`,
+    // nem `password`. O hash nao serve para nada na interface (nao da' para
+    // mostrar, nao da' para reusar) e te-lo em memoria so' aumenta a
+    // superficie de um vazamento.
+    //
+    // As colunas de estado mudaram de nome entre versoes: `account_locked` so'
+    // existe do 5.7.6 em diante, e `password_expired` do 5.6.6. Pedi-las num
+    // servidor anterior daria erro de coluna inexistente, que na arvore
+    // pareceria falha de conexao.
+    const bool has_lock = !mariadb_ && version_.at_least(5, 7);
+    const bool has_expiry = mariadb_ || version_.at_least(5, 6);
+
+    std::string columns = "user, host, plugin";
+    if (has_expiry) columns += ", password_expired";
+    if (has_lock)   columns += ", account_locked";
+
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query("SELECT " + columns +
+                    "  FROM mysql.user ORDER BY user, host"));
+
+    std::vector<UserMeta> users;
+    users.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        UserMeta user;
+        user.name   = std::string(rs.text(row, 0));
+        user.host   = std::string(rs.text(row, 1));
+        user.plugin = std::string(rs.text(row, 2));
+
+        std::size_t next = 3;
+        if (has_expiry && next < rs.column_count()) {
+            user.expired = rs.text(row, next++) == "Y";
+        }
+        if (has_lock && next < rs.column_count()) {
+            user.locked = rs.text(row, next) == "Y";
+        }
+        users.push_back(std::move(user));
+    }
+    return users;
+}
+
+Result<std::vector<std::string>> MysqlCatalog::load_grants(std::string_view user,
+                                                           std::string_view host) {
+    // SHOW GRANTS FOR 'user'@'host' -- o par e' a identidade da conta no
+    // MySQL, e pedir so' o nome pegaria a conta errada quando ha' 'root'@'%'
+    // e 'root'@'localhost' com privilegios diferentes.
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query("SHOW GRANTS FOR " + mysql_literal(user) + "@" +
+                    mysql_literal(host)));
+
+    std::vector<std::string> grants;
+    grants.reserve(rs.row_count());
+
+    // A resposta tem UMA coluna, cujo nome varia com a conta ("Grants for
+    // root@localhost"). Por isso lemos pelo indice, nao pelo nome.
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        grants.emplace_back(rs.text(row, 0));
+    }
+    return grants;
+}
 
 } // namespace otter::db

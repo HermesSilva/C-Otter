@@ -108,6 +108,13 @@ public:
     [[nodiscard]] virtual Result<std::vector<ServerVariable>> load_server_info(
         ServerInfoKind kind) = 0;
 
+    // Contas do servidor. Vazio onde o conceito nao se aplica ou falta
+    // privilegio -- a pasta simplesmente nao mostra nada.
+    [[nodiscard]] virtual bool has_users() const noexcept = 0;
+    [[nodiscard]] virtual Result<std::vector<UserMeta>> load_users() = 0;
+    [[nodiscard]] virtual Result<std::vector<std::string>> load_grants(
+        std::string_view user, std::string_view host) = 0;
+
 protected:
     CatalogReader() = default;
 };

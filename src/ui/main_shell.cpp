@@ -1545,12 +1545,96 @@ void MainShell::draw_navigator_panel() {
         // DBeaver, onde "System Info" é irmão de "Databases", não filho.
         // Colocá-lo dentro de um banco sugeriria que os números são daquele
         // banco, e são do SERVIDOR.
-        if (session().state() == SessionState::connected &&
-            session().has_server_info()) {
-            draw_server_info_folder();
+        if (session().state() == SessionState::connected) {
+            if (session().has_users())       draw_users_folder();
+            if (session().has_server_info()) draw_server_info_folder();
         }
     }
     ImGui::End();
+}
+
+// As contas do servidor, com os GRANTs de cada uma.
+//
+// Os grants são carregados por usuário, ao expandir: `SHOW GRANTS` é uma
+// consulta por conta, e num servidor com 50 contas carregar tudo junto seriam
+// 50 idas ao servidor para uma árvore que talvez nem seja aberta.
+void MainShell::draw_users_folder() {
+    const Palette& p = colors();
+    const std::vector<db::UserMeta> users = session().users();
+
+    if (!draw_folder_node(Icon::user, TR("Users"), users.size(),
+                          session().users_loaded())) {
+        return;
+    }
+
+    if (!session().users_loaded() && !session().busy()) {
+        session().load_users_async();
+    }
+
+    if (session().users_loaded() && users.empty()) {
+        // Lista vazia quase sempre é falta de privilégio em mysql.user, não
+        // ausência de contas -- todo servidor tem ao menos uma. Dizer isso
+        // evita que o usuário conclua o contrário.
+        ImGui::TextColored(col4(p.text_dim),
+                           TR("no access to the user list"));
+    }
+
+    for (const db::UserMeta& user : users) {
+        if (!matches_filter(user.name)) continue;
+
+        ImGui::PushID(user.qualified().c_str());
+
+        icon_inline(Icon::user, user.locked ? p.error : p.text_dim);
+        ImGui::SameLine(0.0f, 4.0f);
+
+        // Conta bloqueada ou com senha expirada sai marcada: ela EXISTE, mas
+        // não conecta -- e é essa a informação que importa ao olhar a lista.
+        const bool usable = !user.locked && !user.expired;
+
+        const bool open = ImGui::TreeNodeEx(
+            user.qualified().c_str(),
+            ImGuiTreeNodeFlags_SpanAvailWidth |
+            (usable ? 0 : ImGuiTreeNodeFlags_Selected));
+
+        if (!usable) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.error), "%s",
+                               user.locked ? TR("[locked]") : TR("[expired]"));
+        }
+
+        if (ImGui::IsItemHovered() && !user.plugin.empty()) {
+            ImGui::SetTooltip("%s", user.plugin.c_str());
+        }
+
+        if (open) {
+            if (!user.grants_loaded && !session().busy()) {
+                session().load_grants_async(user.name, user.host);
+            }
+
+            if (user.grants_loaded && user.grants.empty()) {
+                ImGui::TextColored(col4(p.text_dim), TR("no grants"));
+            }
+
+            for (const std::string& grant : user.grants) {
+                ImGui::BeginGroup();
+                icon_inline(Icon::grant, p.text_dim);
+                ImGui::SameLine(0.0f, 4.0f);
+
+                // O texto do GRANT é longo. Truncar na largura do painel e
+                // mostrar o inteiro no tooltip é mais legível que quebrar em
+                // três linhas cada um.
+                ImGui::TextColored(col4(p.text), "%s", grant.c_str());
+                ImGui::EndGroup();
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", grant.c_str());
+                }
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    ImGui::TreePop();
 }
 
 // As quatro pastas de estatísticas do servidor, mais engines e charsets.

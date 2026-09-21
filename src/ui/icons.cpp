@@ -556,6 +556,33 @@ void draw_event(const Canvas& c) {
     c.line(0.30f, 0.22f, 0.22f, 0.18f);
 }
 
+void draw_user(const Canvas& c) {
+    // Silhueta simples: cabeca e ombros. O icone de `role` ja' e' a silhueta
+    // COM chave -- aqui, sem chave, porque usuario e papel sao conceitos
+    // diferentes e a arvore mostra os dois em SGBDs diferentes.
+    c.circle(0.0f, -0.16f, 0.15f);
+    c.dl->PathLineTo(c.at(-0.28f, 0.32f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.28f, 0.02f), c.at(0.28f, 0.02f),
+                                 c.at(0.28f, 0.32f), 16);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_grant(const Canvas& c) {
+    // Pergaminho com selo: a concessao formal. O retangulo com a ponta
+    // enrolada e' o que separa do icone de `constraint`, que e' um escudo.
+    c.line(-0.26f, -0.30f, 0.20f, -0.30f);
+    c.line(-0.26f, -0.30f, -0.26f, 0.30f);
+    c.line(-0.26f,  0.30f, 0.20f, 0.30f);
+    c.line( 0.20f, -0.30f, 0.20f, 0.30f);
+
+    // As linhas de texto.
+    c.line(-0.16f, -0.14f, 0.10f, -0.14f);
+    c.line(-0.16f, -0.01f, 0.10f, -0.01f);
+
+    // O selo, no canto inferior direito, transbordando a borda.
+    c.circle_filled(0.22f, 0.22f, 0.10f);
+}
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,
@@ -636,6 +663,8 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::pivot:             draw_pivot(c);             break;
         case Icon::partition:         draw_partition(c);         break;
         case Icon::event:             draw_event(c);             break;
+        case Icon::user:              draw_user(c);              break;
+        case Icon::grant:             draw_grant(c);             break;
     }
 }
 

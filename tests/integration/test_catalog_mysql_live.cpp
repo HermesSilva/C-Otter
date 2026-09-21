@@ -537,6 +537,48 @@ int main(int argc, char** argv) {
         }
     }
 
+    std::printf("\nload_users / load_grants\n");
+    {
+        auto users = catalog.load_users();
+        check(users.has_value(), "consulta aceita");
+        check(users.has_value() && !users->empty(),
+              "ha' contas (todo servidor tem ao menos uma)");
+
+        if (users && !users->empty()) {
+            const auto* root = find_by(*users,
+                                       [](const auto& u) { return u.name; },
+                                       "root");
+            check(root != nullptr, "conta root encontrada");
+
+            // A identidade da conta no MySQL e' o PAR (user, host): existem
+            // 'root'@'%' e 'root'@'localhost' com privilegios diferentes.
+            check(root != nullptr && !root->host.empty(), "host da conta");
+            check(root != nullptr && !root->plugin.empty(),
+                  "plugin de autenticacao");
+
+            // O MySQL 8 traz contas de sistema BLOQUEADAS. Se nenhuma
+            // aparecesse assim, seria sinal de que account_locked nao foi
+            // lida -- e a arvore mostraria como utilizavel o que nao e'.
+            bool any_locked = false;
+            for (const auto& user : *users) {
+                if (user.locked) any_locked = true;
+            }
+            check(any_locked, "contas de sistema aparecem bloqueadas");
+
+            if (root != nullptr) {
+                auto grants = catalog.load_grants(root->name, root->host);
+                check(grants.has_value(), "SHOW GRANTS aceito");
+                check(grants.has_value() && !grants->empty(),
+                      "root tem privilegios");
+
+                if (grants && !grants->empty()) {
+                    check((*grants)[0].find("GRANT") != std::string::npos,
+                          "o texto do GRANT vem inteiro");
+                }
+            }
+        }
+    }
+
     std::printf("\n%d verificacoes, %d falharam\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

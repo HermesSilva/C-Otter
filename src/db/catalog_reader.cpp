@@ -82,6 +82,10 @@ public:
     [[nodiscard]] bool has_server_info() const noexcept override;
     [[nodiscard]] Result<std::vector<ServerVariable>> load_server_info(
         ServerInfoKind kind) override;
+    [[nodiscard]] bool has_users() const noexcept override;
+    [[nodiscard]] Result<std::vector<UserMeta>> load_users() override;
+    [[nodiscard]] Result<std::vector<std::string>> load_grants(
+        std::string_view user, std::string_view host) override;
 
 private:
     Catalog catalog_;
@@ -118,6 +122,25 @@ ReaderFor<PostgresCatalog>::load_server_info(ServerInfoKind) {
 }
 
 template <>
+bool ReaderFor<PostgresCatalog>::has_users() const noexcept {
+    // No PostgreSQL o conceito e' ROLE, que e' usuario e grupo ao mesmo
+    // tempo, e ja' tem no' proprio na arvore. Duplicar como "Usuarios" so'
+    // confundiria.
+    return false;
+}
+
+template <>
+Result<std::vector<UserMeta>> ReaderFor<PostgresCatalog>::load_users() {
+    return std::vector<UserMeta>{};
+}
+
+template <>
+Result<std::vector<std::string>> ReaderFor<PostgresCatalog>::load_grants(
+    std::string_view, std::string_view) {
+    return std::vector<std::string>{};
+}
+
+template <>
 bool ReaderFor<PostgresCatalog>::has_events() const noexcept {
     // O PostgreSQL nao tem evento agendado: usa pgAgent (uma extensao) ou cron
     // do sistema. Uma pasta "Eventos" sempre vazia so' faria procurar o que
@@ -146,6 +169,20 @@ bool ReaderFor<MysqlCatalog>::has_sequences() const noexcept {
 
 template <>
 bool ReaderFor<MysqlCatalog>::has_server_info() const noexcept { return true; }
+
+template <>
+bool ReaderFor<MysqlCatalog>::has_users() const noexcept { return true; }
+
+template <>
+Result<std::vector<UserMeta>> ReaderFor<MysqlCatalog>::load_users() {
+    return catalog_.load_users();
+}
+
+template <>
+Result<std::vector<std::string>> ReaderFor<MysqlCatalog>::load_grants(
+    std::string_view user, std::string_view host) {
+    return catalog_.load_grants(user, host);
+}
 
 template <>
 Result<std::vector<ServerVariable>>

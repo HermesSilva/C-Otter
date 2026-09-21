@@ -87,6 +87,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         const bool user_types = catalog->has_user_types();
         const bool events      = catalog->has_events();
         const bool server_info = catalog->has_server_info();
+        const bool users       = catalog->has_users();
         const db::Capabilities caps = holt->capabilities();
 
         std::vector<db::SchemaMeta>     schemas;
@@ -135,6 +136,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         has_user_types_  = user_types;
         has_events_      = events;
         has_server_info_ = server_info;
+        has_users_       = users;
         capabilities_    = caps;
         state_.store(SessionState::connected, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
@@ -740,5 +742,40 @@ bool Session::session_variables_loaded() const noexcept { return server_info_loa
 bool Session::global_variables_loaded() const noexcept  { return server_info_loaded_[3]; }
 bool Session::engines_loaded() const noexcept           { return server_info_loaded_[4]; }
 bool Session::charsets_loaded() const noexcept          { return server_info_loaded_[5]; }
+// --- Usuarios ---------------------------------------------------------------------
+
+std::vector<db::UserMeta> Session::users() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return users_;
+}
+
+void Session::load_users_async() {
+    run_catalog_async([this](db::CatalogReader& catalog) {
+        auto users = catalog.load_users();
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+
+        // Marca como carregado mesmo na FALHA: sem privilegio em mysql.user o
+        // servidor recusa, e repetir a consulta a cada quadro martelaria o
+        // servidor com um erro que ja' se sabe que vai acontecer.
+        users_loaded_ = true;
+        if (users) users_ = std::move(*users);
+    });
+}
+
+void Session::load_grants_async(std::string user, std::string host) {
+    run_catalog_async([this, user, host](db::CatalogReader& catalog) {
+        auto grants = catalog.load_grants(user, host);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        for (db::UserMeta& u : users_) {
+            if (u.name != user || u.host != host) continue;
+
+            u.grants_loaded = true;
+            if (grants) u.grants = std::move(*grants);
+            break;
+        }
+    });
+}
 
 } // namespace otter::ui

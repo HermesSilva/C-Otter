@@ -90,6 +90,16 @@ public:
     [[nodiscard]] Result<std::vector<ServerVariable>> load_status(bool global);
     [[nodiscard]] Result<std::vector<ServerVariable>> load_variables(bool global);
 
+    // Contas do servidor. Exige privilegio SELECT em mysql.user -- sem ele o
+    // servidor recusa, e a lista vem vazia com o erro propagado.
+    [[nodiscard]] Result<std::vector<UserMeta>> load_users();
+
+    // SHOW GRANTS de uma conta. Separado da lista porque e' uma consulta por
+    // usuario: com 50 contas, carregar tudo junto seriam 50 idas ao servidor
+    // para uma arvore que talvez nem seja expandida.
+    [[nodiscard]] Result<std::vector<std::string>> load_grants(
+        std::string_view user, std::string_view host);
+
     [[nodiscard]] Result<std::vector<ServerVariable>> load_engines();
     [[nodiscard]] Result<std::vector<ServerVariable>> load_charsets();
 

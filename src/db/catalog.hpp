@@ -192,6 +192,31 @@ struct ServerVariable {
     std::string detail;        // descrição, ou o valor secundário
 };
 
+// Conta de usuario do SGBD.
+//
+// A senha NUNCA e' lida, nem mesmo o hash. Ela nao serve para nada na
+// interface -- nao da' para mostrar, nao da' para reusar -- e te-la em
+// memoria so' aumenta a superficie de um vazamento.
+struct UserMeta {
+    std::string name;
+    std::string host;          // no MySQL a conta e' o PAR (user, host)
+    std::string plugin;        // caching_sha2_password, mysql_native_password
+    bool        locked = false;
+    bool        expired = false;
+
+    // Uma linha por GRANT, como o servidor devolve. Nao decompomos em
+    // privilegios: o texto do GRANT e' o que o usuario reconhece, e
+    // reconstrui-lo a partir de flags daria algo que nao casa com o que ele
+    // digitou.
+    std::vector<std::string> grants;
+    bool grants_loaded = false;
+
+    // "user@host", que e' como o MySQL identifica a conta em toda mensagem.
+    [[nodiscard]] std::string qualified() const {
+        return host.empty() ? name : name + "@" + host;
+    }
+};
+
 struct TableMeta {
     std::string  name;
     ObjKind      kind = ObjKind::table;

@@ -119,6 +119,14 @@ public:
     // PostgreSQL o equivalente sao as views pg_stat_*, com outra forma.
     [[nodiscard]] bool has_server_info() const noexcept { return has_server_info_; }
 
+    // --- Usuarios ------------------------------------------------------------
+    [[nodiscard]] bool has_users() const noexcept { return has_users_; }
+    [[nodiscard]] bool users_loaded() const noexcept { return users_loaded_; }
+    [[nodiscard]] std::vector<db::UserMeta> users() const;
+
+    void load_users_async();
+    void load_grants_async(std::string user, std::string host);
+
     void load_server_info_async(ServerInfo what);
 
     [[nodiscard]] std::vector<db::ServerVariable> session_status() const;
@@ -232,6 +240,9 @@ private:
     bool has_user_types_ = true;
     bool has_events_     = false;
     bool has_server_info_ = false;
+    bool has_users_       = false;
+    bool users_loaded_    = false;
+    std::vector<db::UserMeta> users_;
 
     // Os seis conjuntos, indexados pelo enum. Array em vez de seis membros:
     // o codigo que carrega e o que le' ficam com um indice, nao com um

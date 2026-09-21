@@ -88,12 +88,13 @@ O valor `0xFB` **dentro de uma linha** é NULL; fora dela, na primeira posição
 
 ## 2. Árvore de objetos
 
-Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **20 implementados**.
+Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **21 implementados**.
 
-Cobertura contra o DBeaver (diretiva 4): **20 / 27 = 74%** da árvore MySQL.
+Cobertura contra o DBeaver (diretiva 4): **21 / 27 = 78%** da árvore MySQL.
 
-Faltam: Packages (só MariaDB), Users → Grants, Administer, User privileges,
-Plugins, e os dois nós "virtuais" de índice e trigger no nível do banco.
+Faltam: Packages (só MariaDB), Administer, User privileges, Plugins, e os dois
+nós "virtuais" de índice e trigger no nível do banco -- que só repetem o que
+já aparece dentro de cada tabela.
 
 | Nó | Caminho | Estado |
 |---|---|:---:|
@@ -115,7 +116,7 @@ Plugins, e os dois nós "virtuais" de índice e trigger no nível do banco.
 | ⠀⠀├ Sequences (MariaDB 10.3+) | `sequences` | ✅ |
 | ⠀⠀├ Triggers (virtual, do banco) | `triggers` | ⬜ |
 | ⠀⠀└ Events | `events` | ✅ |
-| Users → Grants | `users` | ⬜ |
+| Users → Grants | `users` | ✅ |
 | Administer | — | ⬜ |
 | System Info | — | ✅ |
 | ├ Session status / Global status | `sessionStatus` | ✅ |
@@ -171,13 +172,13 @@ armadilhas:
 | Importação do DBeaver com senha | ✅ 6 de 6 conexões |
 | **Particionamento e eventos** | ✅ |
 | **System Info**, com filtro sobre 633 variáveis | ✅ |
-| Usuários e privilégios | ⬜ |
+| **Usuários e GRANTs** | ✅ sem nunca ler a senha |
 | TLS | ⬜ |
 | Protocolo preparado (`COM_STMT_*`) | ⬜ |
 
 Verificado contra um **MySQL 8.0.46 real** em 2026-09-21:
 
-- `tests/integration/test_catalog_mysql_live.cpp` — 99 verificações, 0 falhas
+- `tests/integration/test_catalog_mysql_live.cpp` — 108 verificações, 0 falhas
 - `spikes/myconnect` — aperto de mão, 10.000 linhas, erros com SQLSTATE
 - Na tela: importar do DBeaver, conectar, navegar, consultar, **editar e gravar**
 

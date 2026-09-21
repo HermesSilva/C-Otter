@@ -167,6 +167,11 @@ const char* const kPtBr[] = {
     // --- Particoes e eventos (arvore MySQL) ---
     "Partitions",                 "Partições",
     "System info",                "Informação do servidor",
+    "Users",                      "Usuários",
+    "no access to the user list", "sem acesso à lista de usuários",
+    "no grants",                  "nenhum privilégio",
+    "[locked]",                   "[bloqueada]",
+    "[expired]",                  "[expirada]",
     "Session status",             "Status da sessão",
     "Global status",              "Status global",
     "Session variables",          "Variáveis da sessão",
