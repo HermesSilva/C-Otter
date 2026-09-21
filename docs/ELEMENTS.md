@@ -184,7 +184,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Gerar DDL | ✅ | `CREATE TABLE` com tipos, constraints e índices |
 | INSERT/UPDATE/DELETE em view | ✅ | Desabilitados — exigiriam `INSTEAD OF` |
 | Atualizar nó (F5) | ✅ | Descarta o cache e relê o catálogo |
-| Criar / alterar / excluir objeto | ⬜ | Exige DDL de escrita |
+| **Criar / alterar / excluir objeto** | ✅ | Coluna, tabela, índice, constraint, FK, view, sequence, trigger (ADR 0016) |
 | **Duplo clique abre dados** | ✅ | Distingue de expandir o nó |
 | Arrastar tabela para o editor | ⬜ | |
 | **Atualizar (F5)** | ✅ | Reexecuta a consulta da aba, na mesma página |
@@ -285,8 +285,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Ordenar pelo cabeçalho** | ✅ | No **servidor** — com paginação, ordenar no cliente daria a ordem errada |
 | Terceiro clique remove a ordenação | ✅ | `SortTristate`; volta à ordem do servidor |
 | `ORDER BY` do usuário respeitado | ✅ | Consulta com ordem própria não é sobreposta |
-| Selecionar célula / linha | ⬜ | |
-| Copiar célula | ⬜ | |
+| **Selecionar célula** | ✅ | Clique simples; setas, Home/End, PageUp/PageDown navegam |
+| **Copiar célula** | ✅ | Menu de contexto → `Copiar valor` |
+| Selecionar LINHA inteira | ⬜ | `Ctrl+Alt+R` no DBeaver |
 | **Editar célula** | ✅ | Duplo clique; edição em buffer (ADR 0014) |
 | Gravação explícita | ✅ | `Salvar alterações` / `Descartar`; nada vai ao banco antes |
 | Célula alterada destacada | ✅ | Fundo âmbar, valor original no tooltip |
@@ -294,7 +295,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Recusa com motivo | ✅ | `JOIN`, sem PK, chave fora do `SELECT`, view |
 | `UPDATE` por linha, em transação | ✅ | Ou tudo, ou nada |
 | **Inserir linha** | ✅ | Linha verde no fim; coluna em branco usa o `DEFAULT` |
-| **Copiar da linha de cima/de baixo** | ✅ | `Ctrl+D`/`Ctrl+Alt+D` no DBeaver; aqui só no menu. Preenche a célula, não insere linha |
+| **Copiar da linha de cima/de baixo** | ✅ | `Ctrl+D`/`Ctrl+Alt+D`, como no DBeaver, e no menu. Preenche a célula, não insere linha |
 | **Excluir linha** | ✅ | Marcada em vermelho até gravar |
 | Ordem `INSERT` → `UPDATE` → `DELETE` | ✅ | Evita violar FK ao inserir o que a exclusão removeria |
 
@@ -307,9 +308,11 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Agregação inaplicável desabilitada | ✅ | `SUM` numa coluna de texto aparece cinza |
 | **Aviso de resultado parcial** | ✅ | "apenas sobre esta página (N linhas)" + "Calcular no servidor" |
 
-| Pivot | ⬜ | ADR 0005 |
-| Formatação condicional | ⬜ | |
-| Editores de valor (JSON, hex, data) | ⬜ | |
+| **Pivot** | ✅ | Local e no servidor; `SUM(CASE WHEN...)`, não `PIVOT` (ADR 0005) |
+| **Formatação condicional** | ✅ | 12 operadores e mapa de calor (ADR 0005) |
+| **Barra na célula (sparkline)** | ✅ | 3 ancoragens; **o DBeaver não tem** (ADR 0005) |
+| **Painel de valor** (JSON, hexadecimal, booleano) | ✅ | JSON indentado, BLOB em hex, `t`/`f` e `1`/`0` |
+| Coluna calculada | ⬜ | Resto do ADR 0005 |
 | **Exportar** | ✅ | CSV, JSON, Markdown e `INSERT`, com prévia |
 | Proteção contra CSV injection | ✅ | **Ligada por padrão** — valor iniciado por `=`, `+`, `-` ou `@` vira fórmula na planilha |
 | Copiar resultado para a área de transferência | ✅ | O resultado inteiro, não só a prévia |
@@ -319,7 +322,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | SQL paginado auditável | ✅ | O inspetor mostra o `LIMIT`/`OFFSET` efetivamente executado |
 | `LIMIT` do usuário respeitado | ✅ | Consulta com `LIMIT` próprio não é reescrita |
 | Total exato de linhas | ⬜ | Exigiria `COUNT(*)`; a grade mostra `+` em vez de número falso |
-| Visão de registro único | ⬜ | |
+| **Visão de registro único** | ✅ | `Tab`; nome/valor/tipo, com a chave primária marcada |
+| **Seleção de célula** | ✅ | Clique simples; setas, Home/End, PageUp/PageDown navegam |
+| **Teclas de edição na grade** | ✅ | `Enter`, `Alt+Insert`, `Alt+Delete`, `Esc` — 7 de 47 do DBeaver (`docs/GRID-KEYS.md`) |
 | Limite de 64 colunas | ⚠️ | Restrição do ImGui — **avisado na tela**, com o total real |
 
 ## 8. Painel Queries (inspetor)
@@ -353,16 +358,14 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 
 ## 10. Transações
 
-**Nenhum elemento existe.** É a lacuna mais grave do produto: sem isso, o C-Otter é um
-visualizador, não uma ferramenta de trabalho.
-
-| Elemento | Estado |
-|----------|--------|
-| Alternar autocommit | ⬜ |
-| Commit / Rollback | ⬜ |
-| Savepoints | ⬜ |
-| Indicador de transação aberta | ⬜ |
-| Aviso ao fechar com alterações pendentes | ⬜ |
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| **Alternar autocommit** | ✅ | Botão na barra; o estado aparece ao lado |
+| **Commit / Rollback** | ✅ | `Ctrl+Shift+C` / `Ctrl+Shift+R`, com ícone próprio |
+| **Indicador de transação aberta** | ✅ | Na barra, com glow quando há transação |
+| **Gravação de edições em transação** | ✅ | Ou tudo, ou nada — mesmo em autocommit |
+| Savepoints na UI | ⬜ | O driver os implementa (`Holt::savepoint`); falta a tela |
+| Aviso ao fechar com alterações pendentes | ⬜ | A barra avisa, mas fechar não confirma |
 
 ---
 
