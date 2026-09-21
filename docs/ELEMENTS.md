@@ -430,15 +430,15 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | # | Onde | Problema |
 |---|------|----------|
 | 1 | Conexão | Senha em disco tem a proteção fraca do DBeaver (chave pública) — **avisado na tela**, ADR 0012 |
-
-| 4 | Raft | As conexões abertas não são restauradas ao reiniciar — só a última volta preenchida no diálogo |
+| 2 | Raft | As conexões abertas não são restauradas ao reiniciar — só a última volta preenchida no diálogo |
 | 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
-| 5 | Editor | **"Mostrar espaços" não desenha nada.** `SetShowWhitespacesEnabled(true)` é chamada a cada quadro (confirmado com trace), e `TextEditor.cpp:629` tem o código do desenho — mas os pontos não aparecem, nem depois de corrigir a cor. A caixa fica **desabilitada na tela**, com o motivo, em vez de fingir que funciona |
+| 4 | Editor | **"Mostrar espaços" não desenha nada.** `SetShowWhitespacesEnabled(true)` é chamada a cada quadro (confirmado com trace), e `TextEditor.cpp:629` tem o código do desenho — mas os pontos não aparecem, nem depois de corrigir a cor. A caixa fica **desabilitada na tela**, com o motivo, em vez de fingir que funciona |
 
 ### Corrigidos
 
 | Onde | O que era | Como foi resolvido |
 |------|-----------|--------------------|
+| Tema | O tema claro deixava a interface clara e o **editor escuro** | O primeiro documento nasce antes de `set_theme()`; a paleta dele é reaplicada depois |
 | Grade | `SELECT` sem `LIMIT` numa tabela grande travava a UI até o servidor enviar tudo | Paginação de 200 linhas (ADR 0011). `SELECT *` em 2 M de linhas volta em <1 ms |
 | Editor | O `●` de modificado aparecia na primeira edição e nunca mais saía | Existe "salvar"; `mark_saved()` finalmente é chamado |
 | Grade | Mais de 64 colunas eram truncadas **em silêncio** | Aviso na barra dizendo quantas colunas ficaram de fora |

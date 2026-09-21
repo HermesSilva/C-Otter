@@ -267,6 +267,16 @@ MainShell::MainShell()
     // exige tres capturas, e trocar pelo menu a cada uma e' fragil.
     if (const char* theme = std::getenv("OTTER_THEME")) {
         set_theme(theme);
+
+        // Os documentos JA' criados guardam a paleta do tema anterior -- o
+        // primeiro nasce antes desta linha. Sem reaplicar, OTTER_THEME=light
+        // deixava a interface clara e o EDITOR escuro, e a captura do tema
+        // claro nao mostrava o tema claro.
+        //
+        // Mesma razao do laco no menu Tema, que ja' fazia isto.
+        for (auto& document : documents_) {
+            apply_editor_palette(document->editor());
+        }
     }
 
     // Conecta direto, usando o perfil ja' montado a partir de PGHOST/PGUSER/...
