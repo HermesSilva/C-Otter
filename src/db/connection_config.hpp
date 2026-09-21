@@ -133,6 +133,15 @@ struct EditorOptions {
     bool show_matching_brackets  = true;
     bool show_whitespace         = false;
 
+    // Quebra de linha e dobra de blocos. O widget suporta as duas; nada as
+    // ligava.
+    //
+    // Word wrap DESLIGADO por padrao, como em todo editor de codigo: com ele
+    // ligado, uma linha longa passa a ocupar varias e o numero da linha deixa
+    // de corresponder ao que o servidor reporta num erro.
+    bool word_wrap               = false;
+    bool code_folding            = true;
+
     // --- Processamento SQL (main.sqlexecute) ---
     //
     // Linhas por pagina. O mesmo `RESULT_SET_MAX_ROWS` do DBeaver: grande o

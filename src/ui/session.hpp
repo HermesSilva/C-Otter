@@ -163,6 +163,16 @@ public:
     // servidor nem no resultado exibido, entao nao pede confirmacao.
     void clear_query_log();
 
+    // Pede ao servidor que interrompa a consulta em curso.
+    //
+    // Seguro com o worker OCUPADO -- e' justamente quando se usa. O protocolo
+    // exige uma conexao NOVA (a original esta' aguardando a resposta), e e'
+    // por isso que isto nao trava esperando o lock da query.
+    //
+    // O servidor pode ignorar: cancelar e' um PEDIDO, nao uma ordem. Uma
+    // consulta que ja' estava devolvendo linhas termina normalmente.
+    Status cancel_query();
+
     // Carregamento tardio por pasta da arvore. Cada uma consulta o catalogo
     // apenas quando o no e' expandido -- expandir "Colunas" nao deve custar
     // uma leitura de indices.

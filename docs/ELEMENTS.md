@@ -56,8 +56,8 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **Arquivo** → Sair | `Alt+F4` | ✅ | |
 | **Arquivo** → Abrir script | `Ctrl+O` | ✅ | Diálogo nativo do sistema; abre em aba nova |
 | **Arquivo** → Salvar script | `Ctrl+S` | ✅ | `Ctrl+Shift+S` para "salvar como" |
-| **Editar** → Desfazer | `Ctrl+Z` | 🟡 | Item funciona; atalho vem do widget, não do menu |
-| **Editar** → Refazer | `Ctrl+Y` | 🟡 | Idem |
+| **Editar** → Desfazer | `Ctrl+Z` | ✅ | Atalho global, não só com o editor em foco |
+| **Editar** → Refazer | `Ctrl+Y` | ✅ | Idem |
 | **Editar** → Selecionar tudo | `Ctrl+A` | ✅ | |
 | **Editar** → Localizar | `Ctrl+F` | ✅ | Item abre a janela de busca do editor |
 | **SQL** → Executar | `Ctrl+Enter` | ✅ | Item e atalho funcionam |
@@ -239,8 +239,8 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Comentar linha | `Ctrl+/` | ✅ |
 | Zoom | `Ctrl+roda` | ✅ |
 | Minimap | — | ✅ |
-| Word wrap | — | 🟡 Suportado pelo widget, sem comando |
-| Code folding | — | 🟡 Idem |
+| **Word wrap** | — | ✅ Opção por conexão (Editor de código); desligado por padrão — com ele, o número da linha deixa de corresponder ao que o servidor reporta |
+| **Code folding** | — | ✅ Opção por conexão; liga os parênteses correspondentes sozinha, que é o que ela usa para achar o bloco |
 | Posição do cursor (Ln, Col) | — | ✅ |
 | Contagem de linhas | — | ✅ |
 | Indicador de modificado (`●`) | — | ✅ Compara `GetUndoIndex()` com o ponto salvo |
@@ -256,7 +256,7 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Executar script inteiro | `Alt+X` | ✅ | Para no primeiro erro, dizendo **qual** comando falhou |
 | Progresso do script | — | ✅ | `executando comando 12 de 40` na barra de status |
 | Resultado do último SELECT | — | ✅ | Não do último comando: um script que termina em `COMMIT` deixaria a grade vazia |
-| Cancelar query | — | 🟡 | `cancel_current_query()` implementado, **sem botão** |
+| **Cancelar query** | — | ✅ | Botão na barra, ligado a `Session::cancel_query()`. Pela sessão do documento, não a ativa |
 
 ### Abas de editor
 
@@ -370,7 +370,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | Intervalo de linhas exibido | ✅ | `linhas 401-600 +` — o `+` indica que há mais |
 | SQL paginado auditável | ✅ | O inspetor mostra o `LIMIT`/`OFFSET` efetivamente executado |
 | `LIMIT` do usuário respeitado | ✅ | Consulta com `LIMIT` próprio não é reescrita |
-| **Total exato de linhas** | 🟡 | O `+` virou botão que conta sob demanda (`resultset.count`). SQL e recusas cobertos por teste; **o número na tela não foi confirmado** — a automação não conseguiu encadear conectar+executar+clicar |
+| **Total exato de linhas** | ✅ | O `+` é botão que conta sob demanda (`resultset.count`). Verificado: "linhas 1-200 **de 1005**" contra o ERP_TID |
 | **Visão de registro único** | ✅ | `Tab`; nome/valor/tipo, com a chave primária marcada |
 | **Seleção de célula** | ✅ | Clique simples; setas, Home/End, PageUp/PageDown navegam |
 | **Teclas de edição na grade** | ✅ | `Enter`, `Alt+Insert`, `Alt+Delete`, `Esc` — 7 de 47 do DBeaver (`docs/GRID-KEYS.md`) |
@@ -470,18 +470,18 @@ ficam de fora do total.
 | Área | ✅ | 🟡 | ⬜ | ❌ | Total |
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
-| Barra de menus | 16 | 2 | 0 | 0 | 18 |
+| Barra de menus | 18 | 0 | 0 | 0 | 18 |
 | Assistente de conexão | 46 | 1 | 7 | 1 | 55 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
-| Editor SQL | 55 | 3 | 3 | 0 | 61 |
-| Grade | 55 | 1 | 1 | 0 | 57 |
+| Editor SQL | 58 | 0 | 3 | 0 | 61 |
+| Grade | 56 | 0 | 1 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **264** | **7** | **13** | **1** | **285** |
+| **Total** | **270** | **1** | **13** | **1** | **285** |
 
-**264 de 285 elementos existentes funcionam.**
+**270 de 285 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

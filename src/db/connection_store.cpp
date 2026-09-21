@@ -216,6 +216,8 @@ StoredProfile profile_from_json(const std::string& id,
             ed["show-whitespace"].as_bool(defaults.show_whitespace);
         editor.page_size = static_cast<int>(
             ed["page-size"].as_number(defaults.page_size));
+        editor.word_wrap = ed["word-wrap"].as_bool(defaults.word_wrap);
+        editor.code_folding = ed["code-folding"].as_bool(defaults.code_folding);
         editor.stop_script_on_error =
             ed["stop-script-on-error"].as_bool(defaults.stop_script_on_error);
     }
@@ -445,6 +447,12 @@ json::Value profile_to_json(const StoredProfile& stored) {
         }
         if (editor.page_size != defaults.page_size) {
             ed["page-size"] = json::Value(static_cast<double>(editor.page_size));
+        }
+        if (editor.word_wrap != defaults.word_wrap) {
+            ed["word-wrap"] = json::Value(editor.word_wrap);
+        }
+        if (editor.code_folding != defaults.code_folding) {
+            ed["code-folding"] = json::Value(editor.code_folding);
         }
         if (editor.stop_script_on_error != defaults.stop_script_on_error) {
             ed["stop-script-on-error"] =

@@ -571,6 +571,16 @@ void ConnectionDialog::draw_page_sql_code_editor() {
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Line numbers"), &editor.show_line_numbers);
+
+    ImGui::Checkbox(TR("Word wrap"), &editor.word_wrap);
+    help_marker(TR("Off by default, as in any code editor: with it on, one "
+                   "long line takes several rows and the line number stops "
+                   "matching what the server reports in an error."));
+
+    ImGui::Checkbox(TR("Code folding"), &editor.code_folding);
+    help_marker(TR("Collapse blocks. Needs matching brackets, which it turns "
+                   "on by itself."));
+
     ImGui::Checkbox(TR("Matching brackets"), &editor.show_matching_brackets);
     help_marker(TR("Highlights the pair of the bracket under the cursor. "
                    "Turning it off also turns off block folding, which "

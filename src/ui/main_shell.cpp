@@ -470,6 +470,14 @@ void MainShell::apply_completion_options(SqlDocument& document) {
     text.SetShowLineNumbersEnabled(editor.show_line_numbers);
     text.SetShowMatchingBrackets(editor.show_matching_brackets);
     text.SetShowWhitespacesEnabled(editor.show_whitespace);
+    text.SetWordWrapEnabled(editor.word_wrap);
+
+    // A dobra LIGA os parenteses correspondentes sozinha (e' o que ela usa
+    // para achar o bloco). Aplicada por ultimo para nao ser desfeita pelo
+    // SetShowMatchingBrackets acima, que faz o inverso: desligar os
+    // parenteses desliga a dobra.
+    text.SetLineFoldingEnabled(editor.code_folding &&
+                               editor.show_matching_brackets);
 
     autocomplete_config_->triggerOnTyping   = editor.complete_on_typing;
     autocomplete_config_->triggerInComments = editor.complete_in_comments;
@@ -1429,6 +1437,29 @@ void MainShell::draw() {
     // Alternar auto-commit (ConnectionCommands.CMD_TOGGLE_AUTOCOMMIT).
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_A)) {
         session().set_auto_commit_async(!session().auto_commit());
+    }
+
+    // Desfazer e refazer, GLOBAIS.
+    //
+    // O menu ja' os oferecia, mas o atalho vinha do widget: so' funcionava
+    // com o editor em foco. Clicar na grade e apertar Ctrl+Z nao fazia nada,
+    // e o menu anunciava a tecla mesmo assim -- um atalho anunciado que nao
+    // funciona e' pior que nenhum.
+    //
+    // O editor tambem le' estas teclas quando tem foco. Nao ha' duplicidade:
+    // `ImGui::GetIO().WantTextInput` e' verdadeiro justamente quando ele esta'
+    // consumindo teclado, e aqui a leitura e' pulada nesse caso.
+    if (!ImGui::GetIO().WantTextInput) {
+        if (SqlDocument* document = active_document()) {
+            if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z) &&
+                document->editor().CanUndo()) {
+                document->editor().Undo();
+            }
+            if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) &&
+                document->editor().CanRedo()) {
+                document->editor().Redo();
+            }
+        }
     }
 
     draw_menu_bar();
@@ -3350,7 +3381,18 @@ void MainShell::draw_toolbar() {
         ImGui::SameLine(0.0f, 2.0f);
         if (icon_button("##cancel", Icon::stop, TR("Cancel query"), busy,
                         busy ? p.error : 0)) {
-            // Cancelamento entra quando a Session expuser cancel_async().
+            // A sessao do DOCUMENTO, nao a ativa: com duas conexoes abertas,
+            // cancelar pela ativa interromperia a consulta da outra aba.
+            //
+            // Cancelar e' um PEDIDO ao servidor, nao uma ordem: uma consulta
+            // que ja' estava devolvendo linhas termina normalmente. Por isso
+            // a mensagem diz "pedido enviado", nao "cancelada".
+            if (SqlDocument* document = active_document()) {
+                const Status status = session_for(*document).cancel_query();
+                document->set_status(status
+                    ? std::string(TR("cancel requested"))
+                    : status.error().to_string());
+            }
         }
 
         group_separator();

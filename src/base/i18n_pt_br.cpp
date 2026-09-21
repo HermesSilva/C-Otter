@@ -874,6 +874,20 @@ const char* const kPtBr[] = {
     "Show whitespace",            "Mostrar espaços",
     "(not working yet)",          "(ainda não funciona)",
 
+    // --- Quebra de linha, dobra e cancelar ---
+    "Word wrap",                  "Quebrar linha",
+    "Off by default, as in any code editor: with it on, one long line takes "
+    "several rows and the line number stops matching what the server reports "
+    "in an error.",
+        "Desligado por padrão, como em todo editor de código: com ele ligado, "
+        "uma linha longa ocupa várias e o número da linha deixa de "
+        "corresponder ao que o servidor reporta num erro.",
+    "Code folding",               "Dobrar blocos",
+    "Collapse blocks. Needs matching brackets, which it turns on by itself.",
+        "Recolhe blocos. Precisa dos parênteses correspondentes, que ela liga "
+        "sozinha.",
+    "cancel requested",           "cancelamento pedido",
+
     // --- Pagina Processamento SQL (main.sqlexecute) ---
     "Result set",                 "Resultado",
     "Rows per page",              "Linhas por página",

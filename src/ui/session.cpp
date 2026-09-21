@@ -700,6 +700,24 @@ void Session::clear_query_log() {
     if (holt_) holt_->clear_query_log();
 }
 
+Status Session::cancel_query() {
+    // Mesmo padrao do worker: pega o ponteiro SOB o lock e usa FORA dele.
+    //
+    // Segurar o mutex durante o cancel() seria inofensivo aqui (ele abre
+    // conexao nova e nao toca no estado da original), mas travaria a UI se
+    // algum driver futuro decidisse esperar por algo.
+    db::Holt* holt = nullptr;
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        holt = holt_.get();
+    }
+
+    if (holt == nullptr) {
+        return fail(Errc::closed, "sem conexão para cancelar");
+    }
+    return holt->cancel();
+}
+
 // --- Informacao do servidor (System Info) ----------------------------------------
 
 void Session::load_server_info_async(ServerInfo what) {
