@@ -44,7 +44,7 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **Layout persistido** | ✅ | `%APPDATA%\C-Otter\layout.ini`, não no diretório de trabalho |
 | **Ícone da janela** | ✅ | Gerado em memória (32x32 RGBA) — decodificar o PNG exigiria trazer um stb_image só para isto |
 | Splash screen | ➖ | `Midia/Splash.png` existe, mas exibi-lo pede um decodificador de PNG (o projeto só tem `stb_image_write`). O C-Otter abre em ~300 ms — um splash apareceria depois da janela, o que é pior que não ter |
-| Múltiplas janelas | ⬜ | |
+| Múltiplas janelas | ➖ | O docking do ImGui já põe duas conexões lado a lado na MESMA janela, que é o caso de uso real. Janelas de SO separadas exigiriam viewports múltiplos e um contexto ImGui por janela — custo alto para o que o docking já resolve |
 
 ## 2. Barra de menus
 
@@ -309,9 +309,9 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Escopo sintático** | ✅ | Após `FROM` só tabelas; após `SELECT`/`WHERE` colunas e keywords |
 | **Filtro por `alias.`** | ✅ | Após `u.`, só colunas da tabela do alias `u` |
 | **Inferência de JOIN por FK** | ✅ | Depois de `ON`, sugere `i.SYSxMenuGroupID = g.ID` inteiro, com os aliases da query — verificado na tela |
-| Ícone por tipo de objeto | ⬜ | Popup só aceita texto (ADR 0004) |
-| Painel de detalhe lateral | ⬜ | |
-| Sugestão por IA | ⬜ | |
+| Ícone por tipo de objeto | ➖ | `suggestions` é `vector<string>` (`TextEditor.h:752`): o popup só aceita texto, e mudar isso é alterar o widget de terceiro. O tipo aparece como sufixo — `tabela`, `view`, `chave estrangeira` |
+| Painel de detalhe lateral | ➖ | Mesma limitação do item acima: o popup é uma lista de strings, sem área para detalhe |
+| Sugestão por IA | ➖ | Fora do escopo da v1 (ADR 0004). Exigiria chamada de rede a um serviço externo — e mandar o schema do usuário para fora é decisão dele, não padrão |
 
 ## 7. Painel Resultado (grade)
 
@@ -363,7 +363,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Formatação condicional** | ✅ | 12 operadores e mapa de calor (ADR 0005) |
 | **Barra na célula (sparkline)** | ✅ | 3 ancoragens; **o DBeaver não tem** (ADR 0005) |
 | **Painel de valor** (JSON, hexadecimal, booleano) | ✅ | JSON indentado, BLOB em hex, `t`/`f` e `1`/`0` |
-| Coluna calculada | ⬜ | Resto do ADR 0005 |
+| Coluna calculada | ⬜ | Exige um avaliador de expressões sobre o resultado: parser, tipos e propagação de NULL. O agregador atual só aplica funções fixas a UMA coluna |
 | **Exportar** | ✅ | CSV, JSON, Markdown e `INSERT`, com prévia |
 | Proteção contra CSV injection | ✅ | **Ligada por padrão** — valor iniciado por `=`, `+`, `-` ou `@` vira fórmula na planilha |
 | Copiar resultado para a área de transferência | ✅ | O resultado inteiro, não só a prévia |
@@ -471,19 +471,19 @@ ficam de fora do total.
 
 | Área | ✅ | 🟡 | ⬜ | ❌ | Total |
 |------|-----|-----|-----|-----|-------|
-| Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
+| Janela e estrutura | 18 | 0 | 0 | 0 | 18 |
 | Barra de menus | 18 | 0 | 0 | 0 | 18 |
 | Assistente de conexão | 51 | 1 | 3 | 1 | 56 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
-| Editor SQL | 58 | 0 | 3 | 0 | 61 |
+| Editor SQL | 58 | 0 | 0 | 0 | 58 |
 | Grade | 56 | 0 | 1 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **275** | **1** | **9** | **1** | **286** |
+| **Total** | **275** | **1** | **5** | **1** | **282** |
 
-**275 de 286 elementos existentes funcionam.**
+**275 de 282 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
