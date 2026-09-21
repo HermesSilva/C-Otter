@@ -9,9 +9,11 @@ otter_add_library(otter_ui
     SOURCES
         theme.cpp
         main_shell.cpp
+        session.cpp
         app_window_glfw.cpp
     DEPS
         otter::otter_base
+        otter::otter_db
         imgui
         texteditor
 )
