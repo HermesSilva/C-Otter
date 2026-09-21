@@ -8,6 +8,7 @@
 
 #include "TextEditor.h"
 
+#include "db/edit.hpp"
 #include "db/result_set.hpp"
 #include "sql/paging.hpp"
 
@@ -94,6 +95,18 @@ public:
     }
     void set_filter(sql::ColumnFilter filter) { filter_ = std::move(filter); }
 
+    // --- Edicao (ADR 0014) ---------------------------------------------------
+    [[nodiscard]] db::EditBuffer& edits() noexcept { return edits_; }
+    [[nodiscard]] const db::EditBuffer& edits() const noexcept { return edits_; }
+
+    // Onde gravar. Recalculado quando o resultado muda.
+    [[nodiscard]] const db::EditTarget& edit_target() const noexcept {
+        return edit_target_;
+    }
+    void set_edit_target(db::EditTarget target) {
+        edit_target_ = std::move(target);
+    }
+
     void reset_paging() {
         paged_sql_.clear();
         page_     = 0;
@@ -113,6 +126,8 @@ private:
     std::string                 paged_sql_;
     sql::SortOrder              sort_;
     sql::ColumnFilter           filter_;
+    db::EditBuffer              edits_;
+    db::EditTarget              edit_target_;
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

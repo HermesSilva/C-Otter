@@ -149,6 +149,11 @@ struct TriggerMeta {
 struct TableMeta {
     std::string  name;
     ObjKind      kind = ObjKind::table;
+
+    // OID no pg_class. Casa com o `source_table_oid` das colunas do resultado
+    // e e' o que permite saber de que tabela um SELECT veio (ADR 0014).
+    std::uint32_t oid = 0;
+
     std::string  comment;
     std::int64_t estimated_rows = 0;
     std::string  size_pretty;

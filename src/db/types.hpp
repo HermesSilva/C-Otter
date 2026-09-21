@@ -51,6 +51,15 @@ struct ColumnInfo {
     std::int16_t  precision = 0;  // para numeric
     std::int16_t  scale = 0;
     bool          nullable = true;
+
+    // De onde a coluna veio, informado pelo RowDescription do protocolo v3.
+    //
+    // Zero significa que a coluna nao e' de uma tabela: e' expressao,
+    // agregado ou constante. E' o que permite saber se o resultado da' para
+    // editar sem analisar o FROM da consulta, que quebraria com alias,
+    // subconsulta e CTE (ADR 0014).
+    std::uint32_t source_table_oid = 0;
+    std::int16_t  source_column = 0;   // attnum na tabela de origem
 };
 
 } // namespace otter::db

@@ -287,9 +287,14 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | `ORDER BY` do usuário respeitado | ✅ | Consulta com ordem própria não é sobreposta |
 | Selecionar célula / linha | ⬜ | |
 | Copiar célula | ⬜ | |
-| **Editar célula** | ⬜ | |
+| **Editar célula** | ✅ | Duplo clique; edição em buffer (ADR 0014) |
+| Gravação explícita | ✅ | `Salvar alterações` / `Descartar`; nada vai ao banco antes |
+| Célula alterada destacada | ✅ | Fundo âmbar, valor original no tooltip |
+| Definir `NULL` | ✅ | Menu de contexto — digitar nada é string vazia, não `NULL` |
+| Recusa com motivo | ✅ | `JOIN`, sem PK, chave fora do `SELECT`, view |
+| `UPDATE` por linha, em transação | ✅ | Ou tudo, ou nada |
 | Inserir / excluir linha | ⬜ | |
-| Salvar alterações | ⬜ | |
+
 | **Filtro por coluna** | ✅ | Botão direito no cabeçalho; expressão `WHERE` livre |
 | Coluna filtrada marcada | ✅ | Prefixo `*` em âmbar no cabeçalho |
 | Menu de contexto do cabeçalho | ✅ | Filtrar, ordenar, copiar nome |
@@ -481,7 +486,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (221, todos verdes):
+Testes automatizados (238, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

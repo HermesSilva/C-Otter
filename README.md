@@ -74,7 +74,7 @@ build\win-release\bin\c-otter.exe
 - [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — lacunas estruturais e ordem de implementação
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
 - [`docs/PLAN.md`](docs/PLAN.md) — roteiro em fases · [`docs/EFFORT.md`](docs/EFFORT.md) — esforço em homem-hora
-- [`docs/adr/`](docs/adr/) — 13 decisões arquiteturais, com as revogadas marcadas
+- [`docs/adr/`](docs/adr/) — 14 decisões arquiteturais, com as revogadas marcadas
 - [`lang/README.md`](lang/README.md) — como acrescentar um idioma
 
 ## Licença

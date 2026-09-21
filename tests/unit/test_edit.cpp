@@ -1,0 +1,400 @@
+// Edicao de dados pela grade (ADR 0014).
+//
+// Esta e' a operacao mais perigosa da ferramenta: um UPDATE com WHERE errado
+// altera linhas que ninguem pediu. Por isso a maior parte destes testes cobre
+// os casos em que a grade deve RECUSAR editar, nao os em que ela edita.
+#include "test_main.hpp"
+
+#include "db/edit.hpp"
+
+#include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace otter::db;
+
+namespace {
+
+bool has(const std::string& haystack, std::string_view needle) {
+    return haystack.find(needle) != std::string::npos;
+}
+
+struct ColumnSpec {
+    std::string   name;
+    DataKind      kind = DataKind::string;
+    std::uint32_t table_oid = 0;
+};
+
+ResultSet make_result(const std::vector<ColumnSpec>& columns,
+                      const std::vector<std::vector<std::string>>& rows,
+                      const std::vector<std::pair<std::size_t, std::size_t>>& nulls = {}) {
+    ResultSetBuilder builder;
+    for (const ColumnSpec& spec : columns) {
+        ColumnInfo info;
+        info.name             = spec.name;
+        info.kind             = spec.kind;
+        info.source_table_oid = spec.table_oid;
+        builder.add_column(std::move(info));
+    }
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        for (std::size_t c = 0; c < rows[r].size(); ++c) {
+            const bool is_null = std::find(nulls.begin(), nulls.end(),
+                                           std::make_pair(r, c)) != nulls.end();
+            if (is_null) builder.append_null(c);
+            else         builder.append_text(c, rows[r][c]);
+        }
+    }
+    builder.set_row_count(rows.size());
+    return builder.take();
+}
+
+// Catalogo com uma tabela 'cliente' de OID 16400 e PK em cliente_id.
+std::vector<SchemaMeta> catalog_with_pk() {
+    ConstraintMeta pk;
+    pk.name    = "cliente_pkey";
+    pk.kind    = ObjKind::primary_key;
+    pk.columns = "cliente_id";
+
+    TableMeta table;
+    table.name = "cliente";
+    table.oid  = 16400;
+    table.constraints = {pk};
+    table.constraints_loaded = true;
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {table};
+    return {schema};
+}
+
+} // namespace
+
+// --- Quando a grade NAO deve editar ------------------------------------------
+
+OTTER_TEST(edit_refuses_a_table_without_a_key) {
+    // Sem PK nao ha' como escrever o WHERE. A grade diz isso em vez de
+    // oferecer um campo que falha na hora de salvar.
+    TableMeta no_key;
+    no_key.name = "log";
+    no_key.oid  = 16500;
+    no_key.constraints_loaded = true;
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {no_key};
+
+    const ResultSet rs = make_result(
+        {{"mensagem", DataKind::string, 16500}}, {{"algo"}});
+
+    const EditTarget target = find_edit_target(rs, {schema});
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::no_key);
+}
+
+OTTER_TEST(edit_refuses_a_join) {
+    // Duas tabelas no resultado: nao ha' para onde escrever.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"pedido_id",  DataKind::integer, 16401}},
+        {{"1", "7"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::multiple_tables);
+}
+
+OTTER_TEST(edit_refuses_a_result_of_pure_expressions) {
+    // SELECT now(), 1+1 -- nenhuma coluna vem de tabela.
+    const ResultSet rs = make_result(
+        {{"agora", DataKind::timestamp, 0}, {"soma", DataKind::integer, 0}},
+        {{"2026-01-01", "2"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::no_source_table);
+}
+
+OTTER_TEST(edit_refuses_when_the_key_is_not_selected) {
+    // "SELECT nome FROM cliente": ha' PK, mas ela nao veio no resultado.
+    const ResultSet rs = make_result(
+        {{"nome", DataKind::string, 16400}}, {{"Lontra"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::key_not_selected);
+}
+
+OTTER_TEST(edit_refuses_a_view) {
+    // Escrever numa view exige trigger INSTEAD OF; nao presumimos que exista.
+    ConstraintMeta pk;
+    pk.kind    = ObjKind::primary_key;
+    pk.columns = "id";
+
+    TableMeta view;
+    view.name = "vw_cliente";
+    view.oid  = 16600;
+    view.kind = ObjKind::view;
+    view.constraints = {pk};
+    view.constraints_loaded = true;
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {view};
+
+    const ResultSet rs = make_result({{"id", DataKind::integer, 16600}}, {{"1"}});
+    OTTER_CHECK(!find_edit_target(rs, {schema}).editable());
+}
+
+// --- Quando pode ------------------------------------------------------------
+
+OTTER_TEST(edit_accepts_a_single_table_with_its_key) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "Lontra"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(target.editable());
+    OTTER_CHECK_EQ(target.schema, std::string{"otter_test"});
+    OTTER_CHECK_EQ(target.table, std::string{"cliente"});
+    OTTER_CHECK_EQ(target.key_columns.size(), std::size_t{1});
+    OTTER_CHECK_EQ(target.key_columns[0], std::size_t{0});
+}
+
+OTTER_TEST(edit_ignores_expression_columns_alongside_table_columns) {
+    // "SELECT cliente_id, nome, now()" continua editavel nas duas primeiras.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer,   16400},
+         {"nome",       DataKind::string,    16400},
+         {"agora",      DataKind::timestamp, 0}},
+        {{"7", "Lontra", "2026-01-01"}});
+
+    OTTER_CHECK(find_edit_target(rs, catalog_with_pk()).editable());
+}
+
+// --- Geracao do UPDATE -------------------------------------------------------
+
+OTTER_TEST(edit_generates_one_update_per_row) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400},
+         {"credito",    DataKind::numeric, 16400}},
+        {{"7", "Lontra", "100"}, {"8", "Rio", "200"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "Lontra Marinha");
+    buffer.set(0, 2, "500");
+    buffer.set(1, 1, "Rio Corrente");
+
+    // Tres celulas, duas linhas: DOIS comandos. Um por celula faria tres.
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{3});
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{2});
+
+    const auto updates = generate_updates(rs, target, buffer);
+    OTTER_CHECK(updates.has_value());
+    OTTER_CHECK_EQ(updates->size(), std::size_t{2});
+
+    // As duas colunas da mesma linha entram no mesmo SET.
+    OTTER_CHECK(has((*updates)[0], "nome = 'Lontra Marinha'"));
+    OTTER_CHECK(has((*updates)[0], "credito = 500"));       // numero sem aspas
+    OTTER_CHECK(has((*updates)[0], "WHERE cliente_id = 7"));
+
+    OTTER_CHECK(has((*updates)[1], "WHERE cliente_id = 8"));
+}
+
+OTTER_TEST(edit_escapes_quotes_in_the_value) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "x"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "O'Brien");
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(updates.has_value());
+    OTTER_CHECK(has((*updates)[0], "'O''Brien'"));
+}
+
+OTTER_TEST(edit_writes_null_not_the_text) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"email",      DataKind::string,  16400}},
+        {{"7", "a@b.c"}});
+
+    EditBuffer buffer;
+    buffer.set_null(0, 1);
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(updates.has_value());
+    OTTER_CHECK(has((*updates)[0], "email = NULL"));
+    OTTER_CHECK(!has((*updates)[0], "'NULL'"));
+}
+
+OTTER_TEST(edit_treats_an_emptied_number_as_null) {
+    // Apagar o conteudo de um campo numerico significa ausencia, nao zero --
+    // e "SET credito = " seria erro de sintaxe.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"credito",    DataKind::numeric, 16400}},
+        {{"7", "100"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "");
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(updates.has_value());
+    OTTER_CHECK(has((*updates)[0], "credito = NULL"));
+}
+
+OTTER_TEST(edit_refuses_a_row_whose_key_is_null) {
+    // "WHERE id = NULL" nunca casa: o UPDATE alteraria zero linhas em
+    // silencio, e o usuario acharia que gravou.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "x"}}, {{0, 0}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "novo");
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(!updates.has_value());
+    OTTER_CHECK(has(updates.error().message(), "NULL"));
+}
+
+OTTER_TEST(edit_refuses_to_change_a_key_column) {
+    // Alterar a chave mudaria a propria linha que o WHERE identifica.
+    // E' possivel em SQL, mas nao por acidente numa grade.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "x"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 0, "99");
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(!updates.has_value());
+}
+
+OTTER_TEST(edit_handles_a_composite_key) {
+    ConstraintMeta pk;
+    pk.kind    = ObjKind::primary_key;
+    pk.columns = "pedido_id, item_id";
+
+    TableMeta table;
+    table.name = "pedido_item";
+    table.oid  = 16700;
+    table.constraints = {pk};
+    table.constraints_loaded = true;
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {table};
+
+    const ResultSet rs = make_result(
+        {{"pedido_id",  DataKind::integer, 16700},
+         {"item_id",    DataKind::integer, 16700},
+         {"quantidade", DataKind::integer, 16700}},
+        {{"1", "2", "10"}});
+
+    const EditTarget target = find_edit_target(rs, {schema});
+    OTTER_CHECK(target.editable());
+    OTTER_CHECK_EQ(target.key_columns.size(), std::size_t{2});
+
+    EditBuffer buffer;
+    buffer.set(0, 2, "20");
+
+    const auto updates = generate_updates(rs, target, buffer);
+    OTTER_CHECK(updates.has_value());
+
+    // As duas colunas da chave, unidas por AND. Usar so' a primeira alteraria
+    // linhas demais.
+    OTTER_CHECK(has((*updates)[0], "pedido_id = 1"));
+    OTTER_CHECK(has((*updates)[0], "AND"));
+    OTTER_CHECK(has((*updates)[0], "item_id = 2"));
+}
+
+OTTER_TEST(edit_falls_back_to_a_unique_constraint) {
+    // Sem PK, uma constraint unica serve: tambem identifica uma linha so'.
+    ConstraintMeta unique;
+    unique.kind    = ObjKind::unique_key;
+    unique.columns = "email";
+
+    TableMeta table;
+    table.name = "cliente";
+    table.oid  = 16400;
+    table.constraints = {unique};
+    table.constraints_loaded = true;
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {table};
+
+    const ResultSet rs = make_result(
+        {{"email", DataKind::string, 16400},
+         {"nome",  DataKind::string, 16400}},
+        {{"a@b.c", "Lontra"}});
+
+    const EditTarget target = find_edit_target(rs, {schema});
+    OTTER_CHECK(target.editable());
+    OTTER_CHECK_EQ(target.key_columns[0], std::size_t{0});
+}
+
+// --- Buffer -------------------------------------------------------------------
+
+OTTER_TEST(edit_buffer_tracks_and_reverts) {
+    EditBuffer buffer;
+    OTTER_CHECK(buffer.empty());
+
+    buffer.set(0, 1, "a");
+    buffer.set(0, 2, "b");
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{2});
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{1});
+
+    // Reeditar a mesma celula substitui, nao acumula.
+    buffer.set(0, 1, "c");
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{2});
+    OTTER_CHECK_EQ(buffer.find(0, 1)->value, std::string{"c"});
+
+    buffer.revert(0, 1);
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{1});
+    OTTER_CHECK(buffer.find(0, 1) == nullptr);
+
+    buffer.clear();
+    OTTER_CHECK(buffer.empty());
+}
+
+OTTER_TEST(edit_distinguishes_no_key_from_key_not_loaded) {
+    // Dizer "a tabela nao tem chave primaria" de uma tabela que TEM seria
+    // mentira: o no' simplesmente ainda nao foi expandido. Foi o defeito
+    // visto na tela -- a mensagem culpava a tabela pelo que era estado da UI.
+    TableMeta not_loaded;
+    not_loaded.name = "cliente";
+    not_loaded.oid  = 16400;
+    not_loaded.constraints_loaded = false;   // ninguem expandiu ainda
+
+    SchemaMeta schema;
+    schema.name   = "otter_test";
+    schema.tables = {not_loaded};
+
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400}}, {{"1"}});
+
+    const EditTarget target = find_edit_target(rs, {schema});
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::key_not_loaded);
+
+    // E o nome da tabela ja' esta' preenchido, para a UI saber o que pedir.
+    OTTER_CHECK_EQ(target.table, std::string{"cliente"});
+    OTTER_CHECK_EQ(target.schema, std::string{"otter_test"});
+}

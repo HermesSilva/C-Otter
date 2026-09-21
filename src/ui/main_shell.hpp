@@ -88,6 +88,14 @@ private:
     // Menu de contexto de um cabecalho de coluna: filtro e ordenacao.
     void draw_column_header_menu(SqlDocument& document, const db::ResultSet& rs,
                                  std::size_t column);
+
+    // Uma celula da grade: valor, marca de alteracao pendente e o editor
+    // embutido quando o usuario da' duplo clique (ADR 0014).
+    void draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
+                        std::size_t row, std::size_t column);
+
+    // Grava as alteracoes pendentes, em transacao.
+    void save_pending_edits(SqlDocument& document);
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();
@@ -201,6 +209,18 @@ private:
     std::optional<db::QueryPlan> plan_;
     bool               show_plan_ = false;
     bool               plan_analyze_ = false;
+
+    // Celula em edicao no momento: (documento, linha, coluna). Fora dela, a
+    // grade so' desenha texto.
+    std::size_t        editing_document_ = 0;
+    std::size_t        editing_row_ = 0;
+    std::size_t        editing_column_ = 0;
+    bool               editing_active_ = false;
+    bool               saving_edits_ = false;
+
+    // Documento esperando as constraints para saber se da' para editar.
+    std::size_t        pending_edit_target_ = 0;
+    char               edit_buffer_[1024] = "";
     db::ExportOptions  export_options_;
     std::string        export_path_;
     std::string        export_status_;

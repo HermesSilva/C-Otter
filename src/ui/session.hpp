@@ -70,6 +70,14 @@ public:
         return script_total_.load(std::memory_order_acquire);
     }
 
+    // Verdadeiro quando o ultimo script teve pelo menos um comando com erro.
+    //
+    // Existe porque procurar "erro" na mensagem seria fragil: a mensagem vem
+    // traduzida do servidor e muda de idioma com o `lc_messages`.
+    [[nodiscard]] bool last_script_failed() const noexcept {
+        return script_failed_.load(std::memory_order_acquire);
+    }
+
     void disconnect();
 
     [[nodiscard]] SessionState state() const noexcept {
@@ -156,6 +164,7 @@ private:
     // worker escreve; um mutex aqui seria contencao por nada.
     std::atomic<std::size_t>  script_done_{0};
     std::atomic<std::size_t>  script_total_{0};
+    std::atomic<bool>         script_failed_{false};
 
     std::string status_message_;
     std::string database_name_;

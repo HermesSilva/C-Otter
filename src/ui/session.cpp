@@ -140,6 +140,7 @@ void Session::execute_script_async(std::vector<std::string> statements,
 
     script_done_.store(0, std::memory_order_release);
     script_total_.store(statements.size(), std::memory_order_release);
+    script_failed_.store(false, std::memory_order_release);
 
     worker_ = std::thread([this, statements = std::move(statements),
                            stop_on_error] {
@@ -198,6 +199,7 @@ void Session::execute_script_async(std::vector<std::string> statements,
             status_message_ = TRF("%zu statement(s) executed", executed);
         }
 
+        script_failed_.store(failed > 0, std::memory_order_release);
         script_total_.store(0, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
     });

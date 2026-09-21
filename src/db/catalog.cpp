@@ -167,7 +167,8 @@ Result<std::vector<TableMeta>> PostgresCatalog::load_tables(std::string_view sch
         "       c.relkind,"
         "       COALESCE(obj_description(c.oid, 'pg_class'), ''),"
         "       c.reltuples::bigint,"
-        "       pg_size_pretty(pg_total_relation_size(c.oid))"
+        "       pg_size_pretty(pg_total_relation_size(c.oid)),"
+        "       c.oid"
         "  FROM pg_class c"
         "  JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = " + quote_literal(schema) +
@@ -195,6 +196,7 @@ Result<std::vector<TableMeta>> PostgresCatalog::load_tables(std::string_view sch
         const std::int64_t estimate = to_int64(rs.text(r, 3));
         table.estimated_rows = estimate < 0 ? 0 : estimate;
         table.size_pretty    = std::string(rs.text(r, 4));
+        table.oid = static_cast<std::uint32_t>(to_int64(rs.text(r, 5)));
 
         tables.push_back(std::move(table));
     }

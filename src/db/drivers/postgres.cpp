@@ -252,6 +252,10 @@ private:
                         info.type_name = type_name_for(field.type_oid);
                         info.size      = field.type_size;
 
+                        // Origem da coluna, para a grade editavel (ADR 0014).
+                        info.source_table_oid = field.table_oid;
+                        info.source_column    = field.column_id;
+
                         // typmod carrega precisao e escala de numeric.
                         if (info.kind == DataKind::numeric && field.type_modifier > 4) {
                             const std::int32_t mod = field.type_modifier - 4;
@@ -292,6 +296,8 @@ private:
                 info.type_oid  = field.type_oid;
                 info.kind      = kind_from_oid(field.type_oid);
                 info.type_name = type_name_for(field.type_oid);
+                info.source_table_oid = field.table_oid;
+                info.source_column    = field.column_id;
                 builder.add_column(std::move(info));
             }
         }

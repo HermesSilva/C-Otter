@@ -806,6 +806,21 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
 void MainShell::draw() {
     // Colhe o resultado e entrega ao documento que o pediu -- nao ao que
     // estiver ativo agora, porque o usuario pode ter trocado de aba.
+    // Constraints chegaram: recalcula se o resultado da' para editar. Sem
+    // isto, a grade ficaria somente leitura ate' o usuario reexecutar.
+    if (pending_edit_target_ != 0 && !session().busy()) {
+        for (auto& document : documents_) {
+            if (document->id() != pending_edit_target_) continue;
+            if (document->result().has_value()) {
+                document->set_edit_target(
+                    db::find_edit_target(*document->result(),
+                                         session().schemas()));
+            }
+            break;
+        }
+        pending_edit_target_ = 0;
+    }
+
     // Plano pronto: o worker guardou; a UI recolhe no quadro seguinte.
     if (show_plan_ && !session().busy() && !plan_) {
         if (auto fresh = session().take_plan()) plan_ = std::move(*fresh);
@@ -814,6 +829,19 @@ void MainShell::draw() {
     if (!session().busy() && executing_document_id_ != 0) {
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
+
+            // Gravacao de edicoes: o buffer so' e' limpo quando os UPDATE
+            // passaram. Limpar antes de saber perderia o trabalho se a
+            // transacao falhasse -- e o usuario nao teria como refaze-lo.
+            if (!document->edits().empty() && saving_edits_) {
+                saving_edits_ = false;
+                if (!session().last_script_failed()) {
+                    document->edits().clear();
+                    // Relê para mostrar o que o banco realmente gravou:
+                    // trigger e DEFAULT podem ter mudado o valor.
+                    if (document->paged()) execute_page(*document, document->page());
+                }
+            }
 
             if (auto fresh = session().take_result()) {
                 // A pagina pediu uma linha a mais do que mostra. Se ela veio,
@@ -825,6 +853,26 @@ void MainShell::draw() {
                     if (more) fresh->hide_rows_beyond(sql::kDefaultPageSize);
                 }
                 document->set_result(std::move(*fresh));
+
+                // De onde o resultado veio decide se da' para editar. E'
+                // calculado uma vez, aqui, e nao a cada quadro.
+                document->edits().clear();
+                document->set_edit_target(
+                    db::find_edit_target(*document->result(),
+                                         session().schemas()));
+
+                // Chave ainda nao lida: pede o carregamento. O alvo e'
+                // recalculado no quadro seguinte, quando as constraints
+                // chegarem -- sem isto, um SELECT numa tabela nunca expandida
+                // ficaria somente leitura sem motivo real.
+                if (document->edit_target().refusal ==
+                        db::EditRefusal::key_not_loaded &&
+                    !document->edit_target().table.empty()) {
+                    session().load_constraints_async(
+                        document->edit_target().schema,
+                        document->edit_target().table);
+                    pending_edit_target_ = document->id();
+                }
             }
 
             // Conferir a janela de exportacao exige um resultado na tela e um
@@ -2181,6 +2229,159 @@ void MainShell::draw_editor_panel() {
     ImGui::End();
 }
 
+void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
+                               std::size_t row, std::size_t column) {
+    const Palette& p = colors();
+
+    const bool editing = editing_active_ &&
+                         editing_document_ == document.id() &&
+                         editing_row_ == row && editing_column_ == column;
+
+    // --- Celula em edicao ---------------------------------------------------
+    if (editing) {
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SetKeyboardFocusHere();
+
+        const bool committed = ImGui::InputText(
+            "##celledit", edit_buffer_, sizeof edit_buffer_,
+            ImGuiInputTextFlags_EnterReturnsTrue |
+            ImGuiInputTextFlags_AutoSelectAll);
+
+        // Enter grava no buffer; Esc descarta. Nenhum dos dois toca o banco --
+        // a gravacao e' explicita (ADR 0014).
+        if (committed) {
+            document.edits().set(row, column, edit_buffer_);
+            editing_active_ = false;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            editing_active_ = false;
+        } else if (!ImGui::IsItemActive() && ImGui::IsItemDeactivated()) {
+            // Clicou fora: guarda o que foi digitado, em vez de perder.
+            document.edits().set(row, column, edit_buffer_);
+            editing_active_ = false;
+        }
+        return;
+    }
+
+    // --- Valor: o do buffer tem precedencia sobre o do banco ----------------
+    const db::CellEdit* edit = document.edits().find(row, column);
+
+    const bool is_null = edit != nullptr ? edit->is_null : rs.is_null(row, column);
+    const std::string_view value =
+        edit != nullptr ? std::string_view(edit->value) : rs.text(row, column);
+
+    // Fundo distinto para celula alterada: saber o que mudou ANTES de gravar
+    // e' o que torna a edicao em buffer util.
+    if (edit != nullptr) {
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                               with_alpha(p.warn, 0.22f));
+    }
+
+    // Guarda o inicio da celula: o alvo clicavel volta para ca' e cobre a
+    // largura toda, incluindo a area do texto.
+    const ImVec2 cell_origin = ImGui::GetCursorPos();
+    const float  cell_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+
+    if (is_null) {
+        ImGui::TextColored(col4(p.text_dim), "[null]");
+    } else {
+        const db::DataKind kind = rs.column(column).info().kind;
+        if (db::is_right_aligned(kind)) {
+            const float width = ImGui::CalcTextSize(
+                value.data(), value.data() + value.size()).x;
+            const float available = ImGui::GetContentRegionAvail().x;
+            if (available > width) {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - width);
+            }
+        }
+        ImGui::TextUnformatted(value.data(), value.data() + value.size());
+    }
+
+    // --- Interacao -----------------------------------------------------------
+    if (!document.edit_target().editable()) return;
+
+    // Alvo clicavel cobrindo a celula inteira.
+    //
+    // Dummy NAO serve aqui: ele reserva espaco mas nao e' item interativo,
+    // entao IsItemHovered() sempre respondia falso e o duplo clique nunca
+    // chegava. InvisibleButton e' item de verdade.
+    //
+    // Desenhado POR CIMA do texto (cursor recuado), nao ao lado: ao lado, a
+    // celula com valor curto teria alvo so' na sobra.
+    ImGui::SetCursorPos(cell_origin);
+    ImGui::InvisibleButton("##cellhit",
+                           ImVec2(cell_width, ImGui::GetTextLineHeight()),
+                           ImGuiButtonFlags_MouseButtonLeft |
+                           ImGuiButtonFlags_MouseButtonRight);
+
+    if (ImGui::IsItemHovered()) {
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            editing_active_   = true;
+            editing_document_ = document.id();
+            editing_row_      = row;
+            editing_column_   = column;
+            std::snprintf(edit_buffer_, sizeof edit_buffer_, "%s",
+                          is_null ? "" : std::string(value).c_str());
+        }
+
+        // O valor original no tooltip: poder comparar sem desfazer.
+        if (edit != nullptr) {
+            const std::string original =
+                rs.is_null(row, column) ? "[null]"
+                                        : std::string(rs.text(row, column));
+            ImGui::SetTooltip(TR("was: %s"), original.c_str());
+        }
+    }
+
+    ImGui::PushID(static_cast<int>(row * rs.column_count() + column));
+    if (ImGui::BeginPopupContextItem("##cellmenu")) {
+        if (ImGui::MenuItem(TR("Set NULL"))) {
+            // Botao proprio porque digitar nada significa string vazia, nao
+            // NULL -- sao valores diferentes no banco.
+            document.edits().set_null(row, column);
+        }
+        if (ImGui::MenuItem(TR("Revert cell"), nullptr, false, edit != nullptr)) {
+            document.edits().revert(row, column);
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("Copy value"))) {
+            ImGui::SetClipboardText(is_null ? "" : std::string(value).c_str());
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+}
+
+void MainShell::save_pending_edits(SqlDocument& document) {
+    if (document.edits().empty()) return;
+    if (!document.result().has_value()) return;
+    if (session().state() != SessionState::connected || session().busy()) return;
+
+    auto updates = db::generate_updates(*document.result(),
+                                        document.edit_target(),
+                                        document.edits());
+    if (!updates) {
+        document.set_status(updates.error().to_string());
+        return;
+    }
+
+    // Em transacao, mesmo em auto-commit: gravar cinco linhas e falhar na
+    // terceira deixaria duas gravadas e tres nao -- estado que o usuario nao
+    // pediu e nao consegue reproduzir (ADR 0014).
+    std::vector<std::string> statements;
+    statements.reserve(updates->size() + 2);
+    statements.emplace_back("BEGIN");
+    for (std::string& update : *updates) statements.push_back(std::move(update));
+    statements.emplace_back("COMMIT");
+
+    executing_document_id_ = document.id();
+    document.set_executing(true);
+    saving_edits_ = true;
+
+    // O buffer so' e' limpo quando a gravacao termina sem erro -- ver a
+    // colheita do resultado em draw().
+    session().execute_script_async(std::move(statements));
+}
+
 void MainShell::draw_column_header_menu(SqlDocument& document,
                                         const db::ResultSet& rs,
                                         std::size_t column) {
@@ -2556,6 +2757,40 @@ void MainShell::draw_grid_panel() {
         const Palette& p = colors();
 
         draw_grid_toolbar(*document, rs);
+
+        // Alteracoes pendentes: contagem e os dois botoes. Fica acima da
+        // grade, nao escondido num menu -- e' estado que o usuario precisa
+        // ver sem procurar.
+        if (!document->edits().empty()) {
+            const std::size_t rows = document->edits().touched_rows();
+
+            icon_inline(Icon::warning, p.warn);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.warn),
+                               TR("%zu change(s) in %zu row(s), not saved"),
+                               document->edits().size(), rows);
+
+            ImGui::SameLine();
+            if (icon_text_button("##saveedits", Icon::commit, TR("Save changes"),
+                                 TR("Run the UPDATEs in a transaction"),
+                                 !session().busy())) {
+                save_pending_edits(*document);
+            }
+            ImGui::SameLine();
+            if (icon_text_button("##discardedits", Icon::rollback,
+                                 TR("Discard"),
+                                 TR("Throw the pending changes away"))) {
+                document->edits().clear();
+            }
+        } else if (!document->edit_target().editable() &&
+                   rs.row_count() > 0) {
+            // Diz POR QUE nao da' para editar, em vez de deixar o usuario
+            // tentar e nao conseguir (diretiva 6).
+            ImGui::TextColored(col4(p.text_dim), TR("read-only: %s"),
+                               TR(std::string(db::to_string(
+                                      document->edit_target().refusal)).c_str()));
+        }
+
         ImGui::Separator();
 
         if (rs.column_count() == 0) {
@@ -2695,27 +2930,7 @@ void MainShell::draw_grid_panel() {
                     for (int c = 0; c < columns; ++c) {
                         const auto ci = static_cast<std::size_t>(c);
                         ImGui::TableSetColumnIndex(c);
-
-                        if (rs.is_null(r, ci)) {
-                            // Nulo visualmente distinto de string vazia.
-                            ImGui::TextColored(col4(colors().text_dim), "[null]");
-                            continue;
-                        }
-
-                        const std::string_view value = rs.text(r, ci);
-                        const db::DataKind kind = rs.column(ci).info().kind;
-
-                        if (db::is_right_aligned(kind)) {
-                            const float width = ImGui::CalcTextSize(
-                                value.data(), value.data() + value.size()).x;
-                            const float available = ImGui::GetContentRegionAvail().x;
-                            if (available > width) {
-                                ImGui::SetCursorPosX(
-                                    ImGui::GetCursorPosX() + available - width);
-                            }
-                        }
-                        ImGui::TextUnformatted(value.data(),
-                                               value.data() + value.size());
+                        draw_grid_cell(*document, rs, r, ci);
                     }
                 }
             }
