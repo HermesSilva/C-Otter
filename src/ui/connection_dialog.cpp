@@ -210,6 +210,14 @@ void ConnectionDialog::draw_driver_catalog() {
             ImGui::TableSetColumnIndex(0);
             ImGui::BeginDisabled(!driver.available);
 
+            // Icone do SGBD, como no catalogo do DBeaver. Driver sem desenho
+            // proprio usa a torre generica -- os tres com protocolo
+            // implementado tem o seu.
+            icon_inline(driver_icon(driver.id),
+                        driver.available ? colors().accent_light
+                                         : colors().text_dim);
+            ImGui::SameLine(0.0f, 6.0f);
+
             const bool selected = profile_.driver_id == driver.id;
             if (ImGui::Selectable(driver.name, selected,
                                   ImGuiSelectableFlags_SpanAllColumns |

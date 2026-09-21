@@ -41,19 +41,6 @@ public:
     // recupera este objeto via state.userData.
     void suggest(TextEditor::AutoCompleteState& state);
 
-private:
-    // Aplica ao editor as preferencias da conexao do documento -- editor de
-    // codigo e completar. A AutoCompleteConfig e' compartilhada por todos os
-    // editores, entao vale a cada quadro.
-    void apply_completion_options(SqlDocument& document);
-
-    // Preferencias da conexao do documento, ou os padroes quando ela nao
-    // existe mais. Referencia, nao copia: e' lida por celula da grade.
-    [[nodiscard]] const db::EditorOptions& editor_options_for(
-        const SqlDocument& document) const;
-
-public:
-
     void draw();
 
     [[nodiscard]] bool wants_quit() const noexcept { return wants_quit_; }
@@ -86,8 +73,16 @@ private:
     // Nome do SGBD para exibicao, a partir do driver_id do perfil.
     static std::string dbms_name(const std::string& driver_id);
 
-    // Icone do SGBD. Driver sem desenho proprio cai na torre generica.
-    static Icon dbms_icon(const std::string& driver_id);
+    // Aplica ao editor as preferencias da conexao do documento -- editor de
+    // codigo e completar. A AutoCompleteConfig e' compartilhada por todos os
+    // editores, entao vale a cada quadro.
+    void apply_completion_options(SqlDocument& document);
+
+    // Preferencias da conexao do documento, ou os padroes quando ela nao
+    // existe mais. Referencia, nao copia: e' lida por celula da grade.
+    [[nodiscard]] const db::EditorOptions& editor_options_for(
+        const SqlDocument& document) const;
+
 
     // Dialeto SQL da conexao ativa, para lexer, formatador e reescrita.
     [[nodiscard]] const sql::Dialect& active_dialect() const;

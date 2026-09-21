@@ -1799,16 +1799,6 @@ std::string MainShell::dbms_name(const std::string& driver_id) {
     return driver != nullptr ? std::string(driver->display_name()) : driver_id;
 }
 
-// Icone do SGBD, como o logo que o DBeaver poe em cada conexao.
-//
-// Driver sem desenho proprio cai na torre generica, em vez de reusar o de
-// outro banco: dois SGBDs com o mesmo icone e' o tipo de divida que a
-// diretriz 5 nomeia.
-Icon MainShell::dbms_icon(const std::string& driver_id) {
-    if (driver_id == "postgresql") return Icon::pg_server;
-    if (driver_id == "mysql" || driver_id == "mariadb") return Icon::my_server;
-    return Icon::generic_server;
-}
 
 // Lista UNICA de conexoes, como a do DBeaver.
 //
@@ -1971,7 +1961,7 @@ std::size_t MainShell::draw_raft_entries(const std::string& folder,
 
             // Icone do SGBD, na cor do estado: identifica o banco sem ler o
             // nome, que e' o que o logo faz no DBeaver.
-            icon_inline(dbms_icon(connection.profile.driver_id), status_color);
+            icon_inline(driver_icon(connection.profile.driver_id), status_color);
             ImGui::SameLine(0.0f, 6.0f);
 
             // Selecionavel de largura total: trocar de conexao e' um clique
@@ -2075,7 +2065,7 @@ std::size_t MainShell::draw_saved_profiles(const std::string& folder) {
 
         // Mesmo icone da conexao aberta, esmaecido: a linha tem a mesma
         // forma, e o que muda e' a cor -- continua sendo uma lista so'.
-        icon_inline(dbms_icon(stored.profile.driver_id), p.text_dim);
+        icon_inline(driver_icon(stored.profile.driver_id), p.text_dim);
         ImGui::SameLine(0.0f, 6.0f);
 
         ImGui::BeginDisabled(!stored.supported);

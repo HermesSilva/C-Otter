@@ -696,6 +696,16 @@ void draw_generic_server(const Canvas& c) {
     }
 }
 
+} // namespace
+
+Icon driver_icon(std::string_view driver_id) noexcept {
+    if (driver_id == "postgresql") return Icon::pg_server;
+    if (driver_id == "mysql" || driver_id == "mariadb") return Icon::my_server;
+    return Icon::generic_server;
+}
+
+namespace {
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,

@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 struct ImVec2;
 struct ImDrawList;
@@ -97,6 +98,16 @@ enum class Icon : std::uint8_t {
 // AO ACRESCENTAR UM ICONE: poe antes desta linha e atualiza a ancora.
 inline constexpr std::size_t kIconCount =
     static_cast<std::size_t>(Icon::generic_server) + 1;
+
+// Icone do SGBD a partir do id do driver.
+//
+// Fica aqui, e nao no MainShell, porque o catalogo do dialogo de conexao
+// tambem precisa dele -- e duas copias divergiriam ao acrescentar um driver.
+//
+// Driver sem desenho proprio cai na torre generica, em vez de reusar o de
+// outro banco: dois SGBDs com o mesmo icone e' a divida que a diretriz 5
+// nomeia.
+[[nodiscard]] Icon driver_icon(std::string_view driver_id) noexcept;
 
 // Desenha o icone centrado em `center`, com `size` de lado.
 void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,

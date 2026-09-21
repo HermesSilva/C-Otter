@@ -84,7 +84,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Drivers indisponíveis esmaecidos | ✅ | Com o motivo: "protocolo em desenvolvimento", "fase 3", "fora do escopo" |
 | Duplo clique avança | ✅ | |
 | Botão Avançar / Cancelar | ✅ | Avançar desabilitado sem driver disponível |
-| **Ícones dos SGBDs** | 🟡 | Existem 3 (`pg_server`, `my_server`, `generic_server`); o catálogo lista 18 drivers, mas só 3 têm protocolo |
+| **Ícones dos SGBDs** | ✅ | No catálogo e no Raft. Os 3 drivers com protocolo têm desenho próprio; os 15 indisponíveis usam a torre genérica, esmaecida — reusar o ícone de outro banco seria a dívida da diretriz 5 |
 
 ### Etapa 2 — configuração (árvore de categorias)
 
@@ -473,7 +473,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 0 | 0 | 18 |
 | Barra de menus | 18 | 0 | 0 | 0 | 18 |
-| Assistente de conexão | 51 | 1 | 3 | 1 | 56 |
+| Assistente de conexão | 52 | 0 | 3 | 1 | 56 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 58 | 0 | 0 | 0 | 58 |
@@ -481,9 +481,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **275** | **1** | **5** | **1** | **282** |
+| **Total** | **276** | **0** | **5** | **1** | **282** |
 
-**275 de 282 elementos existentes funcionam.**
+**276 de 282 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
