@@ -363,7 +363,18 @@ public:
         params.allow_invalid_certificate = !config.ssl_verifies_certificate();
 
         OTTER_ASSIGN_OR_RETURN(auto conn, pgwire::Connection::connect(params));
-        return std::unique_ptr<Holt>(new PostgresHolt(std::move(conn)));
+        auto holt = std::unique_ptr<PostgresHolt>(
+            new PostgresHolt(std::move(conn)));
+
+        // Nivel de isolamento do perfil. Um nivel que o servidor nao aceita
+        // FALHA a conexao, nomeando-o -- melhor que uma sessao que ignorou o
+        // pedido em silencio.
+        if (config.isolation_level.has_value()) {
+            OTTER_RETURN_IF_ERROR(
+                holt->set_isolation_level(*config.isolation_level));
+        }
+
+        return std::unique_ptr<Holt>(std::move(holt));
     }
 };
 

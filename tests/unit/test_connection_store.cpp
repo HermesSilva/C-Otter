@@ -569,3 +569,77 @@ OTTER_TEST(store_round_trips_driver_properties) {
     OTTER_CHECK_EQ(props.at("search_path"), std::string{"vendas"});
     OTTER_CHECK_EQ(props.at("TimeZone"), std::string{"America/Sao_Paulo"});
 }
+
+// --- Nivel de isolamento ----------------------------------------------------
+//
+// Por que existe: -1 significa "nao mexer", e confundi-lo com 0
+// (read_uncommitted) trocaria o isolamento de TODA conexao que nunca
+// escolheu um -- silenciosamente, e para o nivel mais frouxo que existe.
+
+OTTER_TEST(profile_isolation_default_does_not_touch_the_server) {
+    ConnectionProfile profile;
+    profile.host = "localhost";
+    // -1 e' o padrao; nada foi escolhido.
+
+    OTTER_CHECK(!profile.to_conn_config().isolation_level.has_value());
+}
+
+OTTER_TEST(profile_carries_the_chosen_isolation_level) {
+    ConnectionProfile profile;
+    profile.host = "localhost";
+    profile.isolation_level = 3;   // serializable
+
+    const auto level = profile.to_conn_config().isolation_level;
+    OTTER_CHECK(level.has_value());
+    OTTER_CHECK(*level == IsolationLevel::serializable);
+}
+
+OTTER_TEST(profile_ignores_an_out_of_range_isolation_level) {
+    // Perfil corrompido ou de uma versao futura: cai no padrao do servidor,
+    // em vez de converter para um nivel arbitrario.
+    ConnectionProfile profile;
+    profile.host = "localhost";
+
+    profile.isolation_level = 99;
+    OTTER_CHECK(!profile.to_conn_config().isolation_level.has_value());
+
+    profile.isolation_level = -7;
+    OTTER_CHECK(!profile.to_conn_config().isolation_level.has_value());
+}
+
+OTTER_TEST(store_round_trips_the_isolation_level) {
+    const TempDir dir("isolation");
+
+    StoredProfile stored;
+    stored.id        = "postgres-iso";
+    stored.provider  = "postgresql";
+    stored.driver    = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host = "localhost";
+    stored.profile.isolation_level = 2;   // repeatable read
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->front().profile.isolation_level, 2);
+}
+
+OTTER_TEST(store_reads_no_isolation_as_server_default) {
+    // Perfil importado do DBeaver nao tem "otter-isolation". Precisa
+    // carregar como -1, nao como 0 -- que seria read_uncommitted.
+    const TempDir dir("isolation-absent");
+
+    StoredProfile stored;
+    stored.id        = "postgres-plain-iso";
+    stored.provider  = "postgresql";
+    stored.driver    = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host = "localhost";
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->front().profile.isolation_level, -1);
+}

@@ -745,8 +745,19 @@ const char* const kPtBr[] = {
         "Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.",
     "Sets search_path when connecting.",
         "Define o search_path ao conectar.",
-    "Isolation level is not available in this version.",
-        "O nível de isolamento não existe nesta versão.",
+    "Isolation",                  "Isolamento",
+    "Level",                      "Nível",
+    "(server default)",           "(padrão do servidor)",
+    "Read uncommitted",           "Read uncommitted",
+    "Read committed",             "Read committed",
+    "Repeatable read",            "Repeatable read",
+    "Serializable",               "Serializable",
+    "Applied when connecting. A level the server does not support fails the "
+    "connection, naming it -- better than a session that silently ignored "
+    "the setting.",
+        "Aplicado ao conectar. Um nível que o servidor não aceita faz a "
+        "conexão falhar, nomeando-o — melhor que uma sessão que ignorou o "
+        "pedido em silêncio.",
 
     // --- Estado da transacao na barra de status ---
     //

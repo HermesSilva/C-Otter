@@ -103,7 +103,7 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | → **Inicialização** | Schema padrão, consultas de bootstrap | ✅ (UI) |
 | | Timeout, keep-alive, fechar ociosas | ✅ |
 | → **Transações** | Auto-commit, somente leitura | ✅ |
-| | Nível de isolamento | ⬜ **avisado na tela** (exige conexão viva) |
+| | **Nível de isolamento** | ✅ Os quatro do padrão SQL, aplicados ao conectar. Verificado: SHOW transaction_isolation devolveu serializable |
 | → **Parâmetros internos** | Tabela de propriedades editável | ✅ |
 | | Adicionar / remover propriedade | ✅ |
 | | **Propriedades aplicadas na conexão** | ✅ PostgreSQL: parâmetros de runtime da StartupMessage. MySQL: SET @@nome. Verificado contra o servidor com pg_stat_activity |
@@ -471,7 +471,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 18 | 0 | 0 | 0 | 18 |
-| Assistente de conexão | 46 | 1 | 7 | 1 | 55 |
+| Assistente de conexão | 47 | 1 | 6 | 1 | 55 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 58 | 0 | 3 | 0 | 61 |
@@ -479,9 +479,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **270** | **1** | **13** | **1** | **285** |
+| **Total** | **271** | **1** | **12** | **1** | **285** |
 
-**270 de 285 elementos existentes funcionam.**
+**271 de 285 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -553,7 +553,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (433, todos verdes):
+Testes automatizados (438, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

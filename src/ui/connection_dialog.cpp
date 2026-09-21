@@ -1032,12 +1032,30 @@ void ConnectionDialog::draw_page_transactions() {
     ImGui::Checkbox(TR("Read-only connection"), &profile_.read_only);
     help_marker(TR("Blocks INSERT, UPDATE, DELETE and DDL on the client."));
 
-    // O DBeaver tem aqui o nivel de isolamento, lido da conexao viva. O
-    // C-Otter ainda nao o consulta, entao a opcao nao existe em vez de
-    // aparecer com um valor inventado (diretriz 6).
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().text_dim), "%s",
-                       TR("Isolation level is not available in this version."));
+    ImGui::TextColored(col4(colors().data), TR("Isolation"));
+    ImGui::Separator();
+
+    // O DBeaver so' lista os niveis com a conexao VIVA, porque le' do
+    // servidor quais sao suportados. Aqui os quatro do padrao SQL aparecem
+    // sempre, com "(padrão do servidor)" na frente -- uma lista vazia antes
+    // de conectar seria pior, e um nivel recusado falha ao conectar
+    // nomeando-se.
+    const char* kLevels[] = {
+        TR("(server default)"),
+        TR("Read uncommitted"), TR("Read committed"),
+        TR("Repeatable read"),  TR("Serializable"),
+    };
+
+    // -1 vira indice 0; os demais deslocam de 1.
+    int level = profile_.isolation_level + 1;
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::Combo(TR("Level"), &level, kLevels, IM_ARRAYSIZE(kLevels))) {
+        profile_.isolation_level = level - 1;
+    }
+    help_marker(TR("Applied when connecting. A level the server does not "
+                   "support fails the connection, naming it -- better than "
+                   "a session that silently ignored the setting."));
 }
 
 void ConnectionDialog::draw_page_initialization() {

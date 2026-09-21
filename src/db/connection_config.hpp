@@ -193,6 +193,19 @@ struct ConnectionProfile {
     std::string default_schema;         // search_path inicial
     std::string bootstrap_queries;      // executadas ao conectar
     bool        read_only = false;
+
+    // Nivel de isolamento a aplicar AO CONECTAR.
+    //
+    // -1 = nao mexer, usar o padrao do servidor. Os demais valores sao os de
+    // db::IsolationLevel (0..3), gravados como numero para o
+    // connection_config nao depender de holt.hpp.
+    //
+    // A pagina "Transações" do dialogo o edita SEM conexao: o DBeaver so'
+    // lista os niveis com a conexao viva, porque le' os suportados do
+    // servidor. Aqui os quatro do padrao SQL sao oferecidos sempre, e um que
+    // o servidor nao aceite falha ao conectar, nomeando-o -- o que e' melhor
+    // que uma lista vazia antes de conectar.
+    int         isolation_level = -1;
     std::chrono::seconds connect_timeout{10};
     bool        keep_alive = false;
     std::chrono::seconds keep_alive_interval{60};

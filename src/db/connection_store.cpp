@@ -178,6 +178,8 @@ StoredProfile profile_from_json(const std::string& id,
     profile.description = std::string(node["description"].as_string());
     profile.folder      = std::string(node["folder"].as_string());
     profile.save_password = node["save-password"].as_bool();
+    profile.isolation_level =
+        static_cast<int>(node["otter-isolation"].as_number(-1));
 
     // Preferencias do editor. Ausentes -- num perfil importado do DBeaver,
     // ou gravado antes desta versao -- ficam no padrao de EditorOptions.
@@ -385,6 +387,14 @@ json::Value profile_to_json(const StoredProfile& stored) {
     }
     if (!profile.folder.empty()) node["folder"] = json::Value(profile.folder);
     node["save-password"] = json::Value(profile.save_password);
+
+    // Nivel de isolamento: so' quando o usuario escolheu um (-1 = padrao do
+    // servidor). Prefixo "otter-" pelo mesmo motivo das preferencias do
+    // editor -- o DBeaver ignora o que nao conhece.
+    if (profile.isolation_level >= 0) {
+        node["otter-isolation"] =
+            json::Value(static_cast<double>(profile.isolation_level));
+    }
 
     // Preferencias do editor, por conexao. Num objeto proprio com prefixo
     // "otter-": o DBeaver ignora chaves que nao conhece, e um perfil que

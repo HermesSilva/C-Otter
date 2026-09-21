@@ -433,6 +433,13 @@ public:
         OTTER_RETURN_IF_ERROR(
             holt->apply_driver_properties(config.driver_properties));
 
+        // Nivel de isolamento do perfil, pela mesma razao: falhar nomeando o
+        // nivel e' melhor que uma sessao que ignorou o pedido.
+        if (config.isolation_level.has_value()) {
+            OTTER_RETURN_IF_ERROR(
+                holt->set_isolation_level(*config.isolation_level));
+        }
+
         return std::unique_ptr<Holt>(std::move(holt));
     }
 };

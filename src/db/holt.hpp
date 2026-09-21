@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -26,6 +27,16 @@ enum class SslMode : std::uint8_t {
 
 [[nodiscard]] const char* to_string(SslMode mode) noexcept;
 [[nodiscard]] SslMode ssl_mode_from_string(std::string_view text) noexcept;
+
+// Nivel de isolamento, na ordem do padrao SQL.
+enum class IsolationLevel : std::uint8_t {
+    read_uncommitted,
+    read_committed,
+    repeatable_read,
+    serializable,
+};
+
+[[nodiscard]] std::string_view to_string(IsolationLevel level) noexcept;
 
 struct ConnConfig {
     // Qual driver falar: "postgresql", "mysql". Viaja junto com o host e a
@@ -46,6 +57,9 @@ struct ConnConfig {
     // ignorava todas. Um campo que parece funcionar e nao funciona e' o que
     // a diretriz 6 proibe.
     std::map<std::string, std::string> driver_properties;
+
+    // Nivel de isolamento a aplicar ao conectar; vazio = padrao do servidor.
+    std::optional<IsolationLevel> isolation_level;
     std::chrono::seconds connect_timeout{10};
 
     // Modo TLS. O enum vem de `connection_config.hpp`, que ja' o define para
@@ -91,16 +105,6 @@ enum class TxnState : std::uint8_t {
 };
 
 [[nodiscard]] std::string_view to_string(TxnState state) noexcept;
-
-// Nivel de isolamento, na ordem do padrao SQL.
-enum class IsolationLevel : std::uint8_t {
-    read_uncommitted,
-    read_committed,
-    repeatable_read,
-    serializable,
-};
-
-[[nodiscard]] std::string_view to_string(IsolationLevel level) noexcept;
 
 // Registro de uma query executada -- alimenta o inspetor de queries (ADR 0008).
 // Toda query e' registrada, inclusive as internas de metadados: ferramenta que

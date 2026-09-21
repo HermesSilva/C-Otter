@@ -49,6 +49,14 @@ ConnConfig ConnectionProfile::to_conn_config() const {
     // paravam ali: o ConnConfig tinha um campo `options` que ninguem
     // preenchia nem lia.
     config.driver_properties = driver_properties;
+
+    // -1 = nao mexer. Os demais sao os valores de IsolationLevel; fora da
+    // faixa e' tratado como "nao mexer", em vez de converter para um nivel
+    // arbitrario -- um perfil corrompido nao deve trocar o isolamento.
+    if (isolation_level >= 0 && isolation_level <= 3) {
+        config.isolation_level =
+            static_cast<IsolationLevel>(isolation_level);
+    }
     return config;
 }
 
