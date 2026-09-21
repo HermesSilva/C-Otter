@@ -94,6 +94,16 @@ public:
 
     [[nodiscard]] std::size_t bytes_used() const noexcept;
 
+    // Esconde as linhas alem de `count`, sem liberar memoria.
+    //
+    // A paginacao pede uma linha a mais que a pagina para saber se ha' proxima
+    // (ADR 0011). Essa linha sobra nao pode aparecer na grade: o usuario veria
+    // 201 linhas depois de pedir 200. Aqui so' o contador muda -- os dados
+    // ficam onde estao, e nenhuma copia acontece.
+    void hide_rows_beyond(std::size_t count) noexcept {
+        if (count < row_count_) row_count_ = count;
+    }
+
 private:
     friend class ResultSetBuilder;
 

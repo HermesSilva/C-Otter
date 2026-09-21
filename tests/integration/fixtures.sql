@@ -109,6 +109,24 @@ BEGIN
 END;
 $$;
 
+-- --- Tabela de volume ------------------------------------------------------
+--
+-- 2 milhoes de linhas. Existe para provar que a paginacao (ADR 0011) destrava
+-- a UI: antes dela, um SELECT sem LIMIT aqui congelava a janela ate' o
+-- servidor terminar de enviar os 209 MB.
+--
+-- Leva ~10 s para criar. Vale o custo: sem uma tabela grande de verdade, a
+-- paginacao so' poderia ser verificada em tabelas onde ela nao faz diferenca.
+
+CREATE TABLE evento_volume AS
+SELECT g AS evento_id,
+       'evento numero ' || g AS descricao,
+       (g % 7) AS categoria,
+       now() - (g || ' seconds')::interval AS ocorrido_em,
+       md5(g::text) AS hash
+  FROM generate_series(1, 2000000) g;
+COMMENT ON TABLE evento_volume IS 'Volume para testar paginacao -- 2M linhas';
+
 -- --- Dados -----------------------------------------------------------------
 
 INSERT INTO cliente (nome, email, credito) VALUES

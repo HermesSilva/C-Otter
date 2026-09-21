@@ -56,6 +56,38 @@ public:
     // SQL a executar: a selecao, se houver; senao o texto inteiro.
     [[nodiscard]] std::string sql_to_execute() const;
 
+    // --- Paginacao (ADR 0011) ------------------------------------------------
+    //
+    // Estado da navegacao entre paginas do resultado. Fica no documento, nao
+    // na sessao: cada aba tem sua consulta e sua posicao.
+
+    // Consulta cuja pagina esta' sendo exibida. Guardada como escrita pelo
+    // usuario -- e' dela que cada pagina e' derivada.
+    [[nodiscard]] const std::string& paged_sql() const noexcept {
+        return paged_sql_;
+    }
+    void set_paged_sql(std::string sql) { paged_sql_ = std::move(sql); }
+
+    [[nodiscard]] std::size_t page() const noexcept { return page_; }
+    void set_page(std::size_t page) noexcept { page_ = page; }
+
+    // Verdadeiro quando a consulta foi reescrita com LIMIT/OFFSET. Quando e'
+    // falso, o resultado e' completo e os botoes de pagina somem.
+    [[nodiscard]] bool paged() const noexcept { return paged_; }
+    void set_paged(bool paged) noexcept { paged_ = paged; }
+
+    // Veio a linha extra pedida alem do tamanho da pagina? Se sim, ha' mais
+    // resultado adiante. Nao e' um total: um COUNT(*) custaria outra varredura.
+    [[nodiscard]] bool has_more() const noexcept { return has_more_; }
+    void set_has_more(bool more) noexcept { has_more_ = more; }
+
+    void reset_paging() {
+        paged_sql_.clear();
+        page_     = 0;
+        paged_    = false;
+        has_more_ = false;
+    }
+
 private:
     std::size_t                 id_;
     std::unique_ptr<TextEditor> editor_;
@@ -63,9 +95,13 @@ private:
     std::string                 file_path_;
     std::string                 status_;
     std::optional<db::ResultSet> result_;
+    std::string                 paged_sql_;
+    std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;
     bool                        executing_ = false;
+    bool                        paged_ = false;
+    bool                        has_more_ = false;
 };
 
 } // namespace otter::ui

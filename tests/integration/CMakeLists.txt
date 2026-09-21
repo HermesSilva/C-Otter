@@ -11,6 +11,7 @@ target_link_libraries(otter_tests_live PRIVATE
     otter_flags
     otter::otter_base
     otter::otter_db
+    otter::otter_sql
 )
 set_target_properties(otter_tests_live PROPERTIES FOLDER "tests")
 

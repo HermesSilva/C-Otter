@@ -37,7 +37,10 @@ enum class Icon : std::uint8_t {
     save,
     open,
     copy,
+    chevron_left,
     chevron_right,
+    first_page,         // chevron com barra
+    last_page,
     chevron_down,
     warning,
     error,

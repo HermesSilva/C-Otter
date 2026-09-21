@@ -19,6 +19,7 @@
 // Sem argumentos, tenta as variaveis PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD.
 #include "db/catalog.hpp"
 #include "db/drivers/postgres.hpp"
+#include "sql/paging.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -91,7 +92,7 @@ int main(int argc, char** argv) {
         else if (r.kind == otter::db::ObjKind::view)              ++views;
         else if (r.kind == otter::db::ObjKind::materialized_view) ++mviews;
     }
-    check(tables == 2, "2 tabelas");
+    check(tables == 3, "3 tabelas (cliente, pedido, evento_volume)");
     check(views  == 2, "2 views");
     check(mviews == 1, "1 materialized view");
 
@@ -178,6 +179,53 @@ int main(int argc, char** argv) {
           "load_references");
     check(catalog.load_triggers(kSchema, "pedido").has_value(),  "load_triggers");
     check(catalog.load_sequences(kSchema).has_value(),           "load_sequences");
+
+    // --- Paginacao (ADR 0011) ------------------------------------------------
+    //
+    // Contra a tabela de 2 milhoes de linhas. Os testes unitarios provam que a
+    // reescrita produz o texto certo; so' aqui se prova que o servidor aceita
+    // esse texto e devolve a pagina pedida.
+    std::printf("\npaginacao sobre evento_volume\n");
+    {
+        const std::string base =
+            "SELECT evento_id FROM otter_test.evento_volume ORDER BY evento_id";
+
+        const otter::sql::PagedQuery first = otter::sql::make_paged_query(
+            base, otter::sql::postgres_dialect(), 0);
+        check(first.rewritten, "consulta reescrita");
+
+        auto page0 = (*holt)->query(first.sql);
+        check(page0.has_value(), "servidor aceita a consulta reescrita");
+        if (page0) {
+            // 201, nao 200: a linha-sonda diz que ha' proxima pagina.
+            check(page0->row_count() == otter::sql::kDefaultPageSize + 1,
+                  "primeira pagina traz a linha-sonda");
+            check(!page0->text(0, 0).empty() && page0->text(0, 0) == "1",
+                  "primeira pagina comeca na linha 1");
+        }
+
+        const otter::sql::PagedQuery third = otter::sql::make_paged_query(
+            base, otter::sql::postgres_dialect(), 2);
+        auto page2 = (*holt)->query(third.sql);
+        check(page2.has_value(), "terceira pagina aceita");
+        if (page2) {
+            // OFFSET 400 -> primeira linha e' a de id 401.
+            check(page2->text(0, 0) == "401", "OFFSET posiciona a pagina certa");
+        }
+
+        // A ultima pagina nao tem linha-sonda: e' assim que a UI sabe que
+        // chegou ao fim e desabilita "proxima".
+        const std::size_t last_page =
+            (2000000 / otter::sql::kDefaultPageSize) - 1;
+        const otter::sql::PagedQuery last = otter::sql::make_paged_query(
+            base, otter::sql::postgres_dialect(), last_page);
+        auto tail = (*holt)->query(last.sql);
+        check(tail.has_value(), "ultima pagina aceita");
+        if (tail) {
+            check(tail->row_count() == otter::sql::kDefaultPageSize,
+                  "ultima pagina sem linha-sonda");
+        }
+    }
 
     std::printf("\n%d verificacoes, %d falha(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;

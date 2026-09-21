@@ -1,6 +1,7 @@
 #include "ui/main_shell.hpp"
 
 #include "base/i18n.hpp"
+#include "sql/paging.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 
@@ -396,13 +397,32 @@ void MainShell::execute_current_sql() {
     std::string sql = document->sql_to_execute();
     if (sql.empty()) return;
 
-    // Guarda QUAL documento pediu: o resultado deve voltar para ele, mesmo que
-    // o usuario troque de aba enquanto a query roda.
-    executing_document_id_ = document->id();
-    document->set_executing(true);
-    document->set_status({});
+    // Nova consulta: volta para a primeira pagina.
+    document->set_paged_sql(sql);
+    document->set_page(0);
+    execute_page(*document, 0);
+}
 
-    session_.execute_async(std::move(sql));
+void MainShell::execute_page(SqlDocument& document, std::size_t page) {
+    if (session_.state() != SessionState::connected || session_.busy()) return;
+    if (document.paged_sql().empty()) return;
+
+    // A reescrita com LIMIT/OFFSET impede que um SELECT sem limite trave a UI
+    // ate' o servidor terminar de enviar tudo (ADR 0011). Quando nao e' seguro
+    // reescrever, executa o original: rodar algo diferente do que o usuario
+    // escreveu seria pior que a espera.
+    const sql::PagedQuery paged = sql::make_paged_query(
+        document.paged_sql(), sql::postgres_dialect(), page);
+
+    document.set_page(page);
+    document.set_paged(paged.rewritten);
+    document.set_has_more(false);
+
+    executing_document_id_ = document.id();
+    document.set_executing(true);
+    document.set_status({});
+
+    session_.execute_async(paged.sql);
 }
 
 void MainShell::draw() {
@@ -413,9 +433,28 @@ void MainShell::draw() {
             if (document->id() != executing_document_id_) continue;
 
             if (auto fresh = session_.take_result()) {
+                // A pagina pediu uma linha a mais do que mostra. Se ela veio,
+                // ha' mais resultado adiante -- e ela nao pode aparecer na
+                // grade, senao o usuario veria 201 linhas ao pedir 200.
+                if (document->paged()) {
+                    const bool more = fresh->row_count() > sql::kDefaultPageSize;
+                    document->set_has_more(more);
+                    if (more) fresh->hide_rows_beyond(sql::kDefaultPageSize);
+                }
                 document->set_result(std::move(*fresh));
             }
-            document->set_status(session_.status_message());
+
+            // A mensagem do worker conta as linhas que CHEGARAM, incluindo a
+            // linha-sonda da paginacao. Refaz aqui, onde se sabe que ela
+            // existe: a barra de status dizer "201 linhas" depois de mostrar
+            // "linhas 1-200" e' contradicao na mesma tela.
+            if (document->paged() && document->result().has_value()) {
+                const db::ResultSet& rs = *document->result();
+                document->set_status(TRF("%zu row(s), %zu column(s)",
+                                         rs.row_count(), rs.column_count()));
+            } else {
+                document->set_status(session_.status_message());
+            }
             document->set_executing(false);
             break;
         }
@@ -1556,6 +1595,75 @@ void MainShell::draw_editor_panel() {
     ImGui::End();
 }
 
+void MainShell::draw_grid_toolbar(SqlDocument& document,
+                                  const db::ResultSet& rs) {
+    const Palette& p = colors();
+    const bool can_run = session_.state() == SessionState::connected &&
+                         !session_.busy();
+
+    if (document.paged()) {
+        // Intervalo real de linhas, base 1 -- "linhas 201-400" diz onde o
+        // usuario esta'; "200 linhas" sozinho nao diria.
+        const std::size_t first = document.page() * sql::kDefaultPageSize + 1;
+        const std::size_t last  = first + rs.row_count() - 1;
+
+        if (icon_button("##firstpage", Icon::first_page, TR("First page"),
+                        can_run && document.page() > 0)) {
+            execute_page(document, 0);
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (icon_button("##prevpage", Icon::chevron_left, TR("Previous page"),
+                        can_run && document.page() > 0)) {
+            execute_page(document, document.page() - 1);
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (icon_button("##nextpage", Icon::chevron_right, TR("Next page"),
+                        can_run && document.has_more())) {
+            execute_page(document, document.page() + 1);
+        }
+
+        ImGui::SameLine();
+        if (rs.row_count() == 0) {
+            ImGui::TextColored(col4(p.text_dim), TR("no more rows"));
+        } else {
+            ImGui::TextColored(col4(p.text), TR("rows %zu-%zu"), first, last);
+        }
+
+        // "+" em vez de um total: saber o total exigiria um COUNT(*), que
+        // varre a tabela outra vez (ADR 0011). Um numero inventado seria pior
+        // que a ausencia dele.
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "%s  |  %zu %s  |  %zu bytes",
+                           document.has_more() ? "+" : "",
+                           rs.column_count(), TR("column(s)"),
+                           rs.bytes_used());
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                TR("The query was rewritten with LIMIT %zu.\n"
+                   "See the executed SQL in the Queries tab."),
+                sql::kDefaultPageSize + 1);
+        }
+        return;
+    }
+
+    // Sem paginacao: o resultado e' completo, e a contagem e' exata.
+    ImGui::TextColored(col4(p.text_dim),
+                       TR("%zu row(s) x %zu column(s)  |  %zu bytes"),
+                       rs.row_count(), rs.column_count(), rs.bytes_used());
+
+    // Quando a consulta nao pode ser paginada, o resultado veio inteiro. Dizer
+    // por que evita a pergunta "cade' os botoes de pagina?".
+    if (!document.paged_sql().empty()) {
+        const sql::PagedQuery probe = sql::make_paged_query(
+            document.paged_sql(), sql::postgres_dialect(), 0);
+        if (probe.refusal == sql::PagingRefusal::already_limited) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), TR("  |  your LIMIT"));
+        }
+    }
+}
+
 void MainShell::draw_grid_panel() {
     if (ImGui::Begin(TRW("Result", "###ResultPanel"))) {
         // O resultado pertence ao documento: trocar de aba troca a grade.
@@ -1574,10 +1682,9 @@ void MainShell::draw_grid_panel() {
         }
 
         const db::ResultSet& rs = *document->result();
+        const Palette& p = colors();
 
-        ImGui::TextColored(col4(colors().text_dim),
-                           TR("%zu row(s) x %zu column(s)  |  %zu bytes"),
-                           rs.row_count(), rs.column_count(), rs.bytes_used());
+        draw_grid_toolbar(*document, rs);
         ImGui::Separator();
 
         if (rs.column_count() == 0) {
@@ -1598,8 +1705,26 @@ void MainShell::draw_grid_panel() {
             ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
             ImGuiTableFlags_SizingFixedFit;
 
-        const auto columns = static_cast<int>(
-            std::min(rs.column_count(), std::size_t{64}));   // limite do ImGui
+        // O ImGui nao desenha mais de 64 colunas numa tabela. Truncar em
+        // silencio faria o usuario concluir que a consulta devolveu menos
+        // colunas do que devolveu (diretiva 6).
+        constexpr std::size_t kMaxColumns = 64;
+        const auto columns =
+            static_cast<int>(std::min(rs.column_count(), kMaxColumns));
+
+        if (rs.column_count() > kMaxColumns) {
+            icon_inline(Icon::warning, p.warn);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.warn),
+                               TR("showing the first %zu of %zu columns"),
+                               kMaxColumns, rs.column_count());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    TR("The grid cannot draw more than %zu columns.\n"
+                       "Narrow the SELECT list to see the remaining ones."),
+                    kMaxColumns);
+            }
+        }
 
         if (ImGui::BeginTable("##results", columns, flags)) {
             ImGui::TableSetupScrollFreeze(1, 1);   // cabecalho e 1a coluna fixos
@@ -1811,7 +1936,11 @@ void MainShell::draw_icon_gallery() {
         {Icon::settings, "settings"},     {Icon::plus, "plus"},
         {Icon::close, "close"},           {Icon::pin, "pin"},
         {Icon::save, "save"},             {Icon::open, "open"},
-        {Icon::copy, "copy"},             {Icon::chevron_right, "chevron_right"},
+        {Icon::copy, "copy"},
+        {Icon::chevron_left, "chevron_left"},
+        {Icon::first_page, "first_page"},
+        {Icon::last_page, "last_page"},
+        {Icon::chevron_right, "chevron_right"},
         {Icon::chevron_down, "chevron_down"},
         {Icon::warning, "warning"},       {Icon::error, "error"},
         {Icon::info, "info"},             {Icon::clock, "clock"},

@@ -212,10 +212,36 @@ void draw_copy(const Canvas& c) {
     c.rect(-0.10f, -0.16f, 0.34f, 0.34f, 0.08f);
 }
 
+void draw_chevron_left(const Canvas& c) {
+    c.dl->PathLineTo(c.at( 0.12f, -0.26f));
+    c.dl->PathLineTo(c.at(-0.16f,  0.0f));
+    c.dl->PathLineTo(c.at( 0.12f,  0.26f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
 void draw_chevron_right(const Canvas& c) {
     c.dl->PathLineTo(c.at(-0.12f, -0.26f));
     c.dl->PathLineTo(c.at( 0.16f,  0.0f));
     c.dl->PathLineTo(c.at(-0.12f,  0.26f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+// Chevron encostado numa barra: ir ao extremo, nao um passo. A barra e' o que
+// distingue "primeira pagina" de "pagina anterior" -- dois botoes vizinhos com
+// o mesmo desenho seriam indistinguiveis na pressa.
+void draw_first_page(const Canvas& c) {
+    c.line(-0.26f, -0.26f, -0.26f, 0.26f);
+    c.dl->PathLineTo(c.at( 0.22f, -0.26f));
+    c.dl->PathLineTo(c.at(-0.06f,  0.0f));
+    c.dl->PathLineTo(c.at( 0.22f,  0.26f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_last_page(const Canvas& c) {
+    c.line(0.26f, -0.26f, 0.26f, 0.26f);
+    c.dl->PathLineTo(c.at(-0.22f, -0.26f));
+    c.dl->PathLineTo(c.at( 0.06f,  0.0f));
+    c.dl->PathLineTo(c.at(-0.22f,  0.26f));
     c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
 }
 
@@ -529,7 +555,10 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::save:          draw_save(c);          break;
         case Icon::open:          draw_open(c);          break;
         case Icon::copy:          draw_copy(c);          break;
+        case Icon::chevron_left:  draw_chevron_left(c);  break;
         case Icon::chevron_right: draw_chevron_right(c); break;
+        case Icon::first_page:    draw_first_page(c);    break;
+        case Icon::last_page:     draw_last_page(c);     break;
         case Icon::chevron_down:  draw_chevron_down(c);  break;
         case Icon::warning:       draw_warning(c);       break;
         case Icon::error:         draw_error(c);         break;

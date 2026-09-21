@@ -67,6 +67,9 @@ private:
     void draw_types_folder(const db::SchemaMeta& schema);
     void draw_editor_panel();
     void draw_grid_panel();
+
+    // Linha acima da grade: contagem, navegacao de paginas e avisos.
+    void draw_grid_toolbar(SqlDocument& document, const db::ResultSet& rs);
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();
@@ -76,6 +79,9 @@ private:
     void draw_icon_gallery();
 
     void execute_current_sql();
+
+    // Executa uma pagina da consulta guardada no documento (ADR 0011).
+    void execute_page(SqlDocument& document, std::size_t page);
 
     // --- Documentos (abas) ---------------------------------------------------
     SqlDocument& new_document();

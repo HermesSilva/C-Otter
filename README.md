@@ -44,7 +44,7 @@ Termos do projeto que apareceram no código e nos docs:
 
 Funciona hoje: conexão PostgreSQL via protocolo v3 nativo (SCRAM-SHA-256, sem libpq),
 navegação de schema com carregamento tardio, editor SQL com realce e autocomplete sobre
-metadados reais, grade virtualizada e inspetor de queries. 144 fps, 1,8 MB em Release, sem
+metadados reais, grade virtualizada com paginação e inspetor de queries. 144 fps, 1,8 MB em Release, sem
 dependência de DLL redistribuível.
 
 Funciona também: assistente de conexão com catálogo de drivers e 8 abas, múltiplas abas de
@@ -72,7 +72,7 @@ build\win-release\bin\c-otter.exe
 - [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — lacunas estruturais e ordem de implementação
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
 - [`docs/PLAN.md`](docs/PLAN.md) — roteiro em fases · [`docs/EFFORT.md`](docs/EFFORT.md) — esforço em homem-hora
-- [`docs/adr/`](docs/adr/) — 10 decisões arquiteturais, com as revogadas marcadas
+- [`docs/adr/`](docs/adr/) — 11 decisões arquiteturais, com as revogadas marcadas
 - [`lang/README.md`](lang/README.md) — como acrescentar um idioma
 
 ## Licença

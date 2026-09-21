@@ -50,6 +50,23 @@ const char* const kPtBr[] = {
     "Copy name",                  "Copiar nome",
 
     // --- Arvore de objetos ---
+    "First page",                 "Primeira página",
+    "Previous page",              "Página anterior",
+    "Next page",                  "Próxima página",
+    "rows %zu-%zu",               "linhas %zu-%zu",
+    "no more rows",               "sem mais linhas",
+    "column(s)",                  "coluna(s)",
+    "  |  your LIMIT",            "  |  seu LIMIT",
+    "showing the first %zu of %zu columns",
+    "mostrando as %zu primeiras de %zu colunas",
+    "The grid cannot draw more than %zu columns.\n"
+    "Narrow the SELECT list to see the remaining ones.",
+    "A grade não desenha mais de %zu colunas.\n"
+    "Reduza a lista do SELECT para ver as demais.",
+    "The query was rewritten with LIMIT %zu.\n"
+    "See the executed SQL in the Queries tab.",
+    "A consulta foi reescrita com LIMIT %zu.\n"
+    "Veja o SQL executado na aba Queries.",
     "Tables",                     "Tabelas",
     "Data types",                 "Tipos de dados",
     "Views",                      "Views",

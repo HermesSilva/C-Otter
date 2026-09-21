@@ -279,9 +279,13 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Formatação condicional | ⬜ | |
 | Editores de valor (JSON, hex, data) | ⬜ | |
 | Exportar (CSV, JSON, SQL) | ⬜ | |
-| Paginação / carregar mais | ⬜ | Carrega tudo de uma vez |
+| **Paginação** | ✅ | 200 linhas por página, com primeira/anterior/próxima (ADR 0011) |
+| Intervalo de linhas exibido | ✅ | `linhas 401-600 +` — o `+` indica que há mais |
+| SQL paginado auditável | ✅ | O inspetor mostra o `LIMIT`/`OFFSET` efetivamente executado |
+| `LIMIT` do usuário respeitado | ✅ | Consulta com `LIMIT` próprio não é reescrita |
+| Total exato de linhas | ⬜ | Exigiria `COUNT(*)`; a grade mostra `+` em vez de número falso |
 | Visão de registro único | ⬜ | |
-| Limite de 64 colunas | ⚠️ | Restrição do ImGui; resultados maiores são truncados |
+| Limite de 64 colunas | ⚠️ | Restrição do ImGui — **avisado na tela**, com o total real |
 
 ## 8. Painel Queries (inspetor)
 
@@ -331,10 +335,18 @@ visualizador, não uma ferramenta de trabalho.
 
 | # | Onde | Problema |
 |---|------|----------|
-| 1 | Grade | Resultados com mais de 64 colunas são truncados **sem aviso** (limite do ImGui) |
-| 2 | Conexão | Não persiste — redigitar host/banco/usuário a cada execução |
-| 3 | Grade | Carrega o resultado inteiro de uma vez; um `SELECT` sem `LIMIT` numa tabela grande trava a UI até terminar |
-| 4 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
+| 1 | Conexão | Não persiste — redigitar host/banco/usuário a cada execução |
+| 2 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
+| 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
+
+### Corrigidos
+
+| Onde | O que era | Como foi resolvido |
+|------|-----------|--------------------|
+| Grade | `SELECT` sem `LIMIT` numa tabela grande travava a UI até o servidor enviar tudo | Paginação de 200 linhas (ADR 0011). `SELECT *` em 2 M de linhas volta em <1 ms |
+| Grade | Mais de 64 colunas eram truncadas **em silêncio** | Aviso na barra dizendo quantas colunas ficaram de fora |
+| Navigator | Tooltips respondiam só sobre o último trecho de texto da linha | Cada linha dentro de `BeginGroup`/`EndGroup` |
+| Catálogo | `load_routine_definition()` montava uma assinatura que o servidor recusava | Localiza pelo OID; coberto por `otter_tests_live` |
 
 ## Pronto no núcleo, ausente na UI
 
@@ -443,7 +455,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (113, todos verdes):
+Testes automatizados (125, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe
@@ -457,9 +469,9 @@ nenhum teste unitário pega isso. Foi o que aconteceu com
 assinatura que o PostgreSQL recusava com
 `ERRO: o nome do tipo de dados "p_cliente integer" não é válido`.
 
-`otter_tests_live` executa as consultas de catálogo de verdade — 35
-verificações sobre relações, corpos de view e de função, tipos e filhos de
-tabela.
+`otter_tests_live` executa as consultas de verdade — 43 verificações sobre
+relações, corpos de view e de função, tipos, filhos de tabela e paginação
+contra uma tabela de 2 milhões de linhas.
 
 ```powershell
 psql -h localhost -U postgres -d ERP_TID -f tests/integration/fixtures.sql
