@@ -481,6 +481,55 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
         }
     }
 
+    // Inferencia de JOIN pelas chaves estrangeiras.
+    //
+    // Com duas tabelas na query ligadas por FK, sugere a condicao INTEIRA
+    // ("pedido.cliente_id = cliente.id") em primeiro lugar, em vez de exigir
+    // que o usuario lembre qual coluna referencia qual.
+    //
+    // As FKs ja' estavam carregadas -- o Navigator as usa para desenhar o no'
+    // "Chaves estrangeiras" --, mas nada as lia aqui.
+    //
+    // So' no contexto de coluna, que e' onde o ON cai: sugerir uma igualdade
+    // depois de SELECT ou FROM seria ruido.
+    if (want_columns && qualified_table.empty() && scope.tables.size() >= 2) {
+        // O lado esquerdo usa o ALIAS quando ha' um: quem escreveu
+        // "FROM pedido p" espera "p.cliente_id", e o nome cheio nao compila
+        // em alguns dialetos depois de declarado o alias.
+        auto label_for = [&scope](std::string_view table) {
+            for (const sql::TableRef& ref : scope.tables) {
+                if (iequals(ref.name, table)) {
+                    return ref.alias.empty() ? ref.name : ref.alias;
+                }
+            }
+            return std::string(table);
+        };
+
+        for (const db::ForeignKeyMeta& fk : session().foreign_keys()) {
+            // As DUAS pontas precisam estar na query: sugerir um JOIN com
+            // uma tabela que nao esta' no FROM produziria SQL invalido.
+            if (!in_scope(fk.source_table) || !in_scope(fk.target_table)) {
+                continue;
+            }
+
+            const std::string condition =
+                label_for(fk.source_table) + "." + fk.source_column + " = " +
+                label_for(fk.target_table) + "." + fk.target_column;
+
+            // Filtra pelo termo digitado como qualquer outro candidato: um
+            // push_back direto faria a sugestao ficar na lista mesmo depois
+            // de o usuario digitar algo que nao casa com ela.
+            if (!matches(condition)) continue;
+
+            // Rank -1: acima de tudo, inclusive das colunas de tabela em
+            // escopo (rank 0). Quando ha' uma FK ligando as duas tabelas, e'
+            // quase sempre o que se quer escrever.
+            candidates.push_back({condition + pad_to(condition, 46) +
+                                      std::string(TR("foreign key")),
+                                  -1});
+        }
+    }
+
     // Camada 3 -- metadados reais do servidor.
     for (const db::SchemaMeta& schema : session().schemas()) {
         for (const db::TableMeta& table : schema.tables) {
@@ -504,8 +553,10 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
             }
 
             if (want_tables && qualified_table.empty()) {
+                // Passa por TR(): era o literal "tabela", que aparecia em
+                // portugues com a interface em ingles (diretriz 8).
                 const char* label =
-                    table.kind == db::ObjKind::view ? "view" : "tabela";
+                    table.kind == db::ObjKind::view ? TR("view") : TR("table");
                 add(table.name + pad_to(table.name, 30) + label,
                     referenced ? 1 : 3);
             }
@@ -1186,6 +1237,30 @@ void MainShell::draw() {
         session().rollback_async();
     }
 
+    // Paginacao (resultset.fetch.page). A acao ja' existia nos botoes da
+    // barra da grade; faltava a tecla.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_N)) {
+        if (SqlDocument* document = active_document();
+            document != nullptr && document->paged() && document->has_more()) {
+            execute_page(*document, document->page() + 1);
+        }
+    }
+
+    // Exportar o resultado. Nao ha' tecla no DBeaver -- a exportacao dele e'
+    // um assistente chamado pelo menu --, mas a acao existe aqui e ficava
+    // so' num botao de 24 px.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_X)) {
+        if (SqlDocument* document = active_document();
+            document != nullptr && document->result().has_value()) {
+            show_export_ = true;
+        }
+    }
+
+    // Alternar auto-commit (ConnectionCommands.CMD_TOGGLE_AUTOCOMMIT).
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_A)) {
+        session().set_auto_commit_async(!session().auto_commit());
+    }
+
     draw_menu_bar();
     draw_toolbar();
     draw_dockspace();
@@ -1377,7 +1452,7 @@ void MainShell::draw_menu_bar() {
         const bool in_txn = session().txn_state() != db::TxnState::idle;
 
         bool toggle = auto_commit;
-        if (ImGui::MenuItem(TR("Auto-commit"), nullptr, &toggle, can_run)) {
+        if (ImGui::MenuItem(TR("Auto-commit"), "Ctrl+Shift+A", &toggle, can_run)) {
             session().set_auto_commit_async(toggle);
         }
         if (ImGui::MenuItem(TR("Commit"), "Ctrl+Shift+C", false,
@@ -3442,36 +3517,7 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                                  "be refused"));
         }
 
-        if (duplicated) {
-            const std::size_t index = document.edits().add_row();
-
-            const auto& keys = document.edit_target().key_columns;
-
-            for (std::size_t c = 0; c < rs.column_count(); ++c) {
-                // A chave fica vazia. A fonte é `key_columns` do alvo de
-                // edição -- índices no ResultSet --, e não o `primary_key` da
-                // coluna: o resultado pode vir de um SELECT que não trouxe
-                // essa informação.
-                if (std::find(keys.begin(), keys.end(), c) != keys.end()) {
-                    continue;
-                }
-
-                // O valor copiado é o do BUFFER quando há edição pendente:
-                // duplicar deve copiar o que está na tela, não o que está no
-                // banco.
-                const db::CellEdit* pending = document.edits().find(row, c);
-
-                if (pending != nullptr) {
-                    if (pending->is_null) document.edits().set_new_null(index, c);
-                    else document.edits().set_new_value(index, c, pending->value);
-                } else if (rs.is_null(row, c)) {
-                    document.edits().set_new_null(index, c);
-                } else {
-                    document.edits().set_new_value(index, c,
-                                                   std::string(rs.text(row, c)));
-                }
-            }
-        }
+        if (duplicated) duplicate_row(document, rs, row);
 
         // Copiar da linha de cima / de baixo (Ctrl+D e Ctrl+Alt+D no DBeaver).
         //
@@ -5171,6 +5217,39 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
 // marcaria uma linha para exclusao enquanto o usuario digita no editor SQL --
 // e' a mesma razao pela qual o DBeaver prende estes atalhos ao contexto
 // `resultset.focused`.
+// Linha nova com os valores de `row`, exceto a chave primaria.
+//
+// Extraida do menu de contexto para a tecla Ctrl+Alt+Insert usar a MESMA
+// regra: duas copias da logica divergiriam, e a que trata a chave errado
+// produz um INSERT recusado pelo servidor depois de o usuario ja' ter
+// preenchido o resto.
+void MainShell::duplicate_row(SqlDocument& document, const db::ResultSet& rs,
+                              std::size_t row) {
+    const std::size_t index = document.edits().add_row();
+    const auto& keys = document.edit_target().key_columns;
+
+    for (std::size_t c = 0; c < rs.column_count(); ++c) {
+        // A chave fica vazia. A fonte e' `key_columns` do alvo de edicao --
+        // indices no ResultSet --, e nao o `primary_key` da coluna: o
+        // resultado pode vir de um SELECT que nao trouxe essa informacao.
+        if (std::find(keys.begin(), keys.end(), c) != keys.end()) continue;
+
+        // O valor copiado e' o do BUFFER quando ha' edicao pendente:
+        // duplicar deve copiar o que esta' na tela, nao o que esta' no banco.
+        const db::CellEdit* pending = document.edits().find(row, c);
+
+        if (pending != nullptr) {
+            if (pending->is_null) document.edits().set_new_null(index, c);
+            else document.edits().set_new_value(index, c, pending->value);
+        } else if (rs.is_null(row, c)) {
+            document.edits().set_new_null(index, c);
+        } else {
+            document.edits().set_new_value(index, c,
+                                           std::string(rs.text(row, c)));
+        }
+    }
+}
+
 void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs) {
     // Anota para o PROXIMO quadro quem fica com as setas. Ver o comentario
     // em draw(): a decisao precisa estar tomada antes do NewFrame.
@@ -5264,6 +5343,70 @@ void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs)
         document.set_record_mode(!document.record_mode());
     }
 
+    // --- Navegacao por linha (resultset.row.first/previous/next/last) -------
+    //
+    // Ctrl+Alt+setas anda de LINHA mantendo a coluna: e' como se percorre um
+    // cadastro comparando o mesmo campo. As setas simples ja' andam livres.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
+                            ImGuiKey_LeftArrow, kRoute)) {
+        selected_row_ = 0;
+        scroll_to_selection_ = true;
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_LeftArrow,
+                        kRoute)) {
+        selected_row_ = selected_row_ > 0 ? selected_row_ - 1 : 0;
+        scroll_to_selection_ = true;
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_RightArrow,
+                        kRoute)) {
+        selected_row_ = std::min(selected_row_ + 1, last_row);
+        scroll_to_selection_ = true;
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
+                            ImGuiKey_RightArrow, kRoute)) {
+        selected_row_ = last_row;
+        scroll_to_selection_ = true;
+    }
+
+    // --- Selecao de linha e coluna (resultset.grid.selectRow/selectColumn) --
+    //
+    // Marcam a linha ou a coluna inteira para copiar. A grade nao tem selecao
+    // em bloco, entao o efeito e' copiar direto para a area de transferencia
+    // -- que e' o que se faz com a selecao em 9 de 10 vezes.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_R, kRoute)) {
+        std::string line;
+        for (std::size_t c = 0; c < rs.column_count(); ++c) {
+            if (c > 0) line += '\t';
+            if (!rs.is_null(row, c)) line += std::string(rs.text(row, c));
+        }
+        ImGui::SetClipboardText(line.c_str());
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_C, kRoute)) {
+        std::string column_text;
+        for (std::size_t r = 0; r < rs.row_count(); ++r) {
+            if (r > 0) column_text += '\n';
+            if (!rs.is_null(r, col)) column_text += std::string(rs.text(r, col));
+        }
+        ImGui::SetClipboardText(column_text.c_str());
+    }
+
+    // Nomes das colunas, separados por tab -- cola direto numa planilha
+    // como linha de cabecalho (resultset.grid.copyColumnNames).
+    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiMod_Shift | ImGuiKey_C, kRoute)) {
+        std::string names;
+        for (std::size_t c = 0; c < rs.column_count(); ++c) {
+            if (c > 0) names += '\t';
+            names += rs.column(c).info().name;
+        }
+        ImGui::SetClipboardText(names.c_str());
+    }
+
+    // Painel de valor (resultset.grid.togglePreview). O DBeaver usa Ctrl+7 e
+    // F7; F7 sozinho basta e nao colide com nada nosso.
+    if (ImGui::Shortcut(ImGuiKey_F7, kRoute)) {
+        open_value_panel(document, rs, row, col);
+    }
+
     if (!document.edit_target().editable()) return;
 
     // Acoes. As teclas sao as do DBeaver (docs/GRID-KEYS.md).
@@ -5280,6 +5423,35 @@ void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs)
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_D, kRoute) &&
         row < last_row) {
         document.edits().copy_cell_from(rs, row + 1, row, col);
+    }
+
+    // Duplicar a linha (resultset.row.copy). Mesma regra do menu -- a chave
+    // fica vazia, senao o INSERT viola a unicidade.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_Insert, kRoute)) {
+        duplicate_row(document, rs, row);
+    }
+
+    // NULL na celula. Digitar nada produz string VAZIA, que e' diferente de
+    // NULL no banco -- por isso a acao existe separada da edicao.
+    //
+    // Ctrl+Shift+N seria o natural, mas ja' e' "nova conexao" global, e
+    // atalhos globais sao lidos com IsKeyChordPressed, que NAO respeita
+    // rota: a grade em foco nao impediria o dialogo de abrir junto.
+    // Ctrl+0 esta' livre e nao colide.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, kRoute)) {
+        document.edits().set_null(row, col);
+    }
+
+    // Gravar e descartar as alteracoes pendentes.
+    //
+    // O DBeaver usa Ctrl+S e Ctrl+R; aqui os dois ja' sao globais (salvar o
+    // script e recarregar). Ctrl+Alt+Shift+Enter e' o `cell.save` dele, e
+    // esta' livre -- vale para o buffer inteiro, que e' o que se quer
+    // gravar.
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
+                            ImGuiKey_Enter, kRoute) &&
+        document.edits().has_changes()) {
+        save_pending_edits(document);
     }
 
     // Esc reverte a celula -- o `cell.reset` do DBeaver.

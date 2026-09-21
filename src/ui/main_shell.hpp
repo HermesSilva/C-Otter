@@ -146,6 +146,11 @@ private:
     // Grava as alteracoes pendentes, em transacao.
     void save_pending_edits(SqlDocument& document);
 
+    // Linha nova com os valores de `row`, menos a chave. Usada pelo menu de
+    // contexto e pela tecla -- uma regra so'.
+    void duplicate_row(SqlDocument& document, const db::ResultSet& rs,
+                       std::size_t row);
+
     // --- DDL de escrita (docs/DDL-WRITE.md) ----------------------------------
     //
     // Ponto UNICO por onde toda alteracao de estrutura passa: mostra o SQL e

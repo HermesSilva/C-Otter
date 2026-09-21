@@ -785,6 +785,9 @@ const char* const kPtBr[] = {
     "%zu of %zu query(s)",        "%zu de %zu query(s)",
     "Open in SQL editor",         "Abrir no editor SQL",
     "Copy error",                 "Copiar erro",
+
+    // --- Autocomplete ---
+    "foreign key",                "chave estrangeira",
 };
 
 } // namespace

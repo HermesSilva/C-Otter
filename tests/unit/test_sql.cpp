@@ -261,6 +261,45 @@ OTTER_TEST(scope_collects_tables_with_aliases) {
     OTTER_CHECK_EQ(scope.tables[1].alias, std::string{"r"});
 }
 
+// A inferencia de JOIN por FK (MainShell::suggest) monta a condicao a partir
+// DESTES dois dados: as tabelas em escopo e o alias de cada uma. Ela sugere
+// "i.grupo_id = g.id" -- com o alias, nao com o nome da tabela.
+//
+// Se o escopo perder o alias, a sugestao sai "SYSxMenuItem.grupo_id = ...",
+// que o PostgreSQL RECUSA depois de o alias ter sido declarado
+// ("invalid reference to FROM-clause entry"). E se perder uma das tabelas, a
+// condicao nem e' oferecida.
+OTTER_TEST(scope_after_on_keeps_both_tables_and_aliases) {
+    // Exatamente a forma que dispara a inferencia: duas tabelas, aliases
+    // curtos, cursor logo apos o ON.
+    constexpr std::string_view sql =
+        "SELECT * FROM menu_item i JOIN menu_group g ON ";
+
+    const ScopeInfo scope = analyze_scope(sql, postgres_dialect(), sql.size());
+
+    // Contexto de COLUNA: e' onde a sugestao de condicao entra. Se o ON
+    // virasse table_expected, a inferencia nunca rodaria.
+    OTTER_CHECK(scope.context == CompletionContext::column_expected);
+
+    OTTER_CHECK_EQ(scope.tables.size(), std::size_t{2});
+    OTTER_CHECK_EQ(scope.tables[0].alias, std::string{"i"});
+    OTTER_CHECK_EQ(scope.tables[1].alias, std::string{"g"});
+}
+
+OTTER_TEST(scope_after_on_keeps_quoted_table_names) {
+    // Nomes entre aspas sao o caso real do banco de teste (SYSxMenuItem).
+    // O alias precisa sobreviver a eles: sem isso a inferencia cai no nome
+    // cheio, que nao vale depois do alias declarado.
+    constexpr std::string_view sql =
+        "SELECT * FROM \"SYSxMenuItem\" i JOIN \"SYSxMenuGroup\" g ON ";
+
+    const ScopeInfo scope = analyze_scope(sql, postgres_dialect(), sql.size());
+
+    OTTER_CHECK_EQ(scope.tables.size(), std::size_t{2});
+    OTTER_CHECK_EQ(scope.tables[0].alias, std::string{"i"});
+    OTTER_CHECK_EQ(scope.tables[1].alias, std::string{"g"});
+}
+
 OTTER_TEST(scope_does_not_treat_clause_word_as_alias) {
     // "FROM otters WHERE" -- WHERE nao e' alias de otters.
     constexpr std::string_view sql = "SELECT * FROM otters WHERE ";

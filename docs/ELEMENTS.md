@@ -299,7 +299,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | Não dispara em comentário/string | ✅ | |
 | **Escopo sintático** | ✅ | Após `FROM` só tabelas; após `SELECT`/`WHERE` colunas e keywords |
 | **Filtro por `alias.`** | ✅ | Após `u.`, só colunas da tabela do alias `u` |
-| Inferência de JOIN por FK | ⬜ | FKs já carregadas, não usadas |
+| **Inferência de JOIN por FK** | ✅ | Depois de `ON`, sugere `i.SYSxMenuGroupID = g.ID` inteiro, com os aliases da query — verificado na tela |
 | Ícone por tipo de objeto | ⬜ | Popup só aceita texto (ADR 0004) |
 | Painel de detalhe lateral | ⬜ | |
 | Sugestão por IA | ⬜ | |
@@ -326,7 +326,10 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | `ORDER BY` do usuário respeitado | ✅ | Consulta com ordem própria não é sobreposta |
 | **Selecionar célula** | ✅ | Clique simples; setas, Home/End, PageUp/PageDown navegam |
 | **Copiar célula** | ✅ | Menu de contexto → `Copiar valor` |
-| Selecionar LINHA inteira | ⬜ | `Ctrl+Alt+R` no DBeaver |
+| **Copiar a linha inteira** | ✅ | `Ctrl+Alt+R`, separada por tab — cola numa planilha |
+| **Copiar a coluna inteira** | ✅ | `Ctrl+Alt+C`, uma linha por valor |
+| **Copiar os nomes das colunas** | ✅ | `Alt+Shift+C` — vira o cabeçalho na planilha |
+| **Navegar por linha** | ✅ | `Ctrl+Alt+←/→` anda mantendo a coluna; com `Shift`, vai ao extremo |
 | **Editar célula** | ✅ | Duplo clique; edição em buffer (ADR 0014) |
 | Gravação explícita | ✅ | `Salvar alterações` / `Descartar`; nada vai ao banco antes |
 | Célula alterada destacada | ✅ | Fundo âmbar, valor original no tooltip |
@@ -463,14 +466,14 @@ ficam de fora do total.
 | Assistente de conexão | 41 | 0 | 10 | 0 | 51 |
 | Painel Raft | 10 | 0 | 2 | 0 | 12 |
 | Navigator | 32 | 0 | 1 | 0 | 33 |
-| Editor SQL | 52 | 3 | 5 | 0 | 60 |
-| Grade | 51 | 0 | 3 | 0 | 54 |
+| Editor SQL | 53 | 3 | 4 | 0 | 60 |
+| Grade | 55 | 0 | 2 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **247** | **5** | **26** | **0** | **278** |
+| **Total** | **252** | **5** | **24** | **0** | **281** |
 
-**247 de 278 elementos existentes funcionam.**
+**252 de 281 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -484,7 +487,7 @@ ficam de fora do total.
 > | | DBeaver | C-Otter | |
 > |---|---|---|---|
 > | Comandos | 281 | 7 | **2,5%** |
-> | Atalhos | 147 | 6 | **4,1%** |
+> | Atalhos | 147 | 24 | **16,3%** |
 >
 > O diálogo de conexão conta 51 elementos aqui, com 41 prontos. O do DBeaver tem
 > **34 páginas** alcançáveis (`tools/map_conn_dialog.py`), das quais 6 têm

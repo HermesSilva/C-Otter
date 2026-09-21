@@ -38,10 +38,10 @@ Três obstáculos apareceram, nenhum deles visível no build:
 | Mover seleção (setas) | — | ✅ |
 | Home/End na linha, `Ctrl` no resultado | — | ✅ |
 | PageUp/PageDown | — | ✅ uma tela, não uma página do servidor |
-| `resultset.row.first` | `Ctrl+Alt+Shift+←` | ⬜ |
-| `resultset.row.previous` | `Ctrl+Alt+←` | ⬜ |
-| `resultset.row.next` | `Ctrl+Alt+→` | ⬜ |
-| `resultset.row.last` | `Ctrl+Alt+Shift+→` | ⬜ |
+| `resultset.row.first` | `Ctrl+Alt+Shift+←` | ✅ |
+| `resultset.row.previous` | `Ctrl+Alt+←` | ✅ |
+| `resultset.row.next` | `Ctrl+Alt+→` | ✅ |
+| `resultset.row.last` | `Ctrl+Alt+Shift+→` | ✅ |
 | `resultset.grid.gotoRow` | `Ctrl+G` | ⬜ |
 | `resultset.grid.gotoColumn` | `Ctrl+Shift+G` | ⬜ |
 | `resultset.navigateLink` | `Alt+Espaço` | ⬜ segue a FK |
@@ -54,14 +54,14 @@ Três obstáculos apareceram, nenhum deles visível no build:
 | `resultset.row.edit` | `Shift+Enter` | ⬜ |
 | `resultset.row.add` | `Alt+Insert` | ✅ |
 | `resultset.row.add.before` | `Shift+Alt+Insert` | ⬜ |
-| `resultset.row.copy` | `Ctrl+Alt+Insert` | ⬜ existe no menu |
+| `resultset.row.copy` | `Ctrl+Alt+Insert` | ✅ mesma regra do menu |
 | `resultset.row.copy.before` | `Ctrl+Shift+Alt+Insert` | ⬜ |
 | `resultset.row.copy.from.above` | `Ctrl+D` | ✅ verificado na tela |
 | `resultset.row.copy.from.below` | `Ctrl+Alt+D` | ✅ |
 | `resultset.row.delete` | `Alt+Delete` | ✅ implementado, **não verificado na tela** |
 | `resultset.cell.setDefault` | `Ctrl+Backspace` | ⬜ falta o DEFAULT da coluna — ver abaixo |
 | `resultset.cell.reset` | `Esc` | ✅ implementado, **não verificado na tela** |
-| `resultset.cell.save` | `Ctrl+Alt+Shift+Enter` | ⬜ |
+| `resultset.cell.save` | `Ctrl+Alt+Shift+Enter` | ✅ grava o buffer inteiro |
 | `resultset.applyChanges` | `Ctrl+S` | ⬜ o `Ctrl+S` daqui salva o SCRIPT |
 | `resultset.rejectChanges` | `Ctrl+R` | ⬜ |
 | `generate.uuid` | `Ctrl+Shift+Alt+U` | ⬜ |
@@ -70,9 +70,9 @@ Três obstáculos apareceram, nenhum deles visível no build:
 
 | Comando | Tecla | Estado |
 |---|---|:---:|
-| `resultset.grid.selectRow` | `Ctrl+Alt+R` | ⬜ |
-| `resultset.grid.selectColumn` | `Ctrl+Alt+C` | ⬜ |
-| `resultset.grid.copyColumnNames` | `Alt+Shift+C` | ⬜ |
+| `resultset.grid.selectRow` | `Ctrl+Alt+R` | ✅ copia a linha |
+| `resultset.grid.selectColumn` | `Ctrl+Alt+C` | ✅ copia a coluna |
+| `resultset.grid.copyColumnNames` | `Alt+Shift+C` | ✅ separados por tab |
 | `resultset.grid.moveColumnLeft` | `Alt+Shift+←` | ⬜ arrastar já funciona |
 | `resultset.grid.moveColumnRight` | `Alt+Shift+→` | ⬜ |
 | `resultset.grid.hideColumns` | `Alt+Shift+H` | ⬜ |
@@ -94,7 +94,7 @@ Três obstáculos apareceram, nenhum deles visível no build:
 
 | Comando | Tecla | Estado |
 |---|---|:---:|
-| `resultset.fetch.page` | `Ctrl+Alt+N` | ⬜ paginação existe, sem tecla |
+| `resultset.fetch.page` | `Ctrl+Alt+N` | ✅ |
 | `resultset.fetch.all` | `Ctrl+Shift+=` | ⬜ |
 | `resultset.count` | — | ✅ contagem existe |
 
@@ -104,19 +104,38 @@ Três obstáculos apareceram, nenhum deles visível no build:
 |---|---|:---:|
 | `resultset.toggleMode` | `Tab` | ✅ grade ↔ registro único |
 | `resultset.switchPresentation` | ``Ctrl+` `` | ⬜ |
-| `resultset.grid.togglePreview` | `Ctrl+7` e `F7` | ⬜ painel de valor existe, sem tecla |
+| `resultset.grid.togglePreview` | `Ctrl+7` e `F7` | ✅ com `F7` |
 | `resultset.grid.activatePreview` | `Ctrl+Shift+7` | ⬜ |
 | `resultset.grid.togglePanel` | `Ctrl+Alt+F2`..`F6` | ⬜ cinco painéis |
 | `resultset.zoomIn` / `zoomOut` | `Alt+0` / `Alt+9` | ⬜ |
 
 ## Cobertura
 
-**7 de 47 comandos têm tecla**, mais a navegação por setas, Home/End e
+**19 de 47 comandos têm tecla** (40%), mais a navegação por setas, Home/End e
 PageUp/PageDown, que o DBeaver trata como comportamento da grade e não como
 comando nomeado.
 
-Os outros nove que existem como ação — filtro, ordenação, paginação, painel de
-valor — continuam sem tecla.
+Eram 7 até 2026-09-21. Os 12 acrescentados são, na maioria, **ações que já
+existiam** e estavam só no menu ou num botão: duplicar linha, painel de valor,
+paginação, gravar o buffer. Ligar a tecla ao que já funciona é o caminho mais
+barato de cobertura — e o que mais muda o uso diário, porque uma ação escondida
+num menu de contexto não é encontrada.
+
+### Onde a tecla teve de divergir
+
+| Comando | No DBeaver | Aqui | Por quê |
+|---|---|---|---|
+| `resultset.applyChanges` | `Ctrl+S` | `Ctrl+Alt+Shift+Enter` | `Ctrl+S` salva o script |
+| `resultset.rejectChanges` | `Ctrl+R` | — | `Ctrl+R` recarrega |
+| Definir NULL na célula | não tem | `Ctrl+0` | `Ctrl+Shift+N` é "nova conexão" |
+
+A terceira linha é uma armadilha que só apareceu ao escrever o código: os
+atalhos globais usam `IsKeyChordPressed`, que **não respeita rota**. Um
+`Ctrl+Shift+N` na grade abriria o diálogo de conexão junto com a ação da
+célula — a grade estar em foco não impede.
+
+Restam sem tecla nove ações que existem: filtro (`F11`), ordenação (`Ctrl+2`),
+mover e esconder colunas, e os painéis laterais.
 
 ## O que não foi verificado na tela
 
