@@ -20,6 +20,7 @@ otter_add_library(otter_db
         alter.cpp
         coloring.cpp
         pivot.cpp
+        value_view.cpp
         catalog_mysql.cpp
         catalog_reader.cpp
         registry.cpp

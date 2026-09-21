@@ -1047,6 +1047,7 @@ void MainShell::draw() {
         ddl_dialog_.draw(connected && !session().busy(), transactional);
     }
     draw_ddl_forms();
+    draw_value_panel();
 
     if (show_about_) draw_about_window();
     if (show_plan_) draw_plan_window();
@@ -3019,6 +3020,9 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
             document.edits().revert(row, column);
         }
         ImGui::Separator();
+        if (ImGui::MenuItem(TR("View value..."))) {
+            open_value_panel(document, rs, row, column);
+        }
         if (ImGui::MenuItem(TR("Copy value"))) {
             ImGui::SetClipboardText(is_null ? "" : std::string(value).c_str());
         }
@@ -3086,6 +3090,106 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         ImGui::EndPopup();
     }
     ImGui::PopID();
+}
+
+// Prepara o painel de valor para uma célula.
+//
+// O conteúdo é FORMATADO aqui, uma vez, e não a cada quadro: indentar um JSON
+// de 4 KB ou montar o hexadecimal de 64 KB sessenta vezes por segundo seria
+// desperdício puro.
+void MainShell::open_value_panel(SqlDocument& document, const db::ResultSet& rs,
+                                 std::size_t row, std::size_t column) {
+    value_panel_ = ValuePanel{};
+    value_panel_.open   = true;
+    value_panel_.column = rs.column(column).info().name;
+
+    // O valor do BUFFER tem precedência: o painel mostra o que está na tela,
+    // não o que está no banco.
+    const db::CellEdit* pending = document.edits().find(row, column);
+
+    const bool is_null = pending != nullptr ? pending->is_null
+                                            : rs.is_null(row, column);
+    if (is_null) {
+        value_panel_.view = db::ValueView::plain;
+        value_panel_.text = "[null]";
+        value_panel_.size = 0;
+        return;
+    }
+
+    const std::string_view value =
+        pending != nullptr ? std::string_view(pending->value)
+                           : rs.text(row, column);
+
+    value_panel_.size = value.size();
+    value_panel_.view = db::choose_view(rs.column(column).info().kind, value);
+
+    switch (value_panel_.view) {
+        case db::ValueView::json:
+            value_panel_.text = db::format_json(value);
+            break;
+
+        case db::ValueView::binary:
+            value_panel_.text = db::format_hex(
+                {reinterpret_cast<const std::byte*>(value.data()), value.size()});
+            break;
+
+        case db::ValueView::boolean:
+            value_panel_.text = db::is_true(value) ? "true" : "false";
+            break;
+
+        default:
+            value_panel_.text = std::string(value);
+            break;
+    }
+}
+
+void MainShell::draw_value_panel() {
+    if (!value_panel_.open) return;
+
+    const Palette& p = colors();
+    ImGui::SetNextWindowSize(ImVec2(640, 460), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin(TRW("Value", "###ValuePanel"), &value_panel_.open,
+                     ImGuiWindowFlags_NoDocking)) {
+
+        ImGui::TextColored(col4(p.accent_light), "%s",
+                           value_panel_.column.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "%s  ·  %zu bytes",
+                           TR(std::string(db::to_string(value_panel_.view)).c_str()),
+                           value_panel_.size);
+
+        ImGui::Separator();
+
+        const float footer = ImGui::GetFrameHeightWithSpacing() * 1.4f;
+
+        // Booleano ganha um controle próprio em vez de texto: é a diferença
+        // entre ver "1" e ver uma caixa marcada.
+        if (value_panel_.view == db::ValueView::boolean) {
+            bool checked = value_panel_.text == "true";
+
+            // Somente leitura: o painel MOSTRA. Editar continua sendo pelo
+            // duplo clique na célula, que é onde o buffer de edição registra.
+            ImGui::BeginDisabled();
+            ImGui::Checkbox(value_panel_.text.c_str(), &checked);
+            ImGui::EndDisabled();
+        } else {
+            // Fonte monoespaçada já é a do projeto inteiro, e é o que alinha
+            // as colunas do hexadecimal.
+            ImGui::BeginChild("##valuebody", ImVec2(0, -footer),
+                              ImGuiChildFlags_Borders,
+                              ImGuiWindowFlags_HorizontalScrollbar);
+            ImGui::TextUnformatted(value_panel_.text.c_str());
+            ImGui::EndChild();
+        }
+
+        if (ImGui::Button(TR("Copy"), ImVec2(120, 0))) {
+            ImGui::SetClipboardText(value_panel_.text.c_str());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(TR("Close"), ImVec2(120, 0))) value_panel_.open = false;
+    }
+    ImGui::End();
 }
 
 void MainShell::recompute_groups(SqlDocument& document) {

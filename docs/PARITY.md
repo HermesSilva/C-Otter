@@ -130,7 +130,7 @@ Distribuição dos 275 comandos por área:
 | Linha de totais | ✅ | ✅ |
 | Pivot | ✅ | ✅ local e no servidor |
 | Formatação condicional | ✅ | ✅ 12 operadores, célula ou linha, mapa de calor |
-| Editores de valor (JSON, hex, data) | ✅ | ⬜ |
+| Editores de valor (JSON, hex, booleano) | ✅ | 🟡 visualização; edição segue na célula |
 | Copiar como CSV/Markdown/SQL | ✅ | ✅ via exportação |
 | Exportar resultado | ✅ | ✅ CSV/JSON/Markdown/INSERT |
 | Paginação / carregar mais | ✅ | ✅ ADR 0011 |
@@ -206,7 +206,8 @@ esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 2. **Inserir e duplicar linha na grade** — excluir já funciona; o buffer de
    edição já comporta os três
 3. **TLS** — destrava o `caching_sha2_password` sem RSA e as conexões remotas
-4. **Editores de valor** (JSON, hex, data) — hoje toda célula é texto
+4. **Editar no painel de valor** — hoje ele só mostra; JSON e texto longo
+   mereciam edição multilinha, que a célula não comporta
 5. **Savepoints na UI** — o driver já os implementa
 
 ~~Ligar `analyze_scope` à UI~~ — **concluído em 2026-09-21**.

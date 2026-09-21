@@ -23,6 +23,7 @@ add_executable(otter_tests
     test_result_set.cpp
     test_sql.cpp
     test_theme.cpp
+    test_value_view.cpp
 )
 
 target_include_directories(otter_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

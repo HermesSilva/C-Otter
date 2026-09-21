@@ -9,6 +9,7 @@
 #include "TextEditor.h"
 
 #include "db/alter.hpp"
+#include "db/value_view.hpp"
 #include "db/holt.hpp"
 #include "db/connection_store.hpp"
 #include "db/export.hpp"
@@ -119,6 +120,14 @@ private:
     // embutido quando o usuario da' duplo clique (ADR 0014).
     void draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                         std::size_t row, std::size_t column);
+
+    // Painel de valor: mostra uma celula por TIPO -- JSON indentado, BLOB em
+    // hexadecimal, booleano como caixa. A celula da grade mostra tudo como
+    // uma linha de texto, que e' o certo para caber na tabela e errado para
+    // ler um JSON de 4 KB.
+    void open_value_panel(SqlDocument& document, const db::ResultSet& rs,
+                          std::size_t row, std::size_t column);
+    void draw_value_panel();
 
     // Grava as alteracoes pendentes, em transacao.
     void save_pending_edits(SqlDocument& document);
@@ -241,6 +250,15 @@ private:
     // confirmacao abertas ao mesmo tempo seriam um convite a confirmar a
     // errada.
     DdlDialog        ddl_dialog_;
+
+    struct ValuePanel {
+        bool             open = false;
+        std::string      column;
+        std::string      text;       // ja' formatado; nao refaz a cada quadro
+        db::ValueView    view = db::ValueView::plain;
+        std::size_t      size = 0;
+    };
+    ValuePanel       value_panel_;
 
     // A arvore precisa ser relida depois de um DDL: sem isso a coluna nova
     // nao apareceria ate' o usuario mandar atualizar, e ele concluiria que o
