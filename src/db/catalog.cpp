@@ -821,5 +821,72 @@ Result<std::vector<ForeignKeyMeta>> PostgresCatalog::load_foreign_keys(
     }
     return keys;
 }
+Result<std::vector<PartitionMeta>> PostgresCatalog::load_partitions(
+    std::string_view schema, std::string_view table) {
+
+    // Particao declarativa existe a partir do PostgreSQL 10. Antes disso o
+    // equivalente era HERANCA (INHERITS), que e' outro conceito -- misturar
+    // os dois mostraria uma tabela filha como particao, e ela nao e'.
+    if (!version_.at_least(10)) return std::vector<PartitionMeta>{};
+
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query(
+            "SELECT child.relname,"
+            "       pg_get_expr(child.relpartbound, child.oid),"
+            "       pg_get_partkeydef(parent.oid),"
+            "       child.reltuples::bigint,"
+            "       pg_size_pretty(pg_total_relation_size(child.oid))"
+            "  FROM pg_class parent"
+            "  JOIN pg_namespace ns ON ns.oid = parent.relnamespace"
+            "  JOIN pg_inherits inh ON inh.inhparent = parent.oid"
+            "  JOIN pg_class child ON child.oid = inh.inhrelid"
+            " WHERE ns.nspname = " + quote_literal(schema) +
+            "   AND parent.relname = " + quote_literal(table) +
+            "   AND parent.relkind = 'p'"          // so' tabela particionada
+            " ORDER BY child.relname"));
+
+    std::vector<PartitionMeta> partitions;
+    partitions.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        PartitionMeta partition;
+        partition.name = std::string(rs.text(row, 0));
+
+        // relpartbound e' "FOR VALUES FROM (2024) TO (2025)". Guardamos o
+        // texto inteiro: reconstrui-lo a partir de campos separados daria
+        // algo que nao casa com o \d+ do psql.
+        partition.description = std::string(rs.text(row, 1));
+
+        // partkeydef e' "RANGE (ano)". A primeira palavra e' o metodo.
+        const std::string_view key = rs.text(row, 2);
+        if (const std::size_t space = key.find(' '); space != std::string_view::npos) {
+            partition.method     = std::string(key.substr(0, space));
+            partition.expression = std::string(key.substr(space + 1));
+        } else {
+            partition.expression = std::string(key);
+        }
+
+        partition.estimated_rows = to_int64(rs.text(row, 3));
+        partition.size_pretty    = std::string(rs.text(row, 4));
+
+        // No PostgreSQL a particao E' uma tabela: da' para consultar
+        // `schema.particao` diretamente, o que o MySQL nao permite.
+        partition.is_table = true;
+
+        partitions.push_back(std::move(partition));
+    }
+    return partitions;
+}
+
+Result<std::vector<EventMeta>> PostgresCatalog::load_events(
+    std::string_view schema) {
+    // O PostgreSQL nao tem evento agendado no nucleo: usa pgAgent (extensao)
+    // ou cron do sistema. Devolver vazio faz a pasta nao aparecer, que e' o
+    // correto -- uma pasta "Eventos" sempre vazia so' faria procurar o que
+    // nao existe.
+    (void)schema;
+    return std::vector<EventMeta>{};
+}
 
 } // namespace otter::db

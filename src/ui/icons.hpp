@@ -66,11 +66,13 @@ enum class Icon : std::uint8_t {
     tablespace,         // discos empilhados
     schema,             // grade ramificada
     pivot,              // coluna virando linha, com seta
+    partition,          // cilindro fatiado
+    event,              // relogio com marca de repeticao
 };
 
 // Numero de icones; serve para iterar sobre todos (galeria, testes).
 inline constexpr std::size_t kIconCount =
-    static_cast<std::size_t>(Icon::pivot) + 1;
+    static_cast<std::size_t>(Icon::event) + 1;
 
 // Desenha o icone centrado em `center`, com `size` de lado.
 void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,

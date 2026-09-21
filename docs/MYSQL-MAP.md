@@ -88,9 +88,10 @@ O valor `0xFB` **dentro de uma linha** é NULL; fora dela, na primeira posição
 
 ## 2. Árvore de objetos
 
-Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **13 implementados**.
+Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **15 implementados** e
+4 lidos sem tela.
 
-Cobertura contra o DBeaver (diretiva 4): **13 / 27 = 48%** da árvore MySQL.
+Cobertura contra o DBeaver (diretiva 4): **15 / 27 = 56%** da árvore MySQL.
 
 | Nó | Caminho | Estado |
 |---|---|:---:|
@@ -104,21 +105,21 @@ Cobertura contra o DBeaver (diretiva 4): **13 / 27 = 48%** da árvore MySQL.
 | ⠀⠀⠀⠀⠀⠀├ References (virtual) | `references` | ✅ |
 | ⠀⠀⠀⠀⠀⠀├ Triggers | `triggers` | ✅ |
 | ⠀⠀⠀⠀⠀⠀├ Indexes | `indexes` | ✅ |
-| ⠀⠀⠀⠀⠀⠀└ Partitions → Subpartitions | `partitions` | ⬜ |
+| ⠀⠀⠀⠀⠀⠀└ Partitions → Subpartitions | `partitions` | ✅ |
 | ⠀⠀├ Views → Columns | `views` | ✅ |
 | ⠀⠀├ Indexes (virtual, do banco) | `indexes` | ⬜ |
 | ⠀⠀├ Procedures → Parameters | `procedures` | ✅ |
 | ⠀⠀├ Packages (só MariaDB) | `packages` | ⬜ |
 | ⠀⠀├ Sequences (MariaDB 10.3+) | `sequences` | ✅ |
 | ⠀⠀├ Triggers (virtual, do banco) | `triggers` | ⬜ |
-| ⠀⠀└ Events | `events` | ⬜ |
+| ⠀⠀└ Events | `events` | ✅ |
 | Users → Grants | `users` | ⬜ |
 | Administer | — | ⬜ |
 | System Info | — | ⬜ |
-| ├ Session status / Global status | `sessionStatus` | ⬜ |
-| ├ Session variables / Global variables | `sessionVariables` | ⬜ |
-| ├ Engines | `engines` | ⬜ |
-| ├ Charsets → Collations | `charsets` | ⬜ |
+| ├ Session status / Global status | `sessionStatus` | 🟡 lido, sem tela |
+| ├ Session variables / Global variables | `sessionVariables` | 🟡 lido, sem tela |
+| ├ Engines | `engines` | 🟡 lido, sem tela |
+| ├ Charsets → Collations | `charsets` | 🟡 lido, sem tela |
 | ├ User privileges | `privileges` | ⬜ |
 | └ Plugins | `plugins` | ⬜ |
 
@@ -166,13 +167,15 @@ armadilhas:
 | Grade **editável** (origem por nome, sem OID) | ✅ |
 | Dialeto de identificador (crase) no SQL gerado | ✅ |
 | Importação do DBeaver com senha | ✅ 6 de 6 conexões |
-| Particionamento, eventos, usuários, System Info | ⬜ |
+| **Particionamento e eventos** | ✅ |
+| System Info (lido pelo catálogo, sem tela) | 🟡 |
+| Usuários e privilégios | ⬜ |
 | TLS | ⬜ |
 | Protocolo preparado (`COM_STMT_*`) | ⬜ |
 
 Verificado contra um **MySQL 8.0.46 real** em 2026-09-21:
 
-- `tests/integration/test_catalog_mysql_live.cpp` — 73 verificações, 0 falhas
+- `tests/integration/test_catalog_mysql_live.cpp` — 99 verificações, 0 falhas
 - `spikes/myconnect` — aperto de mão, 10.000 linhas, erros com SQLSTATE
 - Na tela: importar do DBeaver, conectar, navegar, consultar, **editar e gravar**
 

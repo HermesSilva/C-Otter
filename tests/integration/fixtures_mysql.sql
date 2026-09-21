@@ -103,3 +103,31 @@ CREATE TABLE registro_sem_pk (
 ) ENGINE=InnoDB;
 
 INSERT INTO registro_sem_pk VALUES ('a', 1), ('b', 2);
+
+-- Tabela PARTICIONADA, para o nó de partições da árvore.
+--
+-- RANGE por ano, com a última partição em MAXVALUE: é o padrão de quem
+-- particiona por data, e exercita os três casos (limite explícito, limite
+-- explícito, MAXVALUE).
+CREATE TABLE venda_ano (
+    id          INT NOT NULL,
+    ano         INT NOT NULL,
+    valor       DECIMAL(10,2),
+    PRIMARY KEY (id, ano)
+) ENGINE=InnoDB
+PARTITION BY RANGE (ano) (
+    PARTITION p2024   VALUES LESS THAN (2025),
+    PARTITION p2025   VALUES LESS THAN (2026),
+    PARTITION pfuturo VALUES LESS THAN MAXVALUE
+);
+
+INSERT INTO venda_ano VALUES (1, 2024, 100.00), (2, 2025, 200.00), (3, 2030, 50.00);
+
+-- Evento agendado, para o nó de eventos.
+--
+-- Pode não RODAR (o event scheduler vem desligado por padrão), mas fica
+-- DEFINIDO -- que é o que o catálogo lê.
+CREATE EVENT ev_limpeza
+    ON SCHEDULE EVERY 1 DAY
+    COMMENT 'limpa registros antigos'
+    DO DELETE FROM registro_sem_pk WHERE valor < 0;

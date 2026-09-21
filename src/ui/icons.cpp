@@ -524,6 +524,38 @@ void draw_pivot(const Canvas& c) {
     c.line(0.30f, 0.04f, 0.37f, -0.05f);
 }
 
+void draw_partition(const Canvas& c) {
+    // Cilindro FATIADO na horizontal: a tabela dividida em pedacos. As linhas
+    // internas sao o que separa este do icone de database, que e' o mesmo
+    // cilindro inteiro.
+    c.ellipse(0.0f, -0.26f, 0.30f, 0.10f);
+    c.line(-0.30f, -0.26f, -0.30f, 0.26f);
+    c.line( 0.30f, -0.26f,  0.30f, 0.26f);
+
+    // As duas divisorias -- e' delas que vem a ideia de "particao".
+    c.ellipse(0.0f, -0.02f, 0.30f, 0.09f);
+    c.ellipse(0.0f,  0.14f, 0.30f, 0.09f);
+
+    c.dl->PathLineTo(c.at(-0.30f, 0.26f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.30f, 0.36f), c.at(0.30f, 0.36f),
+                                 c.at(0.30f, 0.26f), 12);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_event(const Canvas& c) {
+    // Relogio com uma seta de repeticao em volta: o agendamento recorrente.
+    // O relogio sozinho ja' e' o icone de `clock`; a seta e' o que distingue.
+    c.circle(0.0f, 0.02f, 0.24f);
+    c.line(0.0f, 0.02f, 0.0f, -0.12f);    // ponteiro das horas
+    c.line(0.0f, 0.02f, 0.13f, 0.08f);    // ponteiro dos minutos
+
+    // Arco externo com ponta de seta: repete.
+    c.dl->PathArcTo(c.at(0.0f, 0.02f), 0.36f * c.size, -2.6f, 0.6f, 20);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(0.30f, 0.22f, 0.36f, 0.14f);
+    c.line(0.30f, 0.22f, 0.22f, 0.18f);
+}
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,
@@ -602,6 +634,8 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::tablespace:        draw_tablespace(c);        break;
         case Icon::schema:            draw_schema(c);            break;
         case Icon::pivot:             draw_pivot(c);             break;
+        case Icon::partition:         draw_partition(c);         break;
+        case Icon::event:             draw_event(c);             break;
     }
 }
 

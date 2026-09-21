@@ -164,6 +164,15 @@ const char* const kPtBr[] = {
     // --- Cor condicional (ADR 0005) ---
     "Color",                      "Cor",
 
+    // --- Particoes e eventos (arvore MySQL) ---
+    "Partitions",                 "Partições",
+    "not partitioned",            "não particionada",
+    "View data",                  "Ver dados",
+    "Events",                     "Eventos",
+    "no events (or the scheduler is off)",
+    "nenhum evento (ou o agendador está desligado)",
+    "never executed",             "nunca executado",
+
     // --- Pivot (ADR 0005) ---
     "Pivot by this column",       "Pivotar por esta coluna",
     "Clear pivot",                "Limpar pivot",
@@ -325,7 +334,6 @@ const char* const kPtBr[] = {
     "%zu row(s) copied",          "%zu linha(s) copiada(s)",
     "%zu row(s) written to %s",   "%zu linha(s) gravada(s) em %s",
     "%zu row(s), %zu column(s)",  "%zu linha(s), %zu coluna(s)",
-    "View data",                  "Ver dados",
     "Count rows",                 "Contar linhas",
     "Generate SQL",               "Gerar SQL",
     "expand the table first",     "expanda a tabela antes",

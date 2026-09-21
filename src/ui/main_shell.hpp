@@ -90,6 +90,7 @@ private:
     void draw_sequences_folder(const db::SchemaMeta& schema);
     void draw_routines_folder(const db::SchemaMeta& schema);
     void draw_types_folder(const db::SchemaMeta& schema);
+    void draw_events_folder(const db::SchemaMeta& schema);
     void draw_editor_panel();
     void draw_grid_panel();
 

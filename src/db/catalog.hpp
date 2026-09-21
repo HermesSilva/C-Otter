@@ -146,6 +146,52 @@ struct TriggerMeta {
     bool        enabled = true;
 };
 
+// Partição de uma tabela. Só o MySQL e o PostgreSQL 10+ têm.
+//
+// O PostgreSQL implementa partição como TABELA de verdade, com nome próprio e
+// entrada no catálogo; o MySQL, como divisão INTERNA de uma tabela só. Por
+// isso `is_table`: no PostgreSQL dá para consultar a partição diretamente, no
+// MySQL não -- e oferecer "ver dados desta partição" onde não dá seria um
+// campo que finge funcionar.
+struct PartitionMeta {
+    std::string  name;
+    std::string  method;        // RANGE, LIST, HASH, KEY
+    std::string  expression;    // a coluna ou expressão que particiona
+    std::string  description;   // o limite: "1000", "MAXVALUE", "'sul','norte'"
+    std::int64_t estimated_rows = 0;
+    std::string  size_pretty;
+    bool         is_table = false;
+
+    // Subpartições, quando há. O MySQL permite um nível.
+    std::vector<std::string> subpartitions;
+};
+
+// Evento agendado. Só o MySQL tem -- o PostgreSQL usa pgAgent ou cron externo.
+struct EventMeta {
+    std::string name;
+    std::string definer;
+    std::string type;          // ONE TIME ou RECURRING
+    std::string schedule;      // "EVERY 1 DAY", ou o instante de EXECUTE AT
+    std::string starts;
+    std::string ends;
+    std::string status;        // ENABLED, DISABLED, SLAVESIDE_DISABLED
+    std::string on_completion;
+    std::string last_executed;
+    std::string definition;
+    std::string comment;
+};
+
+// Uma variável ou estatística do servidor: nome e valor.
+//
+// Serve para as quatro pastas de System Info (status e variáveis, de sessão e
+// globais), para engines e para charsets -- todas são pares nome/valor com um
+// detalhe a mais.
+struct ServerVariable {
+    std::string name;
+    std::string value;
+    std::string detail;        // descrição, ou o valor secundário
+};
+
 struct TableMeta {
     std::string  name;
     ObjKind      kind = ObjKind::table;
@@ -167,6 +213,10 @@ struct TableMeta {
     std::vector<ForeignKeyMeta> references;   // FKs que apontam para ca'
     std::vector<TriggerMeta>    triggers;
 
+    // Particoes. Vazio quando a tabela nao e' particionada -- e a pasta nao
+    // aparece, como no `visibleIf` do DBeaver.
+    std::vector<PartitionMeta>  partitions;
+
     // Corpo da view (`pg_get_viewdef`). Vazio para tabelas; carregado sob
     // demanda, porque uma view de relatorio pode ter varios KB de SQL.
     std::string definition;
@@ -176,6 +226,7 @@ struct TableMeta {
     bool indexes_loaded     = false;
     bool keys_loaded        = false;
     bool triggers_loaded    = false;
+    bool partitions_loaded  = false;
     bool definition_loaded  = false;
 
     [[nodiscard]] bool is_view() const noexcept {
@@ -203,10 +254,14 @@ struct SchemaMeta {
     std::vector<RoutineMeta>  routines;
     std::vector<DataTypeMeta> types;
 
+    // Eventos agendados. So' o MySQL tem.
+    std::vector<EventMeta>    events;
+
     bool tables_loaded    = false;
     bool sequences_loaded = false;
     bool routines_loaded  = false;
     bool types_loaded     = false;
+    bool events_loaded    = false;
 };
 
 // Versao do servidor, para selecionar a consulta correta (ADR 0010).
@@ -252,6 +307,17 @@ public:
 
     [[nodiscard]] Result<std::vector<TriggerMeta>> load_triggers(
         std::string_view schema, std::string_view table);
+
+    // Particoes. No PostgreSQL 10+ cada uma e' uma TABELA de verdade, com
+    // nome proprio e entrada no pg_class -- da' para consultar diretamente,
+    // ao contrario do MySQL.
+    [[nodiscard]] Result<std::vector<PartitionMeta>> load_partitions(
+        std::string_view schema, std::string_view table);
+
+    // O PostgreSQL nao tem evento agendado: usa pgAgent ou cron do sistema.
+    // Devolve vazio sempre; existe para a interface bater com o MysqlCatalog.
+    [[nodiscard]] Result<std::vector<EventMeta>> load_events(
+        std::string_view schema);
 
     // --- Por schema ----------------------------------------------------------
 

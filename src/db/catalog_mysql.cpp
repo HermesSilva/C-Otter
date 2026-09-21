@@ -548,5 +548,207 @@ Result<std::string> MysqlCatalog::load_view_definition(std::string_view schema,
     if (rs.row_count() == 0) return fail(Errc::not_found, "view não encontrada");
     return std::string(rs.text(0, 0));
 }
+// --- Particoes, eventos e informacao do servidor ---------------------------------
+
+Result<std::vector<PartitionMeta>> MysqlCatalog::load_partitions(
+    std::string_view schema, std::string_view table) {
+
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query(
+            "SELECT PARTITION_NAME, PARTITION_METHOD, PARTITION_EXPRESSION, "
+            "       PARTITION_DESCRIPTION, TABLE_ROWS, "
+            "       DATA_LENGTH + INDEX_LENGTH, SUBPARTITION_NAME "
+            "  FROM information_schema.PARTITIONS "
+            " WHERE TABLE_SCHEMA = " + mysql_literal(schema) +
+            "   AND TABLE_NAME = "   + mysql_literal(table) +
+            " ORDER BY PARTITION_ORDINAL_POSITION, "
+            "          SUBPARTITION_ORDINAL_POSITION"));
+
+    std::vector<PartitionMeta> partitions;
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        // Tabela NAO particionada devolve uma linha com PARTITION_NAME nulo.
+        // Trata-la como particao criaria um no' fantasma chamado "[null]" na
+        // arvore de toda tabela comum.
+        if (rs.is_null(row, 0)) continue;
+
+        const std::string name(rs.text(row, 0));
+
+        // Subparticoes vem como linhas EXTRAS da mesma particao. Agrupamos,
+        // em vez de repetir a particao -- o DBeaver as mostra aninhadas.
+        if (!partitions.empty() && partitions.back().name == name) {
+            if (!rs.is_null(row, 6)) {
+                partitions.back().subpartitions.emplace_back(rs.text(row, 6));
+            }
+            continue;
+        }
+
+        PartitionMeta partition;
+        partition.name        = name;
+        partition.method      = std::string(rs.text(row, 1));
+        partition.expression  = std::string(rs.text(row, 2));
+        partition.description = std::string(rs.text(row, 3));
+        partition.estimated_rows = to_int64(rs.text(row, 4));
+
+        // No MySQL a particao e' divisao INTERNA da tabela, nao uma tabela
+        // propria: nao da' para consultar `schema.particao`. Marcar isso
+        // impede a UI de oferecer "ver dados" onde nao funciona.
+        partition.is_table = false;
+
+        const std::int64_t bytes = to_int64(rs.text(row, 5));
+        if (bytes > 0) {
+            partition.size_pretty = bytes >= 1024 * 1024
+                ? std::to_string(bytes / (1024 * 1024)) + " MB"
+                : std::to_string(bytes / 1024) + " kB";
+        }
+
+        if (!rs.is_null(row, 6)) {
+            partition.subpartitions.emplace_back(rs.text(row, 6));
+        }
+        partitions.push_back(std::move(partition));
+    }
+    return partitions;
+}
+
+Result<std::vector<EventMeta>> MysqlCatalog::load_events(std::string_view schema) {
+    // Eventos so' existem a partir do MySQL 5.1. Num servidor anterior a
+    // tabela nao existe e a consulta daria erro -- que na arvore parece falha
+    // de conexao.
+    if (!mariadb_ && !version_.at_least(5, 1)) {
+        return std::vector<EventMeta>{};
+    }
+
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query(
+            "SELECT EVENT_NAME, DEFINER, EVENT_TYPE, "
+            "       INTERVAL_VALUE, INTERVAL_FIELD, EXECUTE_AT, "
+            "       STARTS, ENDS, STATUS, ON_COMPLETION, LAST_EXECUTED, "
+            "       EVENT_DEFINITION, EVENT_COMMENT "
+            "  FROM information_schema.EVENTS "
+            " WHERE EVENT_SCHEMA = " + mysql_literal(schema) +
+            " ORDER BY EVENT_NAME"));
+
+    std::vector<EventMeta> events;
+    events.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        EventMeta event;
+        event.name    = std::string(rs.text(row, 0));
+        event.definer = std::string(rs.text(row, 1));
+        event.type    = std::string(rs.text(row, 2));
+
+        // A agenda vem em DUAS formas excludentes: ONE TIME usa EXECUTE_AT,
+        // RECURRING usa INTERVAL_VALUE + INTERVAL_FIELD. Mostrar o campo
+        // vazio do outro tipo nao diria nada.
+        if (event.type == "ONE TIME") {
+            event.schedule = "AT " + std::string(rs.text(row, 5));
+        } else if (!rs.is_null(row, 3)) {
+            event.schedule = "EVERY " + std::string(rs.text(row, 3)) + " " +
+                             std::string(rs.text(row, 4));
+        }
+
+        event.starts        = std::string(rs.text(row, 6));
+        event.ends          = std::string(rs.text(row, 7));
+        event.status        = std::string(rs.text(row, 8));
+        event.on_completion = std::string(rs.text(row, 9));
+        event.last_executed = rs.is_null(row, 10) ? std::string{}
+                                                  : std::string(rs.text(row, 10));
+        event.definition    = std::string(rs.text(row, 11));
+        event.comment       = std::string(rs.text(row, 12));
+
+        events.push_back(std::move(event));
+    }
+    return events;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_status(bool global) {
+    // SHOW em vez de information_schema: no MySQL 5.7+ as tabelas
+    // GLOBAL_STATUS e SESSION_STATUS estao DEPRECIADAS, e no 8.0 foram
+    // REMOVIDAS de la' (mudaram para performance_schema). O SHOW funciona em
+    // todas as versoes, que e' o que o ADR 0010 pede.
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query(global ? "SHOW GLOBAL STATUS" : "SHOW SESSION STATUS"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        ServerVariable variable;
+        variable.name  = std::string(rs.text(row, 0));
+        variable.value = std::string(rs.text(row, 1));
+        out.push_back(std::move(variable));
+    }
+    return out;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_variables(bool global) {
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query(global ? "SHOW GLOBAL VARIABLES" : "SHOW SESSION VARIABLES"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        ServerVariable variable;
+        variable.name  = std::string(rs.text(row, 0));
+        variable.value = std::string(rs.text(row, 1));
+        out.push_back(std::move(variable));
+    }
+    return out;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_engines() {
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query("SELECT ENGINE, SUPPORT, COMMENT "
+                    "  FROM information_schema.ENGINES ORDER BY ENGINE"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        ServerVariable engine;
+        engine.name = std::string(rs.text(row, 0));
+
+        // SUPPORT tem quatro valores, e "DEFAULT" e' o que interessa saber:
+        // e' o engine que CREATE TABLE usa quando nao se diz qual.
+        engine.value  = std::string(rs.text(row, 1));
+        engine.detail = std::string(rs.text(row, 2));
+
+        out.push_back(std::move(engine));
+    }
+    return out;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_charsets() {
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query("SELECT CHARACTER_SET_NAME, DEFAULT_COLLATE_NAME, "
+                    "       DESCRIPTION, MAXLEN "
+                    "  FROM information_schema.CHARACTER_SETS "
+                    " ORDER BY CHARACTER_SET_NAME"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        ServerVariable charset;
+        charset.name  = std::string(rs.text(row, 0));
+        charset.value = std::string(rs.text(row, 1));
+
+        // MAXLEN junto da descricao: e' o que distingue utf8 (3 bytes, NAO
+        // cobre emoji) de utf8mb4 (4 bytes, cobre) -- a diferenca que mais
+        // causa surpresa no MySQL.
+        charset.detail = std::string(rs.text(row, 2)) + " (max " +
+                         std::string(rs.text(row, 3)) + " bytes)";
+
+        out.push_back(std::move(charset));
+    }
+    return out;
+}
 
 } // namespace otter::db

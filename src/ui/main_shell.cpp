@@ -1533,6 +1533,7 @@ void MainShell::draw_navigator_panel() {
                 draw_routines_folder(schema);
 
                 if (session().has_user_types()) draw_types_folder(schema);
+                if (session().has_events())     draw_events_folder(schema);
                 ImGui::TreePop();
             }
             ImGui::PopID();
@@ -1839,6 +1840,70 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
 
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", trigger.definition.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Partições -----------------------------------------------------------
+    //
+    // A pasta só aparece quando a tabela É particionada. Mostrar
+    // "Partições (0)" em toda tabela comum encheria a árvore de ruído.
+    //
+    // O carregamento é pedido sempre que a pasta é expandida pela primeira
+    // vez: não dá para saber se a tabela é particionada sem perguntar, e
+    // perguntar para TODA tabela ao montar a árvore custaria uma consulta por
+    // tabela.
+    if (!table.is_view() &&
+        draw_folder_node(Icon::partition, TR("Partitions"),
+                         table.partitions.size(), table.partitions_loaded)) {
+        if (!table.partitions_loaded && !session().busy()) {
+            session().load_partitions_async(schema.name, table.name);
+        }
+
+        if (table.partitions_loaded && table.partitions.empty()) {
+            ImGui::TextColored(col4(p.text_dim), TR("not partitioned"));
+        }
+
+        for (const db::PartitionMeta& partition : table.partitions) {
+            ImGui::BeginGroup();
+            icon_inline(Icon::partition, p.text_dim);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.text), "%s", partition.name.c_str());
+
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s", partition.method.c_str());
+
+            if (!partition.size_pretty.empty()) {
+                ImGui::SameLine();
+                ImGui::TextColored(col4(p.text_dim), "%s",
+                                   partition.size_pretty.c_str());
+            }
+            ImGui::EndGroup();
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s %s\n%s",
+                                  partition.method.c_str(),
+                                  partition.expression.c_str(),
+                                  partition.description.c_str());
+            }
+
+            // "Ver dados" só onde a partição É uma tabela consultável: no
+            // MySQL ela é divisão interna, e `schema.particao` não existe.
+            if (partition.is_table &&
+                ImGui::BeginPopupContextItem(partition.name.c_str())) {
+                if (ImGui::MenuItem(TR("View data"))) {
+                    open_sql_tab("SELECT * FROM " +
+                                 db::qualified_name(schema.name, partition.name) +
+                                 " LIMIT 200", /*run=*/true);
+                }
+                ImGui::EndPopup();
+            }
+
+            for (const std::string& sub : partition.subpartitions) {
+                ImGui::Indent();
+                ImGui::TextColored(col4(p.text_dim), "%s", sub.c_str());
+                ImGui::Unindent();
             }
         }
         ImGui::TreePop();
@@ -2220,6 +2285,55 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
             ImGui::TreePop();
         }
         ImGui::PopID();
+    }
+    ImGui::TreePop();
+}
+
+void MainShell::draw_events_folder(const db::SchemaMeta& schema) {
+    if (!draw_folder_node(Icon::event, TR("Events"), schema.events.size(),
+                          schema.events_loaded)) {
+        return;
+    }
+
+    if (!schema.events_loaded && !session().busy()) {
+        session().load_events_async(schema.name);
+    }
+
+    const Palette& p = colors();
+
+    if (schema.events_loaded && schema.events.empty()) {
+        // Lista vazia é ambígua no MySQL: pode não haver evento, ou o
+        // scheduler pode estar desligado. Dizer as duas possibilidades evita
+        // que o usuário conclua a errada.
+        ImGui::TextColored(col4(p.text_dim), TR("no events (or the scheduler "
+                                                "is off)"));
+    }
+
+    for (const db::EventMeta& event : schema.events) {
+        ImGui::BeginGroup();
+
+        // Evento desabilitado sai esmaecido: ele EXISTE, mas não vai rodar --
+        // e essa é a informação que mais importa ao olhar a lista.
+        const bool enabled = event.status == "ENABLED";
+
+        icon_inline(Icon::event, enabled ? p.text_dim : p.error);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(enabled ? p.text : p.text_dim), "%s",
+                           event.name.c_str());
+
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "%s%s", event.schedule.c_str(),
+                           enabled ? "" : "  [off]");
+        ImGui::EndGroup();
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s\n%s\n\n%s",
+                              event.definer.c_str(),
+                              event.last_executed.empty()
+                                  ? TR("never executed")
+                                  : event.last_executed.c_str(),
+                              event.definition.c_str());
+        }
     }
     ImGui::TreePop();
 }

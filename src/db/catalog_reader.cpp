@@ -48,6 +48,13 @@ public:
                                                    std::string_view table) override {
         return catalog_.load_triggers(schema, table);
     }
+    Result<std::vector<PartitionMeta>> load_partitions(
+        std::string_view schema, std::string_view table) override {
+        return catalog_.load_partitions(schema, table);
+    }
+    Result<std::vector<EventMeta>> load_events(std::string_view schema) override {
+        return catalog_.load_events(schema);
+    }
     Result<std::vector<SequenceMeta>> load_sequences(std::string_view schema) override {
         return catalog_.load_sequences(schema);
     }
@@ -71,6 +78,7 @@ public:
     [[nodiscard]] std::string_view schema_label() const noexcept override;
     [[nodiscard]] bool has_sequences() const noexcept override;
     [[nodiscard]] bool has_user_types() const noexcept override;
+    [[nodiscard]] bool has_events() const noexcept override;
 
 private:
     Catalog catalog_;
@@ -93,6 +101,14 @@ template <>
 bool ReaderFor<PostgresCatalog>::has_user_types() const noexcept { return true; }
 
 template <>
+bool ReaderFor<PostgresCatalog>::has_events() const noexcept {
+    // O PostgreSQL nao tem evento agendado: usa pgAgent (uma extensao) ou cron
+    // do sistema. Uma pasta "Eventos" sempre vazia so' faria procurar o que
+    // nao existe.
+    return false;
+}
+
+template <>
 std::string ReaderFor<MysqlCatalog>::default_schema() const {
     // Nao existe nivel de schema no MySQL: o banco corrente faz esse papel.
     // Quem chama usa o banco da conexao quando isto vem vazio.
@@ -109,6 +125,12 @@ bool ReaderFor<MysqlCatalog>::has_sequences() const noexcept {
     // Sequences so' existem no MariaDB 10.3+. Perguntar ao catalogo, e nao
     // cravar false: num MariaDB a pasta precisa aparecer.
     return catalog_.is_mariadb() && catalog_.version().at_least(10, 3);
+}
+
+template <>
+bool ReaderFor<MysqlCatalog>::has_events() const noexcept {
+    // Eventos existem desde o MySQL 5.1 e no MariaDB.
+    return catalog_.is_mariadb() || catalog_.version().at_least(5, 1);
 }
 
 template <>

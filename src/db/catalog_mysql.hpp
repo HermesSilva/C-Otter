@@ -71,6 +71,28 @@ public:
     [[nodiscard]] Result<std::string> load_view_definition(
         std::string_view schema, std::string_view name);
 
+    // --- Particoes, eventos e informacao do servidor -------------------------
+
+    // Particoes de uma tabela. Lista vazia quando ela nao e' particionada --
+    // o information_schema devolve UMA linha com PARTITION_NAME nulo nesse
+    // caso, e trata-la como particao criaria um no' fantasma na arvore.
+    [[nodiscard]] Result<std::vector<PartitionMeta>> load_partitions(
+        std::string_view schema, std::string_view table);
+
+    // Eventos agendados. Exige o event scheduler, que vem DESLIGADO por
+    // padrao -- a lista pode estar vazia com eventos definidos.
+    [[nodiscard]] Result<std::vector<EventMeta>> load_events(
+        std::string_view schema);
+
+    // As quatro pastas de System Info. `global` escolhe entre a sessao e o
+    // servidor: sao numeros DIFERENTES, e confundi-los levaria a diagnostico
+    // errado (uma sessao ociosa tem zero queries; o servidor tem milhoes).
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_status(bool global);
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_variables(bool global);
+
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_engines();
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_charsets();
+
     [[nodiscard]] ServerVersion version() const noexcept { return version_; }
     [[nodiscard]] bool is_mariadb() const noexcept { return mariadb_; }
 

@@ -400,6 +400,143 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --- Particoes, eventos e informacao do servidor -------------------------
+
+    std::printf("\nload_partitions\n");
+    {
+        // Tabela NAO particionada: o information_schema devolve uma linha com
+        // PARTITION_NAME nulo, e trata-la como particao criaria um no'
+        // fantasma "[null]" na arvore de TODA tabela comum.
+        auto none = catalog.load_partitions(kSchema, "cliente");
+        check(none.has_value(), "consulta aceita");
+        check(none.has_value() && none->empty(),
+              "tabela sem particao devolve lista VAZIA");
+
+        // Agora uma tabela particionada de verdade.
+        (void)(*holt)->execute("DROP TABLE IF EXISTS otter_test.part_probe");
+        auto created = (*holt)->execute(
+            "CREATE TABLE otter_test.part_probe ("
+            "  id INT NOT NULL, ano INT NOT NULL, PRIMARY KEY (id, ano)"
+            ") ENGINE=InnoDB "
+            "PARTITION BY RANGE (ano) ("
+            "  PARTITION p2024 VALUES LESS THAN (2025),"
+            "  PARTITION p2025 VALUES LESS THAN (2026),"
+            "  PARTITION pfuturo VALUES LESS THAN MAXVALUE)");
+
+        if (created) {
+            auto parts = catalog.load_partitions(kSchema, "part_probe");
+            check(parts.has_value(), "particoes carregadas");
+            check(parts.has_value() && parts->size() == 3, "3 particoes");
+
+            if (parts && parts->size() == 3) {
+                check((*parts)[0].name == "p2024", "nome da particao");
+                check((*parts)[0].method == "RANGE", "metodo");
+                // O MySQL devolve a expressao COM crases: `ano`. Guardamos
+                // como vem, porque e' o que o servidor diz -- tirar as crases
+                // daria um texto que nao casa com o SHOW CREATE TABLE.
+                check((*parts)[0].expression.find("ano") != std::string::npos,
+                      "expressao contem a coluna");
+                check((*parts)[0].description == "2025", "limite superior");
+                check((*parts)[2].description == "MAXVALUE",
+                      "particao final e' MAXVALUE");
+
+                // No MySQL a particao e' divisao INTERNA: nao da' para
+                // consultar `schema.particao`, e a UI nao pode oferecer.
+                check(!(*parts)[0].is_table,
+                      "particao do MySQL NAO e' tabela consultavel");
+            }
+            (void)(*holt)->execute("DROP TABLE otter_test.part_probe");
+        }
+    }
+
+    std::printf("\nload_events\n");
+    {
+        auto events = catalog.load_events(kSchema);
+        check(events.has_value(), "consulta aceita (pode vir vazia)");
+
+        // Cria um evento para exercitar a leitura. O scheduler pode estar
+        // desligado -- o evento e' DEFINIDO de todo jeito, que e' o que o
+        // catalogo le'.
+        (void)(*holt)->execute("DROP EVENT IF EXISTS otter_test.ev_probe");
+        auto created = (*holt)->execute(
+            "CREATE EVENT otter_test.ev_probe "
+            "ON SCHEDULE EVERY 1 DAY "
+            "DO SELECT 1");
+
+        if (created) {
+            auto after = catalog.load_events(kSchema);
+            check(after.has_value() && !after->empty(), "evento aparece");
+
+            if (after && !after->empty()) {
+                const auto* probe = find_by(*after,
+                                            [](const auto& e) { return e.name; },
+                                            "ev_probe");
+                check(probe != nullptr, "evento encontrado pelo nome");
+                check(probe != nullptr && probe->type == "RECURRING",
+                      "tipo RECURRING");
+
+                // A agenda vem em duas formas excludentes: RECURRING usa
+                // INTERVAL, ONE TIME usa EXECUTE_AT. Mostrar o campo vazio do
+                // outro tipo nao diria nada.
+                check(probe != nullptr &&
+                          probe->schedule.find("EVERY 1") != std::string::npos,
+                      "agenda montada do intervalo");
+                check(probe != nullptr && !probe->definition.empty(),
+                      "corpo do evento");
+            }
+            (void)(*holt)->execute("DROP EVENT otter_test.ev_probe");
+        }
+    }
+
+    std::printf("\nSystem Info\n");
+    {
+        // Sessao e servidor sao numeros DIFERENTES: uma sessao recem-aberta
+        // tem poucas queries, o servidor tem muitas. Confundi-los levaria a
+        // diagnostico errado.
+        auto session_status = catalog.load_status(/*global=*/false);
+        auto global_status  = catalog.load_status(/*global=*/true);
+
+        check(session_status.has_value() && !session_status->empty(),
+              "status da sessao");
+        check(global_status.has_value() && !global_status->empty(),
+              "status global");
+
+        auto variables = catalog.load_variables(/*global=*/true);
+        check(variables.has_value() && !variables->empty(), "variaveis globais");
+
+        if (variables) {
+            check(find_by(*variables, [](const auto& v) { return v.name; },
+                          "version") != nullptr,
+                  "a variavel 'version' esta' la'");
+        }
+
+        auto engines = catalog.load_engines();
+        check(engines.has_value() && !engines->empty(), "engines");
+        if (engines) {
+            const auto* innodb = find_by(*engines,
+                                         [](const auto& e) { return e.name; },
+                                         "InnoDB");
+            check(innodb != nullptr, "InnoDB listado");
+            check(innodb != nullptr && !innodb->value.empty(),
+                  "suporte do engine (DEFAULT/YES/NO)");
+        }
+
+        auto charsets = catalog.load_charsets();
+        check(charsets.has_value() && !charsets->empty(), "charsets");
+        if (charsets) {
+            const auto* utf8mb4 = find_by(*charsets,
+                                          [](const auto& c) { return c.name; },
+                                          "utf8mb4");
+            check(utf8mb4 != nullptr, "utf8mb4 listado");
+
+            // MAXLEN e' o que distingue utf8 (3 bytes, NAO cobre emoji) de
+            // utf8mb4 (4 bytes) -- a diferenca que mais causa surpresa.
+            check(utf8mb4 != nullptr &&
+                      utf8mb4->detail.find("4 bytes") != std::string::npos,
+                  "utf8mb4 tem 4 bytes por caractere");
+        }
+    }
+
     std::printf("\n%d verificacoes, %d falharam\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

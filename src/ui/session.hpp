@@ -98,6 +98,7 @@ public:
     // uma, e manda o usuario procurar o que nao existe.
     [[nodiscard]] bool has_sequences() const noexcept { return has_sequences_; }
     [[nodiscard]] bool has_user_types() const noexcept { return has_user_types_; }
+    [[nodiscard]] bool has_events() const noexcept { return has_events_; }
 
     // O que o driver suporta. Vazio enquanto nao ha' conexao.
     //
@@ -119,6 +120,8 @@ public:
     void load_indexes_async(std::string schema, std::string table);
     void load_keys_async(std::string schema, std::string table);
     void load_triggers_async(std::string schema, std::string table);
+    void load_partitions_async(std::string schema, std::string table);
+    void load_events_async(std::string schema);
 
     // Corpo da view (`pg_get_viewdef`). Carregado so' quando o no "Definicao"
     // e' expandido: uma view de relatorio pode ter varios KB de SQL.
@@ -192,6 +195,7 @@ private:
     // criar um leitor de catalogo em cada um seria desperdicio.
     bool has_sequences_  = true;
     bool has_user_types_ = true;
+    bool has_events_     = false;
 
     std::optional<db::Capabilities> capabilities_;
 

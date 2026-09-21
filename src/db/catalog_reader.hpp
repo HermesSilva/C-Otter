@@ -44,6 +44,15 @@ public:
     [[nodiscard]] virtual Result<std::vector<TriggerMeta>> load_triggers(
         std::string_view schema, std::string_view table) = 0;
 
+    // Particoes de uma tabela. Lista vazia quando ela nao e' particionada --
+    // e a pasta nao aparece, como no `visibleIf` do DBeaver.
+    [[nodiscard]] virtual Result<std::vector<PartitionMeta>> load_partitions(
+        std::string_view schema, std::string_view table) = 0;
+
+    // Eventos agendados. So' o MySQL tem; no PostgreSQL devolve vazio.
+    [[nodiscard]] virtual Result<std::vector<EventMeta>> load_events(
+        std::string_view schema) = 0;
+
     [[nodiscard]] virtual Result<std::vector<SequenceMeta>> load_sequences(
         std::string_view schema) = 0;
     [[nodiscard]] virtual Result<std::vector<RoutineMeta>> load_routines(
@@ -76,6 +85,7 @@ public:
     // de uma view.
     [[nodiscard]] virtual bool has_sequences() const noexcept = 0;
     [[nodiscard]] virtual bool has_user_types() const noexcept = 0;
+    [[nodiscard]] virtual bool has_events() const noexcept = 0;
 
 protected:
     CatalogReader() = default;

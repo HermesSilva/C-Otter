@@ -85,6 +85,7 @@ void Session::connect_async(const db::ConnConfig& config) {
 
         const bool sequences  = catalog->has_sequences();
         const bool user_types = catalog->has_user_types();
+        const bool events     = catalog->has_events();
         const db::Capabilities caps = holt->capabilities();
 
         std::vector<db::SchemaMeta>     schemas;
@@ -131,6 +132,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         status_message_  = std::move(message);
         has_sequences_   = sequences;
         has_user_types_  = user_types;
+        has_events_      = events;
         capabilities_    = caps;
         state_.store(SessionState::connected, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
@@ -447,6 +449,34 @@ void Session::load_triggers_async(std::string schema, std::string table) {
         if (db::TableMeta* t = find_table(schema, table)) {
             t->triggers = std::move(*triggers);
             t->triggers_loaded = true;
+        }
+    });
+}
+
+void Session::load_partitions_async(std::string schema, std::string table) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
+        auto partitions = catalog.load_partitions(schema, table);
+        if (!partitions) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::TableMeta* t = find_table(schema, table)) {
+            t->partitions = std::move(*partitions);
+            t->partitions_loaded = true;
+        }
+    });
+}
+
+void Session::load_events_async(std::string schema) {
+    run_catalog_async([this, schema](db::CatalogReader& catalog) {
+        auto events = catalog.load_events(schema);
+        if (!events) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        for (db::SchemaMeta& s : schemas_) {
+            if (s.name != schema) continue;
+            s.events = std::move(*events);
+            s.events_loaded = true;
+            break;
         }
     });
 }
