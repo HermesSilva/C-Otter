@@ -125,6 +125,7 @@ function(otter_add_library name)
     set_property(TARGET ${name} PROPERTY OTTER_IS_UI ${A_UI_LAYER})
 endfunction()
 
+add_subdirectory(third_party)
 add_subdirectory(src)
 
 if(OTTER_BUILD_TESTS)

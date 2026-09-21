@@ -166,9 +166,24 @@ Maior módulo em linhas e o de maior risco.
 | Transversal | 1.050 | 9,0% |
 | **Subtotal técnico** | **10.600** | 90,6% |
 | Contingência 25% (risco normal de projeto) | 2.650 | |
-| **TOTAL** | **≈ 13.250 h/h** | |
+| **TOTAL (linha de base)** | **≈ 13.250 h/h** | |
 
-**Faixa realista: 11.000 – 16.000 h/h.** Use 13.250 como número de planejamento.
+### Revisão após ADRs 0003–0005 (2026-09-21)
+
+Decisões posteriores mudaram o escopo. O saldo é **positivo em capacidade** e ~+1.150 h/h:
+
+| Decisão | Δ h/h | Efeito |
+|---------|-------|--------|
+| **ADR 0003** — Scintilla em vez de editor próprio | **−400** | Remove o maior risco isolado do projeto |
+| **ADR 0004** — completion soberbo + IA | **+600** | Semântica incremental, 6 camadas de completion, `otter_ai` |
+| **ADR 0005** — grade analítica (grupos, totais, pivot) | **+550** | Motor de agregação sobre buffer colunar |
+| **Total revisado** | | **≈ 14.400 h/h** |
+
+**Faixa realista: 12.000 – 17.500 h/h.** Use **14.400** como número de planejamento.
+
+Com 4–5 desenvolvedores, o calendário vai de ~2–2,5 para **~2,5–2,8 anos**. As adições não
+são estouro: completion e grade analítica são exatamente o que diferencia o produto de um
+cliente SQL genérico.
 
 Validação cruzada: 166.000 linhas ÷ 13.250 h = **12,5 linhas/hora**, dentro da faixa
 esperada para C++ de sistemas. A estimativa é internamente consistente.

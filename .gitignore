@@ -21,6 +21,6 @@ CMakeUserPresets.json
 *.swp
 *~
 
-# Dependencias baixadas
-/third_party/*/
-!/third_party/README.md
+# Dependencias: vendoradas no repositorio (ADR 0002 -- build reprodutivel e
+# link estatico). Scintilla e Lexilla sao HPND; ver docs/LICENSES.md.
+# Os .lib gerados ficam em build/, ja' ignorado acima.
