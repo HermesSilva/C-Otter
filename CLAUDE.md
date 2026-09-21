@@ -105,3 +105,45 @@ protocolo. Exemplo real:
 Se um teste falhou, dizer com a saída. Se um passo foi pulado, dizer. Se a automação de UI
 errou o clique três vezes, dizer — e não apresentar como verificado o que não foi.
 
+
+## 12. Elemento de tela parecido com o do DBeaver — e validado como tal
+
+**Todo elemento de tela e de diálogo deve ser semelhante ao equivalente do DBeaver: o
+mesmo tipo de controle, no mesmo lugar, com o mesmo rótulo.** E isso precisa ser
+**validado na tela**, contra o DBeaver rodando ou contra uma captura dele — não contra a
+lembrança de como ele é.
+
+Por quê, nas palavras do usuário:
+
+> "Precisamos de paridade de funcionamento com o DBeaver, porque quem está acostumado com
+> ele terá dificuldade se for totalmente diferente."
+
+Isso amplia a diretiva 1. Mapear o que o DBeaver **oferece** não basta; é preciso mapear
+**onde** ele oferece. Um campo que existe mas está em outro lugar não tem paridade — quem
+procura onde está acostumado não acha, e conclui que a funcionalidade não existe.
+
+O caso que produziu esta diretiva: o **nome da conexão** ficava na aba "Geral", a oitava do
+diálogo. A faixa do topo apenas o exibia. O usuário viu o nome na tela, clicou nele, nada
+aconteceu, e relatou "não está editando nome da conexão". O campo funcionava; estava no
+lugar errado. No DBeaver o nome fica no topo, sempre visível.
+
+O que validar, em ordem:
+
+| Pergunta | Como responder |
+|---|---|
+| O controle existe no DBeaver? | `plugin.xml`, `*Page*.java`, `*Dialog.java` |
+| Está no mesmo lugar? | captura do DBeaver ao lado da nossa |
+| O rótulo é o mesmo? | `OSGI-INF/l10n/bundle.properties` |
+| Chega-se a ele pelo mesmo caminho? | mesma aba, mesmo menu, mesmo atalho |
+
+Para a comparação lado a lado, com as duas janelas já abertas na tela a conferir:
+
+```powershell
+tools\compare_ui.ps1 -Out dialogo.png    # DBeaver à esquerda, C-Otter à direita
+```
+
+Divergir é legítimo quando há razão — e a razão vai no comentário ou no ADR. Divergir sem
+perceber, não.
+
+Mapa do diálogo de conexão em `docs/DIALOG-PARITY.md`; da árvore, em
+`docs/NAVIGATOR-TREE.md`.
