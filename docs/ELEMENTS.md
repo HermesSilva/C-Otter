@@ -42,7 +42,7 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Relatório de textos sem tradução | ✅ | `missing_translations()` / `export_template()` |
 | Docking de painéis (arrastar abas) | ✅ | |
 | **Layout persistido** | ✅ | `%APPDATA%\C-Otter\layout.ini`, não no diretório de trabalho |
-| Ícone da janela | ⬜ | Usa o ícone padrão do sistema |
+| **Ícone da janela** | ✅ | Gerado em memória (32x32 RGBA) — decodificar o PNG exigiria trazer um stb_image só para isto |
 | Splash screen | ⬜ | `Midia/Splash.png` existe, não é usado |
 | Múltiplas janelas | ⬜ | |
 
@@ -271,6 +271,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Múltiplas abas de script** | — | ✅ | Cada uma com editor, resultado e estado próprios |
 | Nova aba | `Ctrl+T` | ✅ | Também pelo botão `+` e pelo menu Arquivo |
 | Fechar aba | `Ctrl+W` | ✅ | Também pelo `×` da aba |
+| **Menu de contexto da aba** | — | ✅ | Nunca abriu ate 2026-09-21: o corpo do editor virava o "ultimo item" e roubava o alvo |
 | Fechar outras | — | ✅ | Menu de contexto; respeita abas fixadas |
 | Fixar aba | — | ✅ | Fixadas vão para a esquerda e sobrevivem a "fechar outras" |
 | Copiar SQL da aba | — | ✅ | Menu de contexto |
@@ -280,7 +281,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Resultado isolado por aba** | — | ✅ | Trocar de aba troca a grade |
 | **Roteamento do resultado** | — | ✅ | Volta para a aba que executou, mesmo trocando de aba durante a query |
 | **Dialeto SQL por aba** | — | ✅ | Realce, formatação e paginação seguem o driver da aba |
-| Renomear aba | — | ⬜ | `set_title()` existe, sem UI |
+| **Renomear aba** | — | ✅ | Menu de contexto → Renomear aba...; vazio volta ao nome padrão |
 | Nome da conexão no rótulo do script | — | ➖ | Fica na janela; o DBeaver o repete em cada aba |
 
 ### Autocomplete
@@ -462,19 +463,19 @@ ficam de fora do total.
 
 | Área | ✅ | 🟡 | ⬜ | ❌ | Total |
 |------|-----|-----|-----|-----|-------|
-| Janela e estrutura | 17 | 0 | 3 | 0 | 20 |
+| Janela e estrutura | 18 | 0 | 2 | 0 | 20 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
 | Assistente de conexão | 41 | 1 | 9 | 0 | 51 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 33 | 0 | 1 | 0 | 34 |
-| Editor SQL | 53 | 3 | 4 | 0 | 60 |
+| Editor SQL | 55 | 3 | 3 | 0 | 61 |
 | Grade | 55 | 0 | 2 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **255** | **6** | **21** | **0** | **282** |
+| **Total** | **258** | **6** | **19** | **0** | **283** |
 
-**255 de 282 elementos existentes funcionam.**
+**258 de 283 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

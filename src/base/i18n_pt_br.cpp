@@ -788,6 +788,12 @@ const char* const kPtBr[] = {
 
     // --- Autocomplete ---
     "foreign key",                "chave estrangeira",
+
+    // --- Renomear aba ---
+    "Rename tab...",              "Renomear aba...",
+    "Rename tab",                 "Renomear aba",
+    "Empty restores the default name.",
+        "Vazio volta ao nome padrão.",
 };
 
 } // namespace

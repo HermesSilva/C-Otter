@@ -416,6 +416,12 @@ private:
     // Desenha a confirmacao de saida, quando ha' trabalho a perder.
     void draw_quit_confirm();
 
+    // Renomear a aba de script. Fora do menu de contexto: um menu se fecha ao
+    // primeiro clique fora, e um campo de texto precisa sobreviver a varios.
+    void draw_rename_tab();
+    std::size_t renaming_document_ = 0;   // 0 = nenhum
+    char        rename_buffer_[128] = "";
+
     // Quantos scripts tem texto nao salvo, e quantas celulas foram editadas
     // sem gravar. Sao as duas coisas que sair descartaria.
     [[nodiscard]] std::size_t unsaved_documents() const;

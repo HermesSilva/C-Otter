@@ -1302,8 +1302,65 @@ void MainShell::draw() {
     if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
 
+    draw_rename_tab();
+
     // Por ultimo: e' modal, e precisa ficar por cima de tudo que veio antes.
     draw_quit_confirm();
+}
+
+// Renomear a aba de script.
+//
+// Fora do menu de contexto de proposito: um menu se fecha ao primeiro clique
+// fora dele, e um campo de texto precisa sobreviver a varios -- e' a mesma
+// razao dos formularios de DDL.
+void MainShell::draw_rename_tab() {
+    if (renaming_document_ == 0) return;
+
+    constexpr const char* kPopup = "###RenameTab";
+    ImGui::OpenPopup(kPopup);
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(TRW("Rename tab", "###RenameTab"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        // Foco no campo ao abrir: renomear e' digitar, e obrigar um clique
+        // no campo antes seria atrito num dialogo de um campo so'.
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+
+        ImGui::SetNextItemWidth(320);
+        const bool entered = ImGui::InputText(
+            "##rename", rename_buffer_, sizeof rename_buffer_,
+            ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::TextColored(col4(colors().text_dim), "%s",
+                           TR("Empty restores the default name."));
+        ImGui::Spacing();
+
+        const bool confirmed = entered || ImGui::Button(TR("OK"), ImVec2(100, 0));
+
+        if (confirmed) {
+            for (std::unique_ptr<SqlDocument>& document : documents_) {
+                if (document->id() != renaming_document_) continue;
+                // Vazio LIMPA o titulo: title() volta a derivar "Script N" ou
+                // o nome do arquivo. Guardar a string vazia como titulo
+                // deixaria a aba sem rotulo nenhum.
+                document->set_title(rename_buffer_);
+                break;
+            }
+            renaming_document_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(TR("Cancel"), ImVec2(100, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            renaming_document_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void MainShell::draw_dockspace() {
@@ -3245,13 +3302,24 @@ void MainShell::draw_document_tabs(std::size_t connection_id) {
         if (document.modified()) item_flags |= ImGuiTabItemFlags_UnsavedDocument;
 
         bool open = true;
-        if (ImGui::BeginTabItem(label.c_str(), &open, item_flags)) {
-            active_document_ = i;
-            draw_document_body(document);
-            ImGui::EndTabItem();
-        }
+        const bool tab_visible =
+            ImGui::BeginTabItem(label.c_str(), &open, item_flags);
 
+        // O menu de contexto ANTES do corpo: BeginTabItem deixa a ABA como
+        // ultimo item, mas draw_document_body desenha o editor dentro dele e
+        // passa a ser o "ultimo item" -- o menu se ligava ao editor, e o
+        // clique direito sobre a aba nao abria nada.
+        //
+        // Aqui o ultimo item ainda e' a aba, que e' o alvo que o usuario ve'.
         if (ImGui::BeginPopupContextItem("##tabmenu")) {
+            // Renomear: set_title() existia desde sempre, sem nada que a
+            // chamasse. Com varios scripts abertos, "Script 1..7" nao diz
+            // qual e' qual -- e o nome do arquivo so' aparece ao salvar.
+            if (ImGui::MenuItem(TR("Rename tab..."))) {
+                renaming_document_ = document.id();
+                std::snprintf(rename_buffer_, sizeof rename_buffer_, "%s",
+                              document.title().c_str());
+            }
             if (ImGui::MenuItem(TR("Close"), "Ctrl+W")) to_close = i;
             if (ImGui::MenuItem(TR("Close others"))) to_close_others = i;
             ImGui::Separator();
@@ -3265,6 +3333,14 @@ void MainShell::draw_document_tabs(std::size_t connection_id) {
                 ImGui::SetClipboardText(document.editor().GetText().c_str());
             }
             ImGui::EndPopup();
+        }
+
+        // O corpo DEPOIS do menu: ele muda qual e' o "ultimo item", e por
+        // isso nao pode vir antes de BeginPopupContextItem.
+        if (tab_visible) {
+            active_document_ = i;
+            draw_document_body(document);
+            ImGui::EndTabItem();
         }
 
         if (!open) to_close = i;

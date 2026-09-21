@@ -23,6 +23,7 @@
 
 #include <GLFW/glfw3.h>
 
+#include <cmath>     // sqrt, para o antialias do icone da janela
 #include <cstdio>
 #include <string>
 
@@ -126,6 +127,83 @@ void load_ui_font(ImGuiIO& io, float scale) {
     if (ui == nullptr && mono == nullptr) return;  // sobra a embutida, so' ASCII
 }
 
+// Icone da janela, gerado em memoria.
+//
+// Midia/Logo.png existe, mas decodificar PNG exigiria trazer um stb_image
+// so' para isto -- o projeto so' tem o stb_image_WRITE, que o ImGui usa. Um
+// decodificador inteiro por um icone de 32 px nao se paga.
+//
+// O desenho e' a silhueta da lontra na paleta do produto: cabeca redonda,
+// duas orelhas e o focinho. No tamanho da barra de tarefas o que se le' e' a
+// silhueta, nao o detalhe -- o mesmo criterio dos icones da arvore.
+void set_window_icon(GLFWwindow* window) {
+    constexpr int kSize = 32;
+    static unsigned char pixels[kSize * kSize * 4];
+
+    // Ambar do tema, que e' a cor da marca (Midia/Logo.png).
+    constexpr unsigned char kR = 0xE8, kG = 0x9C, kB = 0x3E;
+
+    auto put = [&](int x, int y, unsigned char alpha) {
+        if (x < 0 || y < 0 || x >= kSize || y >= kSize) return;
+        unsigned char* px = &pixels[(y * kSize + x) * 4];
+        px[0] = kR; px[1] = kG; px[2] = kB; px[3] = alpha;
+    };
+
+    // Comeca transparente: o fundo da barra de tarefas aparece em volta.
+    for (int i = 0; i < kSize * kSize * 4; ++i) pixels[i] = 0;
+
+    // Disco preenchido com borda suave -- a cabeca.
+    const float cx = 15.5f, cy = 17.5f, r = 11.0f;
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const float dx = static_cast<float>(x) - cx;
+            const float dy = static_cast<float>(y) - cy;
+            const float d = std::sqrt(dx * dx + dy * dy);
+            if (d <= r - 1.0f) {
+                put(x, y, 255);
+            } else if (d <= r) {
+                // Antialias de uma amostra: suficiente a 32 px, e evita a
+                // serrilha que um disco duro mostra na barra de tarefas.
+                put(x, y, static_cast<unsigned char>(255.0f * (r - d)));
+            }
+        }
+    }
+
+    // As duas orelhas, discos menores no alto.
+    for (const float ex : {8.5f, 22.5f}) {
+        for (int y = 0; y < kSize; ++y) {
+            for (int x = 0; x < kSize; ++x) {
+                const float dx = static_cast<float>(x) - ex;
+                const float dy = static_cast<float>(y) - 8.0f;
+                if (std::sqrt(dx * dx + dy * dy) <= 4.5f) put(x, y, 255);
+            }
+        }
+    }
+
+    // Focinho e olhos, furados no disco: alfa zero deixa ver o fundo, o que
+    // da' contraste sem precisar de uma segunda cor.
+    auto punch = [&](float px_, float py, float pr) {
+        for (int y = 0; y < kSize; ++y) {
+            for (int x = 0; x < kSize; ++x) {
+                const float dx = static_cast<float>(x) - px_;
+                const float dy = static_cast<float>(y) - py;
+                if (std::sqrt(dx * dx + dy * dy) <= pr) {
+                    pixels[(y * kSize + x) * 4 + 3] = 0;
+                }
+            }
+        }
+    };
+    punch(11.5f, 15.0f, 1.6f);   // olho esquerdo
+    punch(19.5f, 15.0f, 1.6f);   // olho direito
+    punch(15.5f, 21.0f, 2.6f);   // focinho
+
+    GLFWimage image{};
+    image.width  = kSize;
+    image.height = kSize;
+    image.pixels = pixels;
+    glfwSetWindowIcon(window, 1, &image);
+}
+
 } // namespace
 
 // Fonte monoespacada para o editor SQL. Nula se o sistema nao tinha nenhuma:
@@ -193,6 +271,7 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
                          work_x + (work_w - width)  / 2,
                          work_y + (work_h - height) / 2);
     }
+    set_window_icon(impl.window);
     glfwShowWindow(impl.window);
 
     glfwMakeContextCurrent(impl.window);
