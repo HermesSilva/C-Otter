@@ -148,6 +148,11 @@ MainShell::MainShell()
         static_cast<MainShell*>(state.userData)->suggest(state);
     };
 
+    // Cria a Session vazia ANTES do primeiro documento: new_document() amarra
+    // a aba a' conexao ativa, e sem nenhuma conexao existindo ela nasceria
+    // com id 0 -- que nao pertence a janela nenhuma, deixando a aba invisivel.
+    (void)session();
+
     // Primeiro documento, com o texto de boas-vindas.
     new_document().editor().SetText(std::string(kWelcomeSql));
 
@@ -254,6 +259,14 @@ SqlDocument& MainShell::new_document() {
     document.editor().SetAutoCompleteConfig(autocomplete_config_.get());
     apply_editor_palette(document.editor());
 
+    // Nasce na conexao ATIVA. E' o padrao certo para quem abre um script pelo
+    // menu ou pelo Navigator: o alvo e' a base que se esta' olhando. Quem
+    // cria pelo "+" de uma janela de conexao sobrescreve isto logo depois,
+    // com a conexao daquela janela.
+    if (active_connection_ < connections_.size()) {
+        document.set_connection_id(connections_[active_connection_].id);
+    }
+
     active_document_ = documents_.size() - 1;
     return document;
 }
@@ -279,11 +292,17 @@ void MainShell::close_others(std::size_t keep_index) {
     // unique_ptr vazio e consulta-lo seria desreferenciar nulo.
     const std::size_t keep_id = documents_[keep_index]->id();
 
+    // "Outras" sao as da MESMA conexao: o menu foi aberto na barra de abas de
+    // uma janela de conexao, e fechar junto os scripts das demais apagaria
+    // trabalho que nem esta' visivel dali.
+    const std::size_t keep_conn = documents_[keep_index]->connection_id();
+
     std::vector<std::unique_ptr<SqlDocument>> kept;
     for (std::size_t i = 0; i < documents_.size(); ++i) {
         // Abas fixadas sobrevivem a "fechar outras" -- e' o que "fixar" quer
         // dizer.
-        if (i == keep_index || documents_[i]->pinned()) {
+        if (i == keep_index || documents_[i]->pinned() ||
+            documents_[i]->connection_id() != keep_conn) {
             kept.push_back(std::move(documents_[i]));
         }
     }
@@ -449,6 +468,20 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
 // tratar # como operador em vez de comentario, e nao entender o DELIMITER --
 // o script seria dividido no lugar errado.
 const sql::Dialect& MainShell::active_dialect() const {
+    // Do documento aberto, nao da conexao selecionada no Raft. Eram coisas
+    // diferentes desde que uma segunda conexao pode existir: com uma aba de
+    // MySQL em foco e o PostgreSQL selecionado na lista, o realce tratava a
+    // crase como texto e `#` como operador, e o divisor de script quebrava no
+    // lugar errado.
+    const MainShell* self = this;
+    if (const SqlDocument* document =
+            const_cast<MainShell*>(self)->active_document()) {
+        if (const Connection* connection =
+                connection_by_id(document->connection_id())) {
+            return sql::dialect_for(connection->profile.driver_id);
+        }
+    }
+
     const std::string& driver_id =
         active_connection_ < connections_.size()
             ? connections_[active_connection_].profile.driver_id
@@ -457,10 +490,14 @@ const sql::Dialect& MainShell::active_dialect() const {
 }
 
 void MainShell::execute_current_sql() {
-    if (session().state() != SessionState::connected || session().busy()) return;
-
     SqlDocument* document = active_document();
     if (document == nullptr) return;
+
+    // Pela sessao do DOCUMENTO. Usar session() aqui era o defeito: com duas
+    // conexoes abertas, Ctrl+Enter numa aba da primeira rodava contra a que
+    // estivesse selecionada no Raft.
+    Session& target = session_for(*document);
+    if (target.state() != SessionState::connected || target.busy()) return;
 
     std::string sql = document->sql_to_execute();
     if (sql.empty()) return;
@@ -552,10 +589,13 @@ void MainShell::save_script_file(bool save_as) {
 }
 
 void MainShell::explain_current_sql(bool analyze) {
-    if (session().state() != SessionState::connected || session().busy()) return;
-
     SqlDocument* document = active_document();
     if (document == nullptr) return;
+
+    // Pela sessao do documento, como a execucao: explicar o plano na base
+    // errada daria uma arvore que nao corresponde a nada.
+    Session& target = session_for(*document);
+    if (target.state() != SessionState::connected || target.busy()) return;
 
     std::string sql = document->sql_to_execute();
     if (sql.empty()) return;
@@ -564,7 +604,7 @@ void MainShell::explain_current_sql(bool analyze) {
     show_plan_    = true;
     plan_.reset();
 
-    session().explain_async(std::move(sql), analyze);
+    target.explain_async(std::move(sql), analyze);
 }
 
 void MainShell::draw_plan_node(const db::PlanNode& node, double max_cost,
@@ -767,10 +807,11 @@ void MainShell::format_current_sql() {
 }
 
 void MainShell::execute_script() {
-    if (session().state() != SessionState::connected || session().busy()) return;
-
     SqlDocument* document = active_document();
     if (document == nullptr) return;
+
+    Session& target = session_for(*document);
+    if (target.state() != SessionState::connected || target.busy()) return;
 
     const std::string text = document->editor().GetText();
     if (text.empty()) return;
@@ -804,19 +845,30 @@ void MainShell::execute_script() {
     // passa a ser a do resultado inteiro do ultimo SELECT.
     document->reset_paging();
 
-    session().execute_script_async(std::move(statements));
+    target.execute_script_async(std::move(statements));
 }
 
 void MainShell::execute_page(SqlDocument& document, std::size_t page) {
-    if (session().state() != SessionState::connected || session().busy()) return;
+    // Caminho por onde TODA execucao passa -- e' aqui que a conexao errada
+    // fazia mais estrago.
+    Session& target = session_for(document);
+    if (target.state() != SessionState::connected || target.busy()) return;
     if (document.paged_sql().empty()) return;
 
     // A reescrita com LIMIT/OFFSET impede que um SELECT sem limite trave a UI
     // ate' o servidor terminar de enviar tudo (ADR 0011). Quando nao e' seguro
     // reescrever, executa o original: rodar algo diferente do que o usuario
     // escreveu seria pior que a espera.
+    // Dialeto do documento: a reescrita com LIMIT/OFFSET cita identificadores,
+    // e citar com aspas o que o MySQL espera entre crases faria o servidor
+    // rejeitar a consulta.
+    const Connection* owner = connection_by_id(document.connection_id());
+    const sql::Dialect& dialect =
+        owner != nullptr ? sql::dialect_for(owner->profile.driver_id)
+                         : active_dialect();
+
     const sql::PagedQuery paged = sql::make_paged_query(
-        document.paged_sql(), active_dialect(), page,
+        document.paged_sql(), dialect, page,
         sql::kDefaultPageSize, document.sort(), document.filter());
 
     document.set_page(page);
@@ -827,7 +879,7 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     document.set_executing(true);
     document.set_status({});
 
-    session().execute_async(paged.sql);
+    target.execute_async(paged.sql);
 }
 
 void MainShell::draw() {
@@ -878,7 +930,21 @@ void MainShell::draw() {
         ddl_reload_table_.clear();
     }
 
-    if (!session().busy() && executing_document_id_ != 0) {
+    // A sessao do documento que executou, nao a ativa: o usuario pode ter
+    // clicado noutra conexao enquanto a consulta corria, e colher o
+    // resultado da sessao errada misturaria as duas grades.
+    Session* runner = nullptr;
+    if (executing_document_id_ != 0) {
+        for (auto& document : documents_) {
+            if (document->id() == executing_document_id_) {
+                runner = &session_for(*document);
+                break;
+            }
+        }
+    }
+
+    if (runner != nullptr && !runner->busy()) {
+        Session& active_runner = *runner;
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
 
@@ -887,7 +953,7 @@ void MainShell::draw() {
             // transacao falhasse -- e o usuario nao teria como refaze-lo.
             if (document->edits().has_changes() && saving_edits_) {
                 saving_edits_ = false;
-                if (!session().last_script_failed()) {
+                if (!active_runner.last_script_failed()) {
                     document->edits().clear();
 
                     // Relê para mostrar o que o banco REALMENTE gravou:
@@ -915,7 +981,7 @@ void MainShell::draw() {
                 }
             }
 
-            if (auto fresh = session().take_result()) {
+            if (auto fresh = active_runner.take_result()) {
                 // A pagina pediu uma linha a mais do que mostra. Se ela veio,
                 // ha' mais resultado adiante -- e ela nao pode aparecer na
                 // grade, senao o usuario veria 201 linhas ao pedir 200.
@@ -940,7 +1006,7 @@ void MainShell::draw() {
                 recompute_pivot(*document);
                 document->set_edit_target(
                     db::find_edit_target(*document->result(),
-                                         session().schemas()));
+                                         active_runner.schemas()));
 
                 // Chave ainda nao lida: pede o carregamento. O alvo e'
                 // recalculado no quadro seguinte, quando as constraints
@@ -949,7 +1015,7 @@ void MainShell::draw() {
                 if (document->edit_target().refusal ==
                         db::EditRefusal::key_not_loaded &&
                     !document->edit_target().table.empty()) {
-                    session().load_constraints_async(
+                    active_runner.load_constraints_async(
                         document->edit_target().schema,
                         document->edit_target().table);
                     pending_edit_target_ = document->id();
@@ -973,7 +1039,7 @@ void MainShell::draw() {
                 document->set_status(TRF("%zu row(s), %zu column(s)",
                                          rs.row_count(), rs.column_count()));
             } else {
-                document->set_status(session().status_message());
+                document->set_status(active_runner.status_message());
             }
             document->set_executing(false);
             break;
@@ -1127,10 +1193,14 @@ void MainShell::draw_dockspace() {
 
         ImGui::DockBuilderDockWindow("###RaftPanel",      left_top);
         ImGui::DockBuilderDockWindow("###NavigatorPanel", left_bottom);
-        ImGui::DockBuilderDockWindow("###SqlPanel",       center_top);
         ImGui::DockBuilderDockWindow("###ResultPanel",    center_bottom);
         ImGui::DockBuilderDockWindow("###QueriesPanel",   center_bottom);
         ImGui::DockBuilderFinish(dock_id);
+
+        // Guardado para ancorar a janela de cada conexao NOVA no mesmo lugar
+        // onde ficava a antiga "SQL". Sem isto, conectar a uma segunda base
+        // faria a janela dela nascer flutuando no meio da tela.
+        editor_dock_id_ = center_top;
     }
 
     ImGui::DockSpace(dock_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
@@ -2835,7 +2905,13 @@ void MainShell::draw_toolbar() {
     ImGui::PopStyleVar(2);
 }
 
-void MainShell::draw_document_tabs() {
+// Abas de script de UMA conexao.
+//
+// So' desenha os documentos daquela conexao: os das outras vivem na janela
+// delas. Antes havia uma barra unica com todos os scripts misturados, e um
+// script de MySQL ficava ao lado de um de PostgreSQL sem nada distinguindo
+// -- era possivel ver `public.` e crase na mesma tela.
+void MainShell::draw_document_tabs(std::size_t connection_id) {
     constexpr ImGuiTabBarFlags flags =
         ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs |
         ImGuiTabBarFlags_FittingPolicyScroll |
@@ -2843,10 +2919,12 @@ void MainShell::draw_document_tabs() {
 
     if (!ImGui::BeginTabBar("##doctabs", flags)) return;
 
-    // Botão "+" ao lado das abas, como em navegadores.
+    // Botão "+" ao lado das abas, como em navegadores. O script novo nasce
+    // JA' na conexao desta janela -- e' o que o usuario esta' olhando.
     if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing |
                                       ImGuiTabItemFlags_NoTooltip)) {
-        new_document();
+        SqlDocument& created = new_document();
+        created.set_connection_id(connection_id);
     }
 
     std::optional<std::size_t> to_close;
@@ -2854,6 +2932,8 @@ void MainShell::draw_document_tabs() {
 
     for (std::size_t i = 0; i < documents_.size(); ++i) {
         SqlDocument& document = *documents_[i];
+        if (document.connection_id() != connection_id) continue;
+
         ImGui::PushID(static_cast<int>(document.id()));
 
         // O sufixo ###id mantém a identidade da aba mesmo quando o título
@@ -2902,12 +2982,16 @@ void MainShell::draw_document_tabs() {
 }
 
 void MainShell::draw_document_body(SqlDocument& document) {
-    const bool can_run = session().state() == SessionState::connected &&
-                         !session().busy();
+    // A sessao DESTE documento, nao a ativa: a aba executa contra a base a
+    // que pertence, mesmo que outra conexao esteja selecionada no Raft.
+    Session& target = session_for(document);
+    const bool can_run = target.state() == SessionState::connected &&
+                         !target.busy();
 
     ImGui::BeginDisabled(!can_run);
     if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
     ImGui::EndDisabled();
+
 
     ImGui::SameLine();
     const TextEditor::DocPos cursor =
@@ -2934,11 +3018,78 @@ void MainShell::draw_document_body(SqlDocument& document) {
     if (mono != nullptr) ImGui::PopFont();
 }
 
-void MainShell::draw_editor_panel() {
-    if (ImGui::Begin(TRW("SQL", "###SqlPanel"))) {
-        draw_document_tabs();
+// UMA janela por conexao, com as abas de script dela dentro.
+//
+// Era uma janela unica "SQL" com todos os scripts misturados. O usuario
+// abria uma segunda conexao, criava um script, e ele nascia ao lado dos da
+// primeira -- sem nada dizendo a qual base pertencia. Como a execucao usava
+// a conexao ATIVA, e nao a do documento, o script rodava contra quem
+// estivesse selecionado no Raft naquele instante.
+//
+// Sendo janelas ancoraveis de verdade (e nao uma barra de abas interna), o
+// ImGui as empilha como abas no mesmo no' do dock -- e da' para arrastar
+// duas conexoes lado a lado para comparar.
+void MainShell::draw_connection_editor(Connection& connection) {
+    // Titulo = nome da conexao; ###id mantem a identidade da janela quando o
+    // usuario renomeia a conexao (o ImGui identifica janela pelo nome, e
+    // renomear a desancoraria do layout -- mesma razao do TRW).
+    const std::string title = connection.profile.effective_name() +
+                              "###SqlPanel" + std::to_string(connection.id);
+
+    // Ancora a janela na primeira vez que ela aparece. SetNextWindowDockID
+    // com ImGuiCond_FirstUseEver nao sobrescreve o que o usuario arrastou:
+    // depois de mover a janela, a posicao dele e' que vale.
+    if (editor_dock_id_ != 0) {
+        ImGui::SetNextWindowDockID(editor_dock_id_, ImGuiCond_FirstUseEver);
     }
+
+    // Cor do tipo (Desenvolvimento/Teste/Producao) na aba da janela: e' o
+    // aviso de que se esta' prestes a executar em producao.
+    const db::ConnectionTypeInfo& type =
+        db::connection_type_info(connection.profile.type);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(type.color));
+    const bool open = ImGui::Begin(title.c_str());
+    ImGui::PopStyleColor();
+
+    // A janela em foco manda no resto da tela: Navigator, barra de status e
+    // a conexao que um script novo herda passam a ser os desta.
+    //
+    // Sem isto, clicar na aba do MySQL deixava o Navigator listando os
+    // schemas do PostgreSQL e a barra dizendo "PostgreSQL 18.2" -- a tela
+    // inteira falando de uma base enquanto o editor falava de outra.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        for (std::size_t i = 0; i < connections_.size(); ++i) {
+            if (connections_[i].id == connection.id) {
+                active_connection_ = i;
+                active_profile_    = connections_[i].profile;
+                break;
+            }
+        }
+    }
+
+    if (open) draw_document_tabs(connection.id);
     ImGui::End();
+}
+
+void MainShell::draw_editor_panel() {
+    // Sem conexao nenhuma, session() cria a Session vazia -- e com ela a
+    // janela onde da' para digitar antes de conectar. Chamada pelo efeito
+    // colateral; o valor nao interessa aqui.
+    (void)session();
+
+    // Abas cuja conexao foi fechada passam para a ativa, senao ficariam sem
+    // janela onde aparecer -- some da tela o script que o usuario talvez nao
+    // tenha salvo. Manter a aba e' o combinado; o que ela perde e' o vinculo
+    // com a base que deixou de existir.
+    for (std::unique_ptr<SqlDocument>& document : documents_) {
+        if (connection_by_id(document->connection_id()) == nullptr) {
+            document->set_connection_id(connections_[active_connection_].id);
+        }
+    }
+
+    for (Connection& connection : connections_) {
+        draw_connection_editor(connection);
+    }
 }
 
 void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
@@ -5658,7 +5809,8 @@ Session& MainShell::session() {
     // exatamente o que a UI precisa desenhar.
     if (connections_.empty()) {
         connections_.push_back({std::make_unique<Session>(),
-                                db::ConnectionProfile{}});
+                                db::ConnectionProfile{},
+                                next_connection_id_++});
         active_connection_ = 0;
     }
     if (active_connection_ >= connections_.size()) {
@@ -5669,6 +5821,27 @@ Session& MainShell::session() {
 
 const Session& MainShell::session() const {
     return const_cast<MainShell*>(this)->session();
+}
+
+MainShell::Connection* MainShell::connection_by_id(std::size_t id) {
+    for (Connection& connection : connections_) {
+        if (connection.id == id) return &connection;
+    }
+    return nullptr;   // conexao fechada; a aba continua, sem poder executar
+}
+
+const MainShell::Connection* MainShell::connection_by_id(std::size_t id) const {
+    return const_cast<MainShell*>(this)->connection_by_id(id);
+}
+
+// A sessao DO DOCUMENTO, nao a ativa.
+//
+// Se a conexao dele foi fechada, devolve a Session vazia de session(): ela
+// responde disconnected para tudo, e os pontos que chamam isto ja' tratam
+// esse estado (o botao Executar fica desabilitado).
+Session& MainShell::session_for(const SqlDocument& document) {
+    Connection* connection = connection_by_id(document.connection_id());
+    return connection != nullptr ? *connection->session : session();
 }
 
 Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
@@ -5682,8 +5855,24 @@ Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
         connections_.front().profile = profile;
         active_connection_ = 0;
     } else {
-        connections_.push_back({std::make_unique<Session>(), profile});
+        connections_.push_back({std::make_unique<Session>(), profile,
+                                next_connection_id_++});
         active_connection_ = connections_.size() - 1;
+    }
+
+    // Toda conexao nasce com um script vazio: conectar ja' deixa onde
+    // digitar, sem exigir um clique em "+" antes.
+    const std::size_t conn_id = connections_[active_connection_].id;
+    bool has_document = false;
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        if (document->connection_id() == conn_id) {
+            has_document = true;
+            break;
+        }
+    }
+    if (!has_document) {
+        SqlDocument& document = new_document();
+        document.set_connection_id(conn_id);
     }
 
     // A conexao recem-aberta passa a ser a ativa tambem para o perfil: sem

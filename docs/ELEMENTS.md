@@ -254,9 +254,20 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 
 ### Abas de editor
 
+**Dois níveis desde 2026-09-21**, como o `SQLEditor` do DBeaver: uma janela
+ancorável **por conexão**, com o nome dela no título, e dentro as abas de
+script. Antes havia uma janela única "SQL" com todos os scripts misturados —
+um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
+
 | Elemento | Atalho | Estado | Observação |
 |----------|--------|--------|------------|
-| **Múltiplas abas** | — | ✅ | Cada uma com editor, resultado e estado próprios |
+| **Uma janela por conexão** | — | ✅ | Título = nome da conexão, na cor do tipo |
+| **Conexão por aba** | — | ✅ | O script executa contra a base dele, não contra a ativa |
+| Janela em foco define a conexão ativa | — | ✅ | Navigator e barra de status acompanham a aba |
+| Script novo herda a conexão da janela | — | ✅ | O `+` cria já amarrado |
+| Conectar abre a janela com `Script 1` | — | ✅ | Sem exigir clique no `+` antes |
+| Conexões lado a lado | — | ✅ | Arrastando a janela, pelo docking do ImGui |
+| **Múltiplas abas de script** | — | ✅ | Cada uma com editor, resultado e estado próprios |
 | Nova aba | `Ctrl+T` | ✅ | Também pelo botão `+` e pelo menu Arquivo |
 | Fechar aba | `Ctrl+W` | ✅ | Também pelo `×` da aba |
 | Fechar outras | — | ✅ | Menu de contexto; respeita abas fixadas |
@@ -267,8 +278,9 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Indicador de modificado | — | ✅ | `*` no título e `●` na barra |
 | **Resultado isolado por aba** | — | ✅ | Trocar de aba troca a grade |
 | **Roteamento do resultado** | — | ✅ | Volta para a aba que executou, mesmo trocando de aba durante a query |
+| **Dialeto SQL por aba** | — | ✅ | Realce, formatação e paginação seguem o driver da aba |
 | Renomear aba | — | ⬜ | `set_title()` existe, sem UI |
-| Conexão por aba | — | ⬜ | Todas usam a conexão ativa |
+| Nome da conexão no rótulo do script | — | ➖ | Fica na janela; o DBeaver o repete em cada aba |
 
 ### Autocomplete
 
@@ -446,14 +458,14 @@ ficam de fora do total.
 | Assistente de conexão | 41 | 0 | 10 | 0 | 51 |
 | Painel Raft | 10 | 0 | 2 | 0 | 12 |
 | Navigator | 32 | 0 | 1 | 0 | 33 |
-| Editor SQL | 45 | 3 | 6 | 0 | 54 |
+| Editor SQL | 52 | 3 | 5 | 0 | 60 |
 | Grade | 51 | 0 | 3 | 0 | 54 |
 | Inspetor de queries | 9 | 0 | 4 | 0 | 13 |
 | Barra de status | 4 | 0 | 2 | 0 | 6 |
 | Transações | 4 | 0 | 2 | 0 | 6 |
-| **Total** | **229** | **5** | **33** | **0** | **267** |
+| **Total** | **236** | **5** | **32** | **0** | **273** |
 
-**229 de 267 elementos existentes funcionam.**
+**236 de 273 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

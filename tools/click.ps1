@@ -6,7 +6,13 @@ param(
     [int]$Y,
     [string]$Out = "$env:TEMP\c-otter.png",
     [int]$WaitMs = 700,
-    [switch]$NoShot
+    [switch]$NoShot,
+    # Duplo clique: dois clicks dentro do intervalo do sistema. Chamar o
+    # script duas vezes NAO serve -- o tempo entre as duas execucoes passa
+    # do limite e o app ve dois cliques simples.
+    [switch]$Double,
+    # Botao direito, para menu de contexto.
+    [switch]$Right
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,8 +45,21 @@ $rect = New-Object OtterClick+RECT
 if ($PSBoundParameters.ContainsKey('X')) {
     [void][OtterClick]::SetCursorPos($rect.Left + $X, $rect.Top + $Y)
     Start-Sleep -Milliseconds 250
-    [OtterClick]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
-    [OtterClick]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+
+    # 0x0002/0x0004 = botao esquerdo desce/sobe; 0x0008/0x0010 = direito.
+    $down = if ($Right) { 0x0008 } else { 0x0002 }
+    $up   = if ($Right) { 0x0010 } else { 0x0004 }
+
+    [OtterClick]::mouse_event($down, 0, 0, 0, [IntPtr]::Zero)
+    [OtterClick]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
+
+    if ($Double) {
+        # 80 ms: bem abaixo do limite padrao de 500 ms do Windows.
+        Start-Sleep -Milliseconds 80
+        [OtterClick]::mouse_event($down, 0, 0, 0, [IntPtr]::Zero)
+        [OtterClick]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
+    }
+
     Start-Sleep -Milliseconds $WaitMs
 }
 

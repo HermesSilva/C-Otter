@@ -216,7 +216,8 @@ private:
     void close_document(std::size_t index);
     void close_others(std::size_t keep_index);
     [[nodiscard]] SqlDocument* active_document();
-    void draw_document_tabs();
+    // Abas de script de UMA conexao: so' os documentos dela.
+    void draw_document_tabs(std::size_t connection_id);
     void draw_document_body(SqlDocument& document);
 
     std::vector<std::unique_ptr<SqlDocument>> documents_;
@@ -240,10 +241,27 @@ private:
     struct Connection {
         std::unique_ptr<Session> session;
         db::ConnectionProfile    profile;
+
+        // Identidade estavel da conexao, para o documento saber a qual
+        // pertence. NAO da' para usar o indice: fechar uma conexao desloca
+        // todas as seguintes, e as abas passariam a apontar para a vizinha.
+        std::size_t id = 0;
     };
 
     std::vector<Connection> connections_;
     std::size_t             active_connection_ = 0;
+    std::size_t             next_connection_id_ = 1;
+
+    // Conexao a que uma aba pertence, ou nullptr se ela ja' foi fechada.
+    [[nodiscard]] Connection* connection_by_id(std::size_t id);
+    [[nodiscard]] const Connection* connection_by_id(std::size_t id) const;
+
+    // Sessao de um documento -- a dele, nao a ativa. Executar sempre pela
+    // ativa e' o que fazia um script rodar contra a base errada.
+    [[nodiscard]] Session& session_for(const SqlDocument& document);
+
+    // Desenha a janela de UMA conexao, com as abas de script dela.
+    void draw_connection_editor(Connection& connection);
 
     // Conexao ativa. Os ~70 pontos que usam `session_` continuam valendo: a
     // referencia aponta para a Session da conexao selecionada no Raft.
@@ -355,6 +373,10 @@ private:
 
 
     bool layout_initialized_ = false;
+
+    // No' do dock onde as janelas de conexao nascem -- o lugar da antiga
+    // janela unica "SQL". Zero antes do layout ser montado.
+    unsigned int editor_dock_id_ = 0;
     bool wants_quit_         = false;
     bool show_about_         = false;
     bool show_demo_          = false;

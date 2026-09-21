@@ -50,7 +50,8 @@ SQL Editor                       main.sqleditor
 Rodapé: `Test Connection ...` à esquerda, `OK` e `Close` à direita.
 
 O C-Otter usava **abas horizontais**: Principal, Driver, SSH, SSL, Proxy,
-Inicialização, Geral. Sete abas contra a árvore acima.
+Inicialização, Geral. Sete abas contra a árvore acima — até 2026-09-21, quando
+passou a usar a mesma árvore (ver "O que já foi corrigido", abaixo).
 
 Note onde o DBeaver **não** põe uma página: SSH, SSL e Proxy não são irmãs de
 "Main". Elas vivem dentro de `Connection settings`, como abas da página do
@@ -153,3 +154,30 @@ Da tipografia, mesma data:
 |---|---|
 | Fonte do sistema na interface (Segoe UI / DejaVu Sans) | ✅ |
 | Monoespaçada só no editor SQL | ✅ |
+
+Do editor, 2026-09-21 — *"a aba SQL deve ter o nome da conexão, e ao abrir uma
+nova query deve abrir na conexão correta"*:
+
+A captura do usuário mostrava um `Script 3` com **crase do MySQL e `public.`
+do PostgreSQL na mesma query**. Não era erro de digitação: a janela "SQL" era
+uma só, os scripts de todas as conexões conviviam nela, e tanto a execução
+quanto o realce usavam a conexão **ativa no Raft** — não a do script.
+
+No DBeaver cada `SQLEditor` carrega seu próprio `DBPDataSourceContainer`
+(`SQLEditor.java:445`), e o título de fábrica é
+`<${connectionName}> ${fileName}` (`SQLEditor.java:180`).
+
+| Item | Estado |
+|---|---|
+| Uma janela ancorável por conexão, com o nome dela | ✅ |
+| Abas de script dentro da janela da conexão | ✅ |
+| Execução pela sessão do documento, não pela ativa | ✅ |
+| Dialeto (realce, formatação, paginação) pelo driver da aba | ✅ |
+| Janela em foco define Navigator e barra de status | ✅ |
+| Conectar já abre a janela com `Script 1` | ✅ |
+| Resultado colhido da sessão que executou | ✅ |
+
+Divergência consciente: o DBeaver repete o nome da conexão **em cada aba de
+script**, porque lá elas são abas de topo do Eclipse. Aqui o nome fica na
+janela que as contém — repeti-lo em cada aba seria redundante, já que todas as
+abas de uma janela pertencem à mesma conexão.

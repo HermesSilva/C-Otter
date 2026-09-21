@@ -29,6 +29,18 @@ public:
 
     [[nodiscard]] std::size_t id() const noexcept { return id_; }
 
+    // Conexao a que este script pertence, pelo id ESTAVEL da conexao (nao
+    // pelo indice, que muda quando outra e' fechada).
+    //
+    // Existe porque executar usava sempre a conexao ativa: abrir uma segunda
+    // conexao e voltar a uma aba da primeira fazia o Ctrl+Enter rodar contra
+    // a base errada -- e o realce misturava os dialetos na mesma tela, com
+    // `public.` do PostgreSQL ao lado da crase do MySQL.
+    [[nodiscard]] std::size_t connection_id() const noexcept {
+        return connection_id_;
+    }
+    void set_connection_id(std::size_t id) noexcept { connection_id_ = id; }
+
     [[nodiscard]] TextEditor& editor() noexcept { return *editor_; }
     [[nodiscard]] const TextEditor& editor() const noexcept { return *editor_; }
 
@@ -175,6 +187,7 @@ public:
 
 private:
     std::size_t                 id_;
+    std::size_t                 connection_id_ = 0;
     std::unique_ptr<TextEditor> editor_;
     std::string                 title_;
     std::string                 file_path_;
