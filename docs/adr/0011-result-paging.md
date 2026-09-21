@@ -80,6 +80,33 @@ sintaxe, e sobrepor o do usuário executaria algo diferente do que está na tela
 O custo aparece no inspetor: contra 2 milhões de linhas sem índice, ordenar levou
 76 ms contra 0,88 ms sem ordenação.
 
+## Filtro por coluna (acrescentado em 2026-09-21)
+
+Mesmo mecanismo, com uma diferença: o filtro **envolve** a consulta numa subconsulta
+em vez de anexar `WHERE`. Anexar seria errado de três jeitos:
+
+- A consulta pode já ter `WHERE` — dois na mesma não compilam
+- Pode terminar em `GROUP BY` ou `HAVING`, e `WHERE` depois deles é sintaxe inválida
+- Mesmo quando compilasse, filtraria **antes** da agregação, produzindo um resultado
+  diferente do que a grade mostra
+
+```sql
+SELECT * FROM (
+  <consulta do usuário>
+) AS otter_filter
+ WHERE "coluna" > 100
+ ORDER BY "outra" DESC
+ LIMIT 201
+```
+
+O envolvimento tem um efeito colateral útil: o `ORDER BY` do usuário passa para dentro
+da subconsulta, e a ordenação da grade deixa de conflitar com ele.
+
+A expressão é escrita pelo usuário e vai para o SQL **como digitada** — é uma cláusula
+`WHERE`, não um valor. Quem digita `1=1 OR TRUE` está consultando o próprio banco com as
+próprias credenciais; não há elevação de privilégio a impedir. A interface chama o campo
+de *expressão* justamente para dizer isso.
+
 ## Consequências
 
 - A UI não trava mais com `SELECT` sem `LIMIT`

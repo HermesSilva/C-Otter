@@ -83,6 +83,10 @@ private:
 
     // Janela de exportacao do resultado: formato, opcoes e previa.
     void draw_export_window();
+
+    // Menu de contexto de um cabecalho de coluna: filtro e ordenacao.
+    void draw_column_header_menu(SqlDocument& document, const db::ResultSet& rs,
+                                 std::size_t column);
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();

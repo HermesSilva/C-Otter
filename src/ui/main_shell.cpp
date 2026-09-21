@@ -444,6 +444,7 @@ void MainShell::execute_current_sql() {
     document->set_paged_sql(sql);
     document->set_page(0);
     document->set_sort({});
+    document->set_filter({});
     execute_page(*document, 0);
 }
 
@@ -573,7 +574,7 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     // escreveu seria pior que a espera.
     const sql::PagedQuery paged = sql::make_paged_query(
         document.paged_sql(), sql::postgres_dialect(), page,
-        sql::kDefaultPageSize, document.sort());
+        sql::kDefaultPageSize, document.sort(), document.filter());
 
     document.set_page(page);
     document.set_paged(paged.rewritten);
@@ -1944,6 +1945,93 @@ void MainShell::draw_editor_panel() {
     ImGui::End();
 }
 
+void MainShell::draw_column_header_menu(SqlDocument& document,
+                                        const db::ResultSet& rs,
+                                        std::size_t column) {
+    if (!ImGui::BeginPopupContextItem("##colmenu")) return;
+
+    const Palette& p = colors();
+    const db::ColumnInfo& info = rs.column(column).info();
+    const bool can_run = session().state() == SessionState::connected &&
+                         !session().busy();
+
+    ImGui::TextColored(col4(p.accent_light), "%s", info.name.c_str());
+    ImGui::TextColored(col4(p.text_dim), "%s", info.type_name.c_str());
+    ImGui::Separator();
+
+    // Filtrar exige refazer a consulta, o que so' vale para resultado
+    // paginado -- um resultado completo ja' esta' inteiro na tela.
+    if (!document.paged()) {
+        ImGui::TextColored(col4(p.text_dim), TR("filtering needs a paged result"));
+        ImGui::EndPopup();
+        return;
+    }
+
+    // O campo guarda o texto por coluna, para nao perder o que foi digitado
+    // ao fechar e reabrir o menu.
+    static std::string editing_column;
+    static char expression[256] = "";
+
+    if (editing_column != info.name) {
+        editing_column = info.name;
+        const bool same = document.filter().column == info.name;
+        std::snprintf(expression, sizeof expression, "%s",
+                      same ? document.filter().expression.c_str() : "");
+    }
+
+    // "Expressao", nao "valor": o texto vai para a clausula WHERE como
+    // digitado, e o rotulo precisa dizer isso.
+    ImGui::TextColored(col4(p.text_dim), TR("WHERE %s ..."), info.name.c_str());
+    ImGui::SetNextItemWidth(260.0f);
+
+    const bool submitted = ImGui::InputTextWithHint(
+        "##filterexpr", TR("> 100   |   LIKE '%lontra%'   |   IS NULL"),
+        expression, sizeof expression,
+        ImGuiInputTextFlags_EnterReturnsTrue);
+
+    const bool apply = submitted ||
+                       ImGui::Button(TR("Apply filter"));
+
+    if (apply && can_run) {
+        sql::ColumnFilter filter;
+        if (expression[0] != '\0') {
+            filter.column     = info.name;
+            filter.expression = expression;
+        }
+        document.set_filter(std::move(filter));
+        execute_page(document, 0);   // filtro muda o total: volta ao inicio
+        ImGui::CloseCurrentPopup();
+    }
+
+    if (!document.filter().empty()) {
+        ImGui::SameLine();
+        if (ImGui::Button(TR("Clear filter")) && can_run) {
+            document.set_filter({});
+            expression[0] = '\0';
+            execute_page(document, 0);
+            ImGui::CloseCurrentPopup();
+        }
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::MenuItem(TR("Sort ascending"), nullptr, false, can_run)) {
+        document.set_sort(sql::SortOrder{info.name, false});
+        execute_page(document, 0);
+    }
+    if (ImGui::MenuItem(TR("Sort descending"), nullptr, false, can_run)) {
+        document.set_sort(sql::SortOrder{info.name, true});
+        execute_page(document, 0);
+    }
+
+    ImGui::Separator();
+    if (ImGui::MenuItem(TR("Copy column name"))) {
+        ImGui::SetClipboardText(info.name.c_str());
+    }
+
+    ImGui::EndPopup();
+}
+
 void MainShell::draw_export_window() {
     const Palette& p = colors();
 
@@ -2287,7 +2375,37 @@ void MainShell::draw_grid_panel() {
                 ImGui::TableSetupColumn(
                     rs.column(static_cast<std::size_t>(c)).info().name.c_str());
             }
-            ImGui::TableHeadersRow();
+            // Cabecalhos um a um, em vez de TableHeadersRow(): cada um ganha
+            // menu de contexto proprio, com o filtro daquela coluna.
+            ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+            for (int c = 0; c < columns; ++c) {
+                ImGui::TableSetColumnIndex(c);
+                const std::string& name =
+                    rs.column(static_cast<std::size_t>(c)).info().name;
+
+                // Coluna filtrada leva um prefixo no rotulo, nao um icone ao
+                // lado: TableHeader ocupa a largura toda da celula, e
+                // qualquer SameLine depois dele desenha POR CIMA do texto.
+                const bool filtered =
+                    !document->filter().empty() &&
+                    document->filter().column == name;
+
+                ImGui::PushID(c);
+                if (filtered) {
+                    // '*' e nao um simbolo Unicode: a fonte carregada cobre
+                    // Latin-1, e um glifo ausente viraria '?' na tela.
+                    const std::string marked = "* " + name;
+                    ImGui::PushStyleColor(ImGuiCol_Text, col(p.warn));
+                    ImGui::TableHeader(marked.c_str());
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::TableHeader(ImGui::TableGetColumnName(c));
+                }
+
+                draw_column_header_menu(*document, rs,
+                                        static_cast<std::size_t>(c));
+                ImGui::PopID();
+            }
 
             // A ordenacao acontece no SERVIDOR, refazendo a consulta: ordenar
             // no cliente reordenaria apenas as 200 linhas da pagina, o que

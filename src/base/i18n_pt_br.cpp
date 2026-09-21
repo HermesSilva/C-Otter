@@ -58,6 +58,16 @@ const char* const kPtBr[] = {
 
     // --- Grade de resultado e paginacao ---
     "First page",                 "Primeira página",
+    "Apply filter",               "Aplicar filtro",
+    "Clear filter",               "Limpar filtro",
+    "Sort ascending",             "Ordenar crescente",
+    "Sort descending",            "Ordenar decrescente",
+    "Copy column name",           "Copiar nome da coluna",
+    "WHERE %s ...",               "WHERE %s ...",
+    "> 100   |   LIKE '%lontra%'   |   IS NULL",
+    "> 100   |   LIKE '%lontra%'   |   IS NULL",
+    "filtering needs a paged result",
+    "o filtro exige um resultado paginado",
     "Previous page",              "Página anterior",
     "Next page",                  "Próxima página",
     "rows %zu-%zu",               "linhas %zu-%zu",

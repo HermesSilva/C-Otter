@@ -87,12 +87,20 @@ public:
     [[nodiscard]] const sql::SortOrder& sort() const noexcept { return sort_; }
     void set_sort(sql::SortOrder sort) { sort_ = std::move(sort); }
 
+    // Filtro por coluna, pedido no cabecalho. Vai para o servidor junto com
+    // a pagina, pelo mesmo motivo da ordenacao.
+    [[nodiscard]] const sql::ColumnFilter& filter() const noexcept {
+        return filter_;
+    }
+    void set_filter(sql::ColumnFilter filter) { filter_ = std::move(filter); }
+
     void reset_paging() {
         paged_sql_.clear();
         page_     = 0;
         paged_    = false;
         has_more_ = false;
         sort_     = {};
+        filter_   = {};
     }
 
 private:
@@ -104,6 +112,7 @@ private:
     std::optional<db::ResultSet> result_;
     std::string                 paged_sql_;
     sql::SortOrder              sort_;
+    sql::ColumnFilter           filter_;
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

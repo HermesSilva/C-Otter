@@ -53,7 +53,7 @@ std::string_view to_string(PagingRefusal refusal) noexcept {
 
 PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
                             std::size_t page, std::size_t page_size,
-                            const SortOrder& sort) {
+                            const SortOrder& sort, const ColumnFilter& filter) {
     PagedQuery result;
     result.sql = std::string(sql);
 
@@ -164,6 +164,25 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
 
     std::string paged(trim_trailing(sql, tokens));
 
+    // O filtro envolve a consulta numa subconsulta, em vez de anexar WHERE.
+    //
+    // Anexar seria errado de tres jeitos: a consulta pode ja' ter WHERE (dois
+    // na mesma nao compilam), pode terminar em GROUP BY ou HAVING (WHERE
+    // depois deles e' sintaxe invalida), e mesmo quando compilasse filtraria
+    // ANTES da agregacao -- resultado diferente do que a grade mostra.
+    //
+    // Envolver custa uma subconsulta que o planejador quase sempre achata,
+    // e e' correto em todos os casos.
+    if (!filter.empty()) {
+        std::string inner = "SELECT * FROM (\n" + paged + "\n) AS otter_filter\n WHERE \"";
+        for (const char c : filter.column) {
+            if (c == '"') inner += "\"\"";
+            else          inner.push_back(c);
+        }
+        inner += "\" " + filter.expression;
+        paged = std::move(inner);
+    }
+
     // ORDER BY antes do LIMIT -- e' a ordem exigida pela gramatica, e o
     // sentido tambem: limitar primeiro daria as 200 primeiras linhas na ordem
     // do banco, depois reordenadas entre si.
@@ -171,7 +190,11 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
     // Um ORDER BY que o usuario escreveu tem precedencia: dois ORDER BY na
     // mesma consulta sao erro de sintaxe, e sobrepor o dele seria executar
     // algo diferente do que esta' na tela.
-    if (!sort.empty() && !has_outer_order) {
+    // Com filtro, o ORDER BY do usuario ficou DENTRO da subconsulta -- a
+    // externa nao tem ordem, e a da grade passa a ser legitima.
+    const bool order_is_free = !has_outer_order || !filter.empty();
+
+    if (!sort.empty() && order_is_free) {
         // O nome vem do cabecalho da grade, portanto do servidor -- mas citar
         // e' barato e protege contra uma coluna chamada "order" ou "Nome".
         paged += "\nORDER BY \"";

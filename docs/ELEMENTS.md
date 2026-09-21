@@ -289,7 +289,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Editar célula** | ⬜ | |
 | Inserir / excluir linha | ⬜ | |
 | Salvar alterações | ⬜ | |
-| Filtro por coluna | ⬜ | |
+| **Filtro por coluna** | ✅ | Botão direito no cabeçalho; expressão `WHERE` livre |
+| Coluna filtrada marcada | ✅ | Prefixo `*` em âmbar no cabeçalho |
+| Menu de contexto do cabeçalho | ✅ | Filtrar, ordenar, copiar nome |
 | Agrupamento e subtotais | ⬜ | ADR 0005 |
 | Linha de totais | ⬜ | ADR 0005 |
 | Pivot | ⬜ | ADR 0005 |
@@ -478,7 +480,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (186, todos verdes):
+Testes automatizados (192, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

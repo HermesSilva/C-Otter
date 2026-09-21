@@ -218,3 +218,82 @@ OTTER_TEST(paging_without_sort_produces_no_order_by) {
     OTTER_CHECK(q.rewritten);
     OTTER_CHECK(!contains(q.sql, "ORDER BY"));
 }
+
+// --- Filtro por coluna -------------------------------------------------------
+
+OTTER_TEST(paging_wraps_the_query_to_apply_a_filter) {
+    // Anexar "WHERE ..." ao fim seria errado de tres jeitos: a consulta pode
+    // ja' ter WHERE, pode terminar em GROUP BY (WHERE depois e' invalido), e
+    // filtraria ANTES da agregacao. Envolver e' correto em todos os casos.
+    const PagedQuery q = make_paged_query(
+        "SELECT categoria, count(*) AS total FROM evento GROUP BY categoria",
+        postgres_dialect(), 0, 200, {}, ColumnFilter{"total", "> 100"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "SELECT * FROM ("));
+    OTTER_CHECK(contains(q.sql, ") AS otter_filter"));
+    OTTER_CHECK(contains(q.sql, "WHERE \"total\" > 100"));
+    OTTER_CHECK(contains(q.sql, "LIMIT 201"));
+
+    // O WHERE vem ANTES do LIMIT, e a consulta original fica intacta dentro.
+    OTTER_CHECK(q.sql.find("WHERE") < q.sql.find("LIMIT"));
+    OTTER_CHECK(contains(q.sql, "GROUP BY categoria"));
+}
+
+OTTER_TEST(paging_filter_survives_an_existing_where) {
+    // Dois WHERE na mesma consulta nao compilam; envolver resolve.
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM cliente WHERE ativo",
+        postgres_dialect(), 0, 200, {}, ColumnFilter{"credito", ">= 1000"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "WHERE ativo"));           // o do usuario
+    OTTER_CHECK(contains(q.sql, "WHERE \"credito\" >= 1000"));  // o da grade
+}
+
+OTTER_TEST(paging_filter_quotes_the_column_name) {
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM t", postgres_dialect(), 0, 200, {},
+        ColumnFilter{"order", "IS NULL"});
+    OTTER_CHECK(contains(q.sql, "WHERE \"order\" IS NULL"));
+}
+
+OTTER_TEST(paging_filter_and_sort_work_together) {
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM cliente", postgres_dialect(), 1, 50,
+        SortOrder{"nome", true}, ColumnFilter{"credito", "> 0"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "WHERE \"credito\" > 0"));
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"nome\" DESC"));
+    OTTER_CHECK(contains(q.sql, "LIMIT 51"));
+    OTTER_CHECK(contains(q.sql, "OFFSET 50"));
+
+    // Ordem obrigatoria: WHERE (dentro do wrap), ORDER BY, LIMIT, OFFSET.
+    OTTER_CHECK(q.sql.find("WHERE") < q.sql.find("ORDER BY"));
+    OTTER_CHECK(q.sql.find("ORDER BY") < q.sql.find("LIMIT"));
+}
+
+OTTER_TEST(paging_filter_frees_the_grid_to_sort) {
+    // Com filtro, o ORDER BY do usuario passa para DENTRO da subconsulta: a
+    // externa fica sem ordem, e a da grade deixa de ser conflito.
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM cliente ORDER BY criado_em",
+        postgres_dialect(), 0, 200, SortOrder{"nome"},
+        ColumnFilter{"credito", "> 0"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "ORDER BY criado_em"));      // dentro
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"nome\" ASC"));   // fora
+}
+
+OTTER_TEST(paging_ignores_an_incomplete_filter) {
+    // Coluna sem expressao, ou expressao sem coluna, nao produz WHERE -- um
+    // "WHERE coluna" solto seria erro de sintaxe.
+    OTTER_CHECK(!contains(
+        make_paged_query("SELECT * FROM t", postgres_dialect(), 0, 200, {},
+                         ColumnFilter{"col", ""}).sql, "WHERE"));
+    OTTER_CHECK(!contains(
+        make_paged_query("SELECT * FROM t", postgres_dialect(), 0, 200, {},
+                         ColumnFilter{"", "> 5"}).sql, "WHERE"));
+}

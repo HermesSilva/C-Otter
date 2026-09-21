@@ -56,6 +56,26 @@ struct SortOrder {
     [[nodiscard]] bool empty() const noexcept { return column.empty(); }
 };
 
+// Filtro pedido no cabecalho da grade.
+//
+// Vai para o servidor pelo mesmo motivo da ordenacao: filtrar as 200 linhas
+// visiveis mostraria as que sobram de UMA pagina, nao as que atendem ao
+// criterio no resultado inteiro.
+//
+// A expressao e' escrita pelo usuario e vai para o SQL como digitada -- e'
+// uma clausula WHERE, nao um valor. Quem digita "1=1 OR TRUE" esta' apenas
+// consultando o proprio banco com as proprias credenciais; nao ha' elevacao
+// de privilegio a impedir. A UI deixa isso explicito chamando o campo de
+// "expressao", nao de "valor".
+struct ColumnFilter {
+    std::string column;         // vazio = sem filtro
+    std::string expression;     // "> 100", "LIKE '%lontra%'", "IS NULL"
+
+    [[nodiscard]] bool empty() const noexcept {
+        return column.empty() || expression.empty();
+    }
+};
+
 // Monta a consulta de uma pagina.
 //
 // `page` e' base zero. Quando a consulta nao pode ser reescrita com seguranca,
@@ -65,6 +85,7 @@ struct SortOrder {
                                           const Dialect& dialect,
                                           std::size_t page,
                                           std::size_t page_size = kDefaultPageSize,
-                                          const SortOrder& sort = {});
+                                          const SortOrder& sort = {},
+                                          const ColumnFilter& filter = {});
 
 } // namespace otter::sql
