@@ -62,3 +62,35 @@ else()
 endif()
 
 set_target_properties(lexilla PROPERTIES FOLDER "third_party")
+
+# --- Dear ImGui (branch docking) ---------------------------------------------
+# Licenca MIT. Docking e' necessario para o layout de paineis do C-Otter
+# (navigator | editor | grid), equivalente as views do Eclipse no DBeaver.
+add_library(imgui STATIC
+    imgui/imgui.cpp
+    imgui/imgui_draw.cpp
+    imgui/imgui_tables.cpp
+    imgui/imgui_widgets.cpp
+    imgui/imgui_demo.cpp          # referencia viva de widgets; removivel na v1
+)
+
+target_include_directories(imgui PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
+)
+
+if(WIN32)
+    target_sources(imgui PRIVATE
+        imgui/backends/imgui_impl_win32.cpp
+        imgui/backends/imgui_impl_dx11.cpp
+    )
+    target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi)
+endif()
+
+if(MSVC)
+    target_compile_options(imgui PRIVATE /W0)
+else()
+    target_compile_options(imgui PRIVATE -w)
+endif()
+
+set_target_properties(imgui PROPERTIES FOLDER "third_party")

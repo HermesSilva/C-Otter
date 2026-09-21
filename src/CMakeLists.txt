@@ -1,4 +1,6 @@
 add_subdirectory(base)
+add_subdirectory(ui)
+add_subdirectory(app)
 
 # Camadas seguintes entram conforme as fases do plano (docs/PLAN.md):
 #   add_subdirectory(db)
@@ -6,5 +8,3 @@ add_subdirectory(base)
 #   add_subdirectory(sql)
 #   add_subdirectory(registry)
 #   add_subdirectory(transfer)
-#   add_subdirectory(ui)     # somente se OTTER_BUILD_UI
-#   add_subdirectory(app)
