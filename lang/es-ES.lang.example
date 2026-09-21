@@ -1,0 +1,97 @@
+# C-Otter language file -- exemplo
+#
+# Renomeie para es-ES.lang e coloque ao lado do executavel para ativar.
+# Traduzido parcialmente de proposito: demonstra que um arquivo incompleto
+# funciona -- o que faltar aparece em ingles.
+
+# code: es-ES
+# name: Spanish (Spain)
+# native: Español (España)
+
+# --- Menus ---
+File=Archivo
+Edit=Editar
+Help=Ayuda
+Language=Idioma
+New connection...=Nueva conexión...
+Edit connection...=Editar conexión...
+Disconnect=Desconectar
+Exit=Salir
+Undo=Deshacer
+Redo=Rehacer
+Select all=Seleccionar todo
+Find=Buscar
+Execute=Ejecutar
+About C-Otter=Acerca de C-Otter
+
+# --- Paineis ---
+New connection=Nueva conexión
+no connection=sin conexión
+connect to browse the schema=conéctese para explorar el esquema
+loading...=cargando...
+Copy name=Copiar nombre
+read only=solo lectura
+manual transaction=transacción manual
+
+# --- Grade ---
+run a query to see the result=ejecute una consulta para ver el resultado
+command executed=comando ejecutado
+no queries yet=aún no hay consultas
+time=tiempo
+rows=filas
+state=estado
+error=error
+
+# --- Assistente de conexao ---
+Select the database=Seleccione la base de datos
+Choose the driver for the new connection.=Elija el controlador para la nueva conexión.
+Filter drivers...=Filtrar controladores...
+Driver=Controlador
+Category=Categoría
+Status=Estado
+available=disponible
+Next >=Siguiente >
+< Back=< Atrás
+Cancel=Cancelar
+Finish=Finalizar
+Save=Guardar
+Test connection=Probar conexión
+
+# Categorias
+All=Todos
+Analytical=Analítico
+Files=Archivos
+Embedded=Integrado
+Timeseries=Series temporales
+
+# Abas
+Main=Principal
+Initialization=Inicialización
+General=General
+
+# Aba Principal
+Server=Servidor
+Port=Puerto
+Database=Base de datos
+Authentication=Autenticación
+Method=Método
+User=Usuario
+Password=Contraseña
+Save password=Guardar contraseña
+
+# Tipos de conexao
+Connection type=Tipo de conexión
+Development=Desarrollo
+Test=Pruebas
+Production=Producción
+
+# Marcadores de formatacao: preserve %zu, %s, %d na mesma ordem.
+%zu row(s), %zu column(s)=%zu fila(s), %zu columna(s)
+%zu rows=%zu filas
+
+# Titulos de janela: mantenha o sufixo ###Id intacto.
+New connection###ConnDialog=Nueva conexión###ConnDialog
+Edit connection###ConnDialog=Editar conexión###ConnDialog
+Result=Resultado
+
+# As demais entradas ficam em ingles ate' serem traduzidas.

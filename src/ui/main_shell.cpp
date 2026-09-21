@@ -1,4 +1,6 @@
 #include "ui/main_shell.hpp"
+
+#include "base/i18n.hpp"
 #include "ui/theme.hpp"
 
 #include "imgui.h"
@@ -132,7 +134,7 @@ MainShell::MainShell()
     autocomplete_config_->triggerInComments  = false;
     autocomplete_config_->triggerInStrings   = false;
     autocomplete_config_->suggestionWidth    = 52;
-    autocomplete_config_->noSuggestionsLabel = "sem sugestões";
+    autocomplete_config_->noSuggestionsLabel = TR("no suggestions");
     autocomplete_config_->userData           = this;
     autocomplete_config_->callback = [](TextEditor::AutoCompleteState& state) {
         static_cast<MainShell*>(state.userData)->suggest(state);
@@ -393,11 +395,11 @@ void MainShell::draw_dockspace() {
         ImGui::DockBuilderSplitNode(center, ImGuiDir_Up, 0.42f,
                                     &center_top, &center_bottom);
 
-        ImGui::DockBuilderDockWindow("Raft",      left_top);
-        ImGui::DockBuilderDockWindow("Navigator", left_bottom);
-        ImGui::DockBuilderDockWindow("SQL",       center_top);
-        ImGui::DockBuilderDockWindow("Resultado", center_bottom);
-        ImGui::DockBuilderDockWindow("Queries",   center_bottom);
+        ImGui::DockBuilderDockWindow("###RaftPanel",      left_top);
+        ImGui::DockBuilderDockWindow("###NavigatorPanel", left_bottom);
+        ImGui::DockBuilderDockWindow("###SqlPanel",       center_top);
+        ImGui::DockBuilderDockWindow("###ResultPanel",    center_bottom);
+        ImGui::DockBuilderDockWindow("###QueriesPanel",   center_bottom);
         ImGui::DockBuilderFinish(dock_id);
     }
 
@@ -408,34 +410,34 @@ void MainShell::draw_dockspace() {
 void MainShell::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
 
-    if (ImGui::BeginMenu("Arquivo")) {
-        if (ImGui::MenuItem("Nova conexão...", "Ctrl+Shift+N")) {
+    if (ImGui::BeginMenu(TR("File"))) {
+        if (ImGui::MenuItem(TR("New connection..."), "Ctrl+Shift+N")) {
             connection_dialog_.open_new();
         }
-        if (ImGui::MenuItem("Editar conexão...", nullptr, false,
+        if (ImGui::MenuItem(TR("Edit connection..."), nullptr, false,
                             session_.state() == SessionState::connected)) {
             connection_dialog_.open_edit(active_profile_);
         }
-        if (ImGui::MenuItem("Desconectar", nullptr, false,
+        if (ImGui::MenuItem(TR("Disconnect"), nullptr, false,
                             session_.state() == SessionState::connected)) {
             session_.disconnect();
             result_.reset();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Sair", "Alt+F4")) wants_quit_ = true;
+        if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) wants_quit_ = true;
         ImGui::EndMenu();
     }
 
-    if (ImGui::BeginMenu("Editar")) {
-        if (ImGui::MenuItem("Desfazer", "Ctrl+Z", false, editor_->CanUndo())) {
+    if (ImGui::BeginMenu(TR("Edit"))) {
+        if (ImGui::MenuItem(TR("Undo"), "Ctrl+Z", false, editor_->CanUndo())) {
             editor_->Undo();
         }
-        if (ImGui::MenuItem("Refazer", "Ctrl+Y", false, editor_->CanRedo())) {
+        if (ImGui::MenuItem(TR("Redo"), "Ctrl+Y", false, editor_->CanRedo())) {
             editor_->Redo();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Selecionar tudo", "Ctrl+A")) editor_->SelectAll();
-        if (ImGui::MenuItem("Localizar", "Ctrl+F")) {
+        if (ImGui::MenuItem(TR("Select all"), "Ctrl+A")) editor_->SelectAll();
+        if (ImGui::MenuItem(TR("Find"), "Ctrl+F")) {
             editor_->OpenFindReplaceWindow();
         }
         ImGui::EndMenu();
@@ -444,16 +446,29 @@ void MainShell::draw_menu_bar() {
     if (ImGui::BeginMenu("SQL")) {
         const bool can_run = session_.state() == SessionState::connected &&
                              !session_.busy();
-        if (ImGui::MenuItem("Executar", "Ctrl+Enter", false, can_run)) {
+        if (ImGui::MenuItem(TR("Execute"), "Ctrl+Enter", false, can_run)) {
             execute_current_sql();
         }
         ImGui::EndMenu();
     }
 
-    if (ImGui::BeginMenu("Ajuda")) {
-        ImGui::MenuItem("Demo do ImGui", nullptr, &show_demo_);
+    if (ImGui::BeginMenu(TR("Help"))) {
+        // Seletor de idioma: troca em tempo real, sem reiniciar.
+        if (ImGui::BeginMenu(TR("Language"))) {
+            const std::string_view active = i18n::current_language();
+            for (const i18n::Language& language : i18n::available_languages()) {
+                const bool selected = active == language.code;
+                if (ImGui::MenuItem(language.native_name.c_str(), nullptr,
+                                    selected)) {
+                    i18n::set_language(language.code);
+                }
+            }
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
-        if (ImGui::MenuItem("Sobre o C-Otter")) show_about_ = true;
+        ImGui::MenuItem(TR("ImGui demo"), nullptr, &show_demo_);
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("About C-Otter"))) show_about_ = true;
         ImGui::EndMenu();
     }
 
@@ -470,21 +485,21 @@ void MainShell::draw_menu_bar() {
 }
 
 void MainShell::draw_raft_panel() {
-    if (ImGui::Begin("Raft")) {
-        if (ImGui::Button("Nova conexão")) connection_dialog_.open_new();
+    if (ImGui::Begin(TRW("Raft", "###RaftPanel"))) {
+        if (ImGui::Button(TR("New connection"))) connection_dialog_.open_new();
 
         const SessionState state = session_.state();
         const bool connected = state == SessionState::connected;
 
         ImGui::SameLine();
         ImGui::BeginDisabled(!connected);
-        if (ImGui::Button("Editar")) connection_dialog_.open_edit(active_profile_);
+        if (ImGui::Button(TR("Edit"))) connection_dialog_.open_edit(active_profile_);
         ImGui::EndDisabled();
 
         ImGui::Separator();
 
         if (state == SessionState::disconnected) {
-            ImGui::TextColored(col4(palette::text_dim), "nenhuma conexão");
+            ImGui::TextColored(col4(palette::text_dim), TR("no connection"));
             ImGui::End();
             return;
         }
@@ -500,15 +515,15 @@ void MainShell::draw_raft_panel() {
 
         // Menu de contexto sobre a conexão, como no DBeaver.
         if (ImGui::BeginPopupContextItem("##connmenu")) {
-            if (ImGui::MenuItem("Editar conexão...")) {
+            if (ImGui::MenuItem(TR("Edit connection..."))) {
                 connection_dialog_.open_edit(active_profile_);
             }
-            if (ImGui::MenuItem("Desconectar", nullptr, false, connected)) {
+            if (ImGui::MenuItem(TR("Disconnect"), nullptr, false, connected)) {
                 session_.disconnect();
                 result_.reset();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Copiar nome")) {
+            if (ImGui::MenuItem(TR("Copy name"))) {
                 ImGui::SetClipboardText(active_profile_.effective_name().c_str());
             }
             ImGui::EndPopup();
@@ -528,10 +543,10 @@ void MainShell::draw_raft_panel() {
                                active_profile_.host.c_str(),
                                active_profile_.port);
             ImGui::TextColored(col4(palette::text_dim), "%s",
-                               active_profile_.auto_commit ? "auto-commit"
-                                                           : "transação manual");
+                               active_profile_.auto_commit ? TR("auto-commit")
+                                                           : TR("manual transaction"));
             if (active_profile_.read_only) {
-                ImGui::TextColored(col4(palette::warn), "somente leitura");
+                ImGui::TextColored(col4(palette::warn), TR("read only"));
             }
         }
 
@@ -546,10 +561,10 @@ void MainShell::draw_raft_panel() {
 }
 
 void MainShell::draw_navigator_panel() {
-    if (ImGui::Begin("Navigator")) {
+    if (ImGui::Begin(TRW("Navigator", "###NavigatorPanel"))) {
         if (session_.state() != SessionState::connected) {
             ImGui::TextColored(col4(palette::text_dim),
-                               "conecte-se para navegar o schema");
+                               TR("connect to browse the schema"));
             ImGui::End();
             return;
         }
@@ -587,7 +602,7 @@ void MainShell::draw_navigator_panel() {
                     }
 
                     if (table.columns.empty()) {
-                        ImGui::TextColored(col4(palette::text_dim), "  carregando...");
+                        ImGui::TextColored(col4(palette::text_dim), TR("  loading..."));
                     }
 
                     for (const db::ColumnMeta& column : table.columns) {
@@ -614,12 +629,12 @@ void MainShell::draw_navigator_panel() {
 }
 
 void MainShell::draw_editor_panel() {
-    if (ImGui::Begin("SQL")) {
+    if (ImGui::Begin(TRW("SQL", "###SqlPanel"))) {
         const bool can_run = session_.state() == SessionState::connected &&
                              !session_.busy();
 
         ImGui::BeginDisabled(!can_run);
-        if (ImGui::Button("Executar  (Ctrl+Enter)")) execute_current_sql();
+        if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
         ImGui::EndDisabled();
 
         ImGui::SameLine();
@@ -644,10 +659,10 @@ void MainShell::draw_editor_panel() {
 }
 
 void MainShell::draw_grid_panel() {
-    if (ImGui::Begin("Resultado")) {
+    if (ImGui::Begin(TRW("Result", "###ResultPanel"))) {
         if (!result_.has_value()) {
             ImGui::TextColored(col4(palette::text_dim),
-                               "execute uma query para ver o resultado");
+                               TR("run a query to see the result"));
             ImGui::End();
             return;
         }
@@ -660,7 +675,7 @@ void MainShell::draw_grid_panel() {
         ImGui::Separator();
 
         if (rs.column_count() == 0) {
-            ImGui::TextColored(col4(palette::ok), "comando executado");
+            ImGui::TextColored(col4(palette::ok), TR("command executed"));
             if (rs.affected_rows() >= 0) {
                 ImGui::SameLine();
                 ImGui::TextColored(col4(palette::text_dim), " (%lld linha(s) afetada(s))",
@@ -732,11 +747,11 @@ void MainShell::draw_grid_panel() {
 }
 
 void MainShell::draw_query_log_panel() {
-    if (ImGui::Begin("Queries")) {
+    if (ImGui::Begin(TRW("Queries", "###QueriesPanel"))) {
         const std::vector<db::QueryLog> log = session_.query_log();
 
         if (log.empty()) {
-            ImGui::TextColored(col4(palette::text_dim), "nenhuma query ainda");
+            ImGui::TextColored(col4(palette::text_dim), TR("no queries yet"));
             ImGui::End();
             return;
         }
@@ -752,9 +767,9 @@ void MainShell::draw_query_log_panel() {
 
         if (ImGui::BeginTable("##querylog", 4, flags)) {
             ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("tempo", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-            ImGui::TableSetupColumn("linhas", ImGuiTableColumnFlags_WidthFixed, 64.0f);
-            ImGui::TableSetupColumn("estado", ImGuiTableColumnFlags_WidthFixed, 64.0f);
+            ImGui::TableSetupColumn(TR("time"), ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn(TR("rows"), ImGuiTableColumnFlags_WidthFixed, 64.0f);
+            ImGui::TableSetupColumn(TR("state"), ImGuiTableColumnFlags_WidthFixed, 64.0f);
             ImGui::TableSetupColumn("SQL");
             ImGui::TableHeadersRow();
 
@@ -772,7 +787,7 @@ void MainShell::draw_query_log_panel() {
 
                 ImGui::TableSetColumnIndex(2);
                 ImGui::TextColored(col4(entry.failed ? palette::error : palette::ok),
-                                   entry.failed ? "erro" : "ok");
+                                   entry.failed ? TR("error") : "ok");
 
                 ImGui::TableSetColumnIndex(3);
                 // Uma linha so': quebras de linha do SQL viram espaco.
@@ -837,7 +852,7 @@ void MainShell::draw_status_bar() {
 
 void MainShell::draw_about_window() {
     ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
-    if (ImGui::Begin("Sobre o C-Otter", &show_about_,
+    if (ImGui::Begin(TR("About C-Otter"), &show_about_,
                      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushStyleColor(ImGuiCol_Text, col(palette::fur_light));
         ImGui::TextUnformatted("C-Otter 0.1.0");
@@ -866,3 +881,4 @@ void MainShell::draw_about_window() {
 }
 
 } // namespace otter::ui
+

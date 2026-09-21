@@ -31,6 +31,11 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Escala por DPI | ✅ | `glfwGetMonitorContentScale` |
 | Tema escuro da lontra | ✅ | Paleta extraída de `Midia/Logo.png` |
 | Tema claro | ⬜ | |
+| **Internacionalização** | ✅ | Inglês padrão + pt-BR embutido |
+| Detecção do idioma do sistema | ✅ | Com fallback por idioma base (`pt-PT` → `pt-BR`) |
+| Troca de idioma em tempo real | ✅ | Help → Language, sem reiniciar |
+| Idiomas por arquivo `.lang` | ✅ | Sem recompilar; ver `lang/README.md` |
+| Relatório de textos sem tradução | ✅ | `missing_translations()` / `export_template()` |
 | Docking de painéis (arrastar abas) | ✅ | |
 | Layout persistido entre execuções | ⬜ | Volta ao padrão a cada início |
 | Ícone da janela | ⬜ | Usa o ícone padrão do sistema |

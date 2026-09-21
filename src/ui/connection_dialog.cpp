@@ -1,4 +1,5 @@
 #include "ui/connection_dialog.hpp"
+#include "base/i18n.hpp"
 #include "ui/theme.hpp"
 
 #include "imgui.h"
@@ -71,9 +72,11 @@ bool contains_ci(std::string_view haystack, std::string_view needle) {
     return it != haystack.end();
 }
 
+// Em ingles: a chave de traducao e' o proprio texto (base/i18n.hpp), e a
+// comparacao com DriverEntry::category tambem usa estes valores.
 constexpr std::array<const char*, 8> kCategories = {
-    "Todos", "Popular", "SQL", "NoSQL", "Analítico",
-    "Arquivos", "Embarcado", "Séries temporais",
+    "All", "Popular", "SQL", "NoSQL", "Analytical",
+    "Files", "Embedded", "Timeseries",
 };
 
 } // namespace
@@ -82,25 +85,27 @@ constexpr std::array<const char*, 8> kCategories = {
 // motivo -- esconder a lista inteira daria a impressao de que o produto so'
 // fala com PostgreSQL por design.
 std::vector<DriverEntry> driver_catalog() {
+    // Categorias e notas em ingles: sao chaves de traducao, resolvidas com
+    // TR() no momento de desenhar.
     return {
-        {"postgresql", "PostgreSQL", "Popular", 5432, true, nullptr},
-        {"mysql",      "MySQL",      "Popular", 3306, false, "protocolo em desenvolvimento"},
-        {"mariadb",    "MariaDB",    "Popular", 3306, false, "protocolo em desenvolvimento"},
-        {"sqlite",     "SQLite",     "Embarcado", 0,  false, "planejado para a fase 3"},
-        {"mssql",      "SQL Server", "Popular", 1433, false, "TDS planejado para a fase 3"},
-        {"oracle",     "Oracle",     "Popular", 1521, false, "planejado para a fase 3"},
-        {"db2",        "Db2 for LUW","SQL",    50000, false, "fora do escopo da v1"},
-        {"clickhouse", "ClickHouse", "Analítico", 8123, false, "fora do escopo da v1"},
-        {"duckdb",     "DuckDB",     "Analítico", 0,  false, "fora do escopo da v1"},
-        {"snowflake",  "Snowflake",  "Analítico", 443, false, "fora do escopo da v1"},
-        {"h2",         "H2",         "Embarcado", 8082, false, "fora do escopo da v1"},
-        {"firebird",   "Firebird",   "SQL",     3050, false, "fora do escopo da v1"},
-        {"csv",        "CSV",        "Arquivos", 0,   false, "fora do escopo da v1"},
-        {"mongodb",    "MongoDB",    "NoSQL",  27017, false, "fora do escopo da v1"},
-        {"redis",      "Redis",      "NoSQL",   6379, false, "fora do escopo da v1"},
-        {"cassandra",  "Cassandra",  "NoSQL",   9042, false, "fora do escopo da v1"},
-        {"influxdb",   "InfluxDB",   "Séries temporais", 8086, false, "fora do escopo da v1"},
-        {"timescale",  "TimescaleDB","Séries temporais", 5432, false, "usa o driver PostgreSQL"},
+        {"postgresql", "PostgreSQL",  "Popular",    5432, true,  nullptr},
+        {"mysql",      "MySQL",       "Popular",    3306, false, "protocol in development"},
+        {"mariadb",    "MariaDB",     "Popular",    3306, false, "protocol in development"},
+        {"sqlite",     "SQLite",      "Embedded",      0, false, "planned for phase 3"},
+        {"mssql",      "SQL Server",  "Popular",    1433, false, "TDS planned for phase 3"},
+        {"oracle",     "Oracle",      "Popular",    1521, false, "planned for phase 3"},
+        {"db2",        "Db2 for LUW", "SQL",       50000, false, "out of scope for v1"},
+        {"clickhouse", "ClickHouse",  "Analytical", 8123, false, "out of scope for v1"},
+        {"duckdb",     "DuckDB",      "Analytical",    0, false, "out of scope for v1"},
+        {"snowflake",  "Snowflake",   "Analytical",  443, false, "out of scope for v1"},
+        {"h2",         "H2",          "Embedded",   8082, false, "out of scope for v1"},
+        {"firebird",   "Firebird",    "SQL",        3050, false, "out of scope for v1"},
+        {"csv",        "CSV",         "Files",         0, false, "out of scope for v1"},
+        {"mongodb",    "MongoDB",     "NoSQL",     27017, false, "out of scope for v1"},
+        {"redis",      "Redis",       "NoSQL",      6379, false, "out of scope for v1"},
+        {"cassandra",  "Cassandra",   "NoSQL",      9042, false, "out of scope for v1"},
+        {"influxdb",   "InfluxDB",    "Timeseries", 8086, false, "out of scope for v1"},
+        {"timescale",  "TimescaleDB", "Timeseries", 5432, false, "uses the PostgreSQL driver"},
     };
 }
 
@@ -127,8 +132,8 @@ void ConnectionDialog::draw(const Feedback& feedback) {
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(760, 560), ImGuiCond_Appearing);
 
-    const char* title = editing_ ? "Editar conexão###ConnDialog"
-                                 : "Nova conexão###ConnDialog";
+    const char* title = editing_ ? TR("Edit connection###ConnDialog")
+                                 : TR("New connection###ConnDialog");
 
     if (ImGui::Begin(title, &visible_, ImGuiWindowFlags_NoDocking)) {
         if (step_ == Step::select_driver) {
@@ -141,15 +146,15 @@ void ConnectionDialog::draw(const Feedback& feedback) {
 }
 
 void ConnectionDialog::draw_driver_catalog() {
-    ImGui::TextColored(col4(palette::fur_light), "Selecione o banco de dados");
+    ImGui::TextColored(col4(palette::fur_light), TR("Select the database"));
     ImGui::TextColored(col4(palette::text_dim),
-                       "Escolha o driver para a nova conexão.");
+                       TR("Choose the driver for the new connection."));
     ImGui::Separator();
 
     // Coluna de categorias, como no DBeaver.
     ImGui::BeginChild("##categories", ImVec2(150, -46), ImGuiChildFlags_Borders);
     for (int i = 0; i < static_cast<int>(kCategories.size()); ++i) {
-        if (ImGui::Selectable(kCategories[static_cast<std::size_t>(i)],
+        if (ImGui::Selectable(TR(kCategories[static_cast<std::size_t>(i)]),
                               category_index_ == i)) {
             category_index_ = i;
         }
@@ -160,7 +165,7 @@ void ConnectionDialog::draw_driver_catalog() {
     ImGui::BeginChild("##drivers", ImVec2(0, -46));
 
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##filter", "Filtrar drivers...",
+    ImGui::InputTextWithHint("##filter", TR("Filter drivers..."),
                              driver_filter_, sizeof(driver_filter_));
     ImGui::Separator();
 
@@ -170,12 +175,12 @@ void ConnectionDialog::draw_driver_catalog() {
     if (ImGui::BeginTable("##driverlist", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                           ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn("Driver", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Categoria", ImGuiTableColumnFlags_WidthFixed, 130.0f);
-        ImGui::TableSetupColumn("Estado", ImGuiTableColumnFlags_WidthFixed, 210.0f);
+        ImGui::TableSetupColumn(TR("Driver"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(TR("Category"), ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableSetupColumn(TR("Status"), ImGuiTableColumnFlags_WidthFixed, 210.0f);
 
         for (const DriverEntry& driver : driver_catalog()) {
-            if (category != "Todos" && category != driver.category) continue;
+            if (category != "All" && category != driver.category) continue;
             if (!contains_ci(driver.name, driver_filter_)) continue;
 
             ImGui::TableNextRow();
@@ -197,13 +202,13 @@ void ConnectionDialog::draw_driver_catalog() {
             ImGui::EndDisabled();
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextColored(col4(palette::text_dim), "%s", driver.category);
+            ImGui::TextColored(col4(palette::text_dim), "%s", TR(driver.category));
 
             ImGui::TableSetColumnIndex(2);
             if (driver.available) {
-                ImGui::TextColored(col4(palette::ok), "disponível");
+                ImGui::TextColored(col4(palette::ok), TR("available"));
             } else {
-                ImGui::TextColored(col4(palette::text_dim), "%s", driver.note);
+                ImGui::TextColored(col4(palette::text_dim), "%s", TR(driver.note));
             }
 
             ImGui::PopID();
@@ -216,16 +221,16 @@ void ConnectionDialog::draw_driver_catalog() {
 
     const bool can_advance = profile_.driver_id == "postgresql";
     ImGui::BeginDisabled(!can_advance);
-    if (ImGui::Button("Avançar >", ImVec2(110, 0))) step_ = Step::configure;
+    if (ImGui::Button(TR("Next >"), ImVec2(110, 0))) step_ = Step::configure;
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (ImGui::Button("Cancelar", ImVec2(110, 0))) visible_ = false;
+    if (ImGui::Button(TR("Cancel"), ImVec2(110, 0))) visible_ = false;
 
     if (!can_advance) {
         ImGui::SameLine();
         ImGui::TextColored(col4(palette::text_dim),
-                           "  selecione um driver disponível");
+                           TR("  select an available driver"));
     }
 }
 
@@ -243,7 +248,7 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     ImGui::PopStyleColor();
 
     if (ImGui::BeginTabBar("##conntabs", ImGuiTabBarFlags_None)) {
-        if (ImGui::BeginTabItem("Principal")) {
+        if (ImGui::BeginTabItem(TR("Main"))) {
             draw_tab_main();
             ImGui::EndTabItem();
         }
@@ -255,23 +260,23 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
             draw_tab_driver_properties();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("SSH")) {
+        if (ImGui::BeginTabItem(TR("SSH"))) {
             draw_tab_ssh();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("SSL")) {
+        if (ImGui::BeginTabItem(TR("SSL"))) {
             draw_tab_ssl();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Proxy")) {
+        if (ImGui::BeginTabItem(TR("Proxy"))) {
             draw_tab_proxy();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Inicialização")) {
+        if (ImGui::BeginTabItem(TR("Initialization"))) {
             draw_tab_initialization();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Geral")) {
+        if (ImGui::BeginTabItem(TR("General"))) {
             draw_tab_general();
             ImGui::EndTabItem();
         }
@@ -283,30 +288,30 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     ImGui::Separator();
 
     if (!editing_) {
-        if (ImGui::Button("< Voltar", ImVec2(100, 0))) step_ = Step::select_driver;
+        if (ImGui::Button(TR("< Back"), ImVec2(100, 0))) step_ = Step::select_driver;
         ImGui::SameLine();
     }
 
     ImGui::BeginDisabled(feedback.busy);
-    if (ImGui::Button("Testar conexão", ImVec2(130, 0)) && on_connect_) {
+    if (ImGui::Button(TR("Test connection"), ImVec2(130, 0)) && on_connect_) {
         on_connect_(profile_);
     }
     ImGui::SameLine();
-    if (ImGui::Button(editing_ ? "Salvar" : "Concluir", ImVec2(100, 0))) {
+    if (ImGui::Button(editing_ ? TR("Save") : TR("Finish"), ImVec2(100, 0))) {
         if (on_save_) on_save_(profile_);
         if (on_connect_) on_connect_(profile_);
     }
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (ImGui::Button("Cancelar", ImVec2(100, 0))) visible_ = false;
+    if (ImGui::Button(TR("Cancel"), ImVec2(100, 0))) visible_ = false;
 
     if (feedback.busy) {
         ImGui::SameLine();
         const float t = static_cast<float>(ImGui::GetTime());
         ImVec4 pulse = col4(palette::data_light);
         pulse.w = 0.4f + 0.6f * std::abs(std::sin(t * 3.0f));
-        ImGui::TextColored(pulse, "  ● conectando...");
+        ImGui::TextColored(pulse, TR("  * connecting..."));
     } else if (feedback.failed) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(col4(palette::error), "%s", feedback.message.c_str());
@@ -319,21 +324,21 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
 void ConnectionDialog::draw_tab_main() {
     ImGui::BeginChild("##main", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), "Servidor");
+    ImGui::TextColored(col4(palette::data), TR("Server"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(320);
-    input_string("Host", profile_.host, 128);
+    input_string(TR("Host"), profile_.host, 128);
 
     ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
-    input_uint16("Porta", profile_.port);
+    input_uint16(TR("Port"), profile_.port);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Banco de dados", profile_.database, 128);
+    input_string(TR("Database"), profile_.database, 128);
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "Autenticação");
+    ImGui::TextColored(col4(palette::data), TR("Authentication"));
     ImGui::Separator();
 
     static constexpr const char* kAuthModels[] = {
@@ -342,7 +347,7 @@ void ConnectionDialog::draw_tab_main() {
     };
     int auth = static_cast<int>(profile_.auth_model);
     ImGui::SetNextItemWidth(220);
-    if (ImGui::Combo("Método", &auth, kAuthModels,
+    if (ImGui::Combo(TR("Method"), &auth, kAuthModels,
                      IM_ARRAYSIZE(kAuthModels))) {
         profile_.auth_model = static_cast<db::AuthModel>(auth);
     }
@@ -352,13 +357,13 @@ void ConnectionDialog::draw_tab_main() {
 
     ImGui::BeginDisabled(!needs_credentials);
     ImGui::SetNextItemWidth(320);
-    input_string("Usuário", profile_.user, 128);
+    input_string(TR("User"), profile_.user, 128);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Senha", profile_.password, 128,
+    input_string(TR("Password"), profile_.password, 128,
                  ImGuiInputTextFlags_Password);
 
-    ImGui::Checkbox("Salvar senha", &profile_.save_password);
+    ImGui::Checkbox(TR("Save password"), &profile_.save_password);
     help_marker("A senha é guardada no cofre do sistema operacional "
                 "(DPAPI no Windows). Ainda não implementado — a senha só "
                 "vive nesta sessão.");
@@ -370,41 +375,41 @@ void ConnectionDialog::draw_tab_main() {
 void ConnectionDialog::draw_tab_postgres() {
     ImGui::BeginChild("##pg", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), "Navegador");
+    ImGui::TextColored(col4(palette::data), TR("Navigator settings"));
     ImGui::Separator();
 
-    ImGui::Checkbox("Mostrar todos os bancos",
+    ImGui::Checkbox(TR("Show all databases"),
                     &profile_.postgres.show_non_default_databases);
     help_marker("Lista todos os bancos do servidor, não apenas o conectado.");
 
-    ImGui::Checkbox("Mostrar bancos template",
+    ImGui::Checkbox(TR("Show template databases"),
                     &profile_.postgres.show_template_databases);
     help_marker("Inclui template0 e template1.");
 
-    ImGui::Checkbox("Mostrar bancos sem acesso",
+    ImGui::Checkbox(TR("Show inaccessible databases"),
                     &profile_.postgres.show_unavailable_databases);
     help_marker("Inclui bancos aos quais o usuário não tem permissão de conectar.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "Desempenho");
+    ImGui::TextColored(col4(palette::data), TR("Performance"));
     ImGui::Separator();
 
-    ImGui::Checkbox("Ler estatísticas de tamanho",
+    ImGui::Checkbox(TR("Read size statistics"),
                     &profile_.postgres.show_database_statistics);
     help_marker("Calcula o tamanho em disco de tabelas e índices. Em bancos "
                 "muito grandes, torna a expansão da árvore mais lenta.");
 
-    ImGui::Checkbox("Ler todos os tipos de dado",
+    ImGui::Checkbox(TR("Read all data types"),
                     &profile_.postgres.read_all_data_types);
     help_marker("Inclui tipos raros e de sistema. Deixa o carregamento de "
                 "metadados mais lento.");
 
-    ImGui::Checkbox("Ler colunas das chaves",
+    ImGui::Checkbox(TR("Read key columns"),
                     &profile_.postgres.read_keys_with_columns);
     help_marker("Carrega as colunas de cada chave junto com a chave. Útil "
                 "para inferência de JOIN; custa uma consulta a mais.");
 
-    ImGui::Checkbox("Usar prepared statements",
+    ImGui::Checkbox(TR("Use prepared statements"),
                     &profile_.postgres.use_prepared_statements);
 
     ImGui::Spacing();
@@ -412,10 +417,10 @@ void ConnectionDialog::draw_tab_postgres() {
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
-    input_string("Role da sessão", profile_.postgres.session_role, 64);
+    input_string(TR("Session role"), profile_.postgres.session_role, 64);
     help_marker("Executa SET ROLE ao abrir a conexão.");
 
-    ImGui::Checkbox("Substituir fuso horário legado",
+    ImGui::Checkbox(TR("Replace legacy timezone"),
                     &profile_.postgres.replace_legacy_timezone);
     help_marker("Converte timestamptz do formato antigo para o atual.");
 
@@ -425,16 +430,16 @@ void ConnectionDialog::draw_tab_postgres() {
 void ConnectionDialog::draw_tab_driver_properties() {
     ImGui::BeginChild("##driverprops", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), "Propriedades do driver");
+    ImGui::TextColored(col4(palette::data), TR("Driver properties"));
     ImGui::TextColored(col4(palette::text_dim),
-                       "Parâmetros passados diretamente ao driver na conexão.");
+                       TR("Parameters passed directly to the driver on connect."));
     ImGui::Separator();
 
     if (ImGui::BeginTable("##props", 3,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Propriedade");
-        ImGui::TableSetupColumn("Valor");
+        ImGui::TableSetupColumn(TR("Property"));
+        ImGui::TableSetupColumn(TR("Value"));
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableHeadersRow();
 
@@ -462,14 +467,14 @@ void ConnectionDialog::draw_tab_driver_properties() {
 
     ImGui::Spacing();
     ImGui::SetNextItemWidth(180);
-    ImGui::InputTextWithHint("##newkey", "propriedade",
+    ImGui::InputTextWithHint("##newkey", TR("property"),
                              property_key_, sizeof(property_key_));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(220);
-    ImGui::InputTextWithHint("##newvalue", "valor",
+    ImGui::InputTextWithHint("##newvalue", TR("value"),
                              property_value_, sizeof(property_value_));
     ImGui::SameLine();
-    if (ImGui::Button("Adicionar") && property_key_[0] != '\0') {
+    if (ImGui::Button(TR("Add")) && property_key_[0] != '\0') {
         profile_.driver_properties[property_key_] = property_value_;
         property_key_[0] = '\0';
         property_value_[0] = '\0';
@@ -481,7 +486,7 @@ void ConnectionDialog::draw_tab_driver_properties() {
 void ConnectionDialog::draw_tab_ssh() {
     ImGui::BeginChild("##ssh", ImVec2(0, -80));
 
-    ImGui::Checkbox("Usar túnel SSH", &profile_.ssh.enabled);
+    ImGui::Checkbox(TR("Use SSH tunnel"), &profile_.ssh.enabled);
     ImGui::TextColored(col4(palette::warn),
                        "Não implementado — a configuração é salva, mas o túnel "
                        "não é estabelecido.");
@@ -490,31 +495,33 @@ void ConnectionDialog::draw_tab_ssh() {
     ImGui::BeginDisabled(!profile_.ssh.enabled);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Host SSH", profile_.ssh.host, 128);
+    input_string(TR("SSH host"), profile_.ssh.host, 128);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
-    input_uint16("Porta##ssh", profile_.ssh.port);
+    input_uint16(TR("Port##ssh"), profile_.ssh.port);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Usuário##ssh", profile_.ssh.user, 64);
+    input_string(TR("User##ssh"), profile_.ssh.user, 64);
 
-    static constexpr const char* kAuthTypes[] = {
-        "Senha", "Chave pública", "Agente SSH",
+    // Sem static nem constexpr: TR() resolve em runtime e o rotulo precisa
+    // mudar quando o usuario troca de idioma.
+    const char* const kAuthTypes[] = {
+        TR("Password"), TR("Public key"), TR("SSH agent"),
     };
     int auth = static_cast<int>(profile_.ssh.auth);
     ImGui::SetNextItemWidth(220);
-    if (ImGui::Combo("Autenticação##ssh", &auth, kAuthTypes,
+    if (ImGui::Combo(TR("Authentication##ssh"), &auth, kAuthTypes,
                      IM_ARRAYSIZE(kAuthTypes))) {
         profile_.ssh.auth = static_cast<db::SshAuthType>(auth);
     }
 
     if (profile_.ssh.auth == db::SshAuthType::password) {
         ImGui::SetNextItemWidth(320);
-        input_string("Senha##ssh", profile_.ssh.password, 128,
+        input_string(TR("Password##ssh"), profile_.ssh.password, 128,
                      ImGuiInputTextFlags_Password);
     } else if (profile_.ssh.auth == db::SshAuthType::public_key) {
         ImGui::SetNextItemWidth(320);
-        input_string("Chave privada", profile_.ssh.private_key_path, 260);
+        input_string(TR("Private key"), profile_.ssh.private_key_path, 260);
         ImGui::SetNextItemWidth(320);
         input_string("Passphrase", profile_.ssh.passphrase, 128,
                      ImGuiInputTextFlags_Password);
@@ -522,9 +529,9 @@ void ConnectionDialog::draw_tab_ssh() {
 
     ImGui::Spacing();
     ImGui::SetNextItemWidth(120);
-    input_seconds("Timeout (s)##ssh", profile_.ssh.connect_timeout);
+    input_seconds(TR("Timeout (s)##ssh"), profile_.ssh.connect_timeout);
     ImGui::SetNextItemWidth(120);
-    input_seconds("Keep-alive (s)##ssh", profile_.ssh.keep_alive);
+    input_seconds(TR("Keep-alive (s)##ssh"), profile_.ssh.keep_alive);
 
     ImGui::EndDisabled();
     ImGui::EndChild();
@@ -533,7 +540,7 @@ void ConnectionDialog::draw_tab_ssh() {
 void ConnectionDialog::draw_tab_ssl() {
     ImGui::BeginChild("##ssl", ImVec2(0, -80));
 
-    ImGui::Checkbox("Usar SSL", &profile_.ssl.enabled);
+    ImGui::Checkbox(TR("Use SSL"), &profile_.ssl.enabled);
     ImGui::TextColored(col4(palette::warn),
                        "Não implementado — o protocolo ainda não negocia TLS.");
     ImGui::Separator();
@@ -545,18 +552,18 @@ void ConnectionDialog::draw_tab_ssl() {
     };
     int mode = static_cast<int>(profile_.ssl.mode);
     ImGui::SetNextItemWidth(220);
-    if (ImGui::Combo("Modo", &mode, kModes, IM_ARRAYSIZE(kModes))) {
+    if (ImGui::Combo(TR("Mode"), &mode, kModes, IM_ARRAYSIZE(kModes))) {
         profile_.ssl.mode = static_cast<db::SslMode>(mode);
     }
     help_marker("require exige criptografia; verify-ca valida o certificado do "
                 "servidor; verify-full valida também o nome do host.");
 
     ImGui::SetNextItemWidth(400);
-    input_string("Certificado da CA", profile_.ssl.root_cert_path, 260);
+    input_string(TR("CA certificate"), profile_.ssl.root_cert_path, 260);
     ImGui::SetNextItemWidth(400);
-    input_string("Certificado do cliente", profile_.ssl.client_cert_path, 260);
+    input_string(TR("Client certificate"), profile_.ssl.client_cert_path, 260);
     ImGui::SetNextItemWidth(400);
-    input_string("Chave do cliente", profile_.ssl.client_key_path, 260);
+    input_string(TR("Client key"), profile_.ssl.client_key_path, 260);
 
     ImGui::EndDisabled();
     ImGui::EndChild();
@@ -565,22 +572,22 @@ void ConnectionDialog::draw_tab_ssl() {
 void ConnectionDialog::draw_tab_proxy() {
     ImGui::BeginChild("##proxy", ImVec2(0, -80));
 
-    ImGui::Checkbox("Usar proxy SOCKS", &profile_.proxy.enabled);
-    ImGui::TextColored(col4(palette::warn), "Não implementado.");
+    ImGui::Checkbox(TR("Use SOCKS proxy"), &profile_.proxy.enabled);
+    ImGui::TextColored(col4(palette::warn), TR("Not implemented."));
     ImGui::Separator();
 
     ImGui::BeginDisabled(!profile_.proxy.enabled);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Host##proxy", profile_.proxy.host, 128);
+    input_string(TR("Host##proxy"), profile_.proxy.host, 128);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
-    input_uint16("Porta##proxy", profile_.proxy.port);
+    input_uint16(TR("Port##proxy"), profile_.proxy.port);
 
     ImGui::SetNextItemWidth(320);
-    input_string("Usuário##proxy", profile_.proxy.user, 64);
+    input_string(TR("User##proxy"), profile_.proxy.user, 64);
     ImGui::SetNextItemWidth(320);
-    input_string("Senha##proxy", profile_.proxy.password, 128,
+    input_string(TR("Password##proxy"), profile_.proxy.password, 128,
                  ImGuiInputTextFlags_Password);
 
     ImGui::EndDisabled();
@@ -590,25 +597,25 @@ void ConnectionDialog::draw_tab_proxy() {
 void ConnectionDialog::draw_tab_initialization() {
     ImGui::BeginChild("##init", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), "Transações");
+    ImGui::TextColored(col4(palette::data), TR("Transactions"));
     ImGui::Separator();
 
-    ImGui::Checkbox("Auto-commit", &profile_.auto_commit);
+    ImGui::Checkbox(TR("Auto-commit"), &profile_.auto_commit);
     help_marker("Desligado, cada alteração exige commit explícito. "
                 "Conexões de produção começam com auto-commit desligado.");
 
-    ImGui::Checkbox("Conexão somente leitura", &profile_.read_only);
+    ImGui::Checkbox(TR("Read-only connection"), &profile_.read_only);
     help_marker("Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "Sessão");
+    ImGui::TextColored(col4(palette::data), TR("Session"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
-    input_string("Schema padrão", profile_.default_schema, 64);
+    input_string(TR("Default schema"), profile_.default_schema, 64);
     help_marker("Define o search_path ao conectar.");
 
-    ImGui::Text("Consultas de inicialização");
+    ImGui::Text(TR("Initialization queries"));
     help_marker("Executadas na ordem, logo após a conexão ser estabelecida.");
 
     std::vector<char> buffer(
@@ -621,20 +628,20 @@ void ConnectionDialog::draw_tab_initialization() {
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "Conexão");
+    ImGui::TextColored(col4(palette::data), TR("Connection"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
-    input_seconds("Timeout (s)", profile_.connect_timeout);
+    input_seconds(TR("Timeout (s)"), profile_.connect_timeout);
 
-    ImGui::Checkbox("Keep-alive", &profile_.keep_alive);
+    ImGui::Checkbox(TR("Keep-alive"), &profile_.keep_alive);
     if (profile_.keep_alive) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
-        input_seconds("Intervalo (s)", profile_.keep_alive_interval);
+        input_seconds(TR("Interval (s)"), profile_.keep_alive_interval);
     }
 
-    ImGui::Checkbox("Fechar conexões ociosas", &profile_.close_idle_connections);
+    ImGui::Checkbox(TR("Close idle connections"), &profile_.close_idle_connections);
 
     ImGui::EndChild();
 }
@@ -642,22 +649,22 @@ void ConnectionDialog::draw_tab_initialization() {
 void ConnectionDialog::draw_tab_general() {
     ImGui::BeginChild("##general", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), "Identificação");
+    ImGui::TextColored(col4(palette::data), TR("Identification"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(360);
-    input_string("Nome da conexão", profile_.name, 128);
+    input_string(TR("Connection name"), profile_.name, 128);
     help_marker("Vazio usa \"banco@host\".");
 
     ImGui::SetNextItemWidth(360);
-    input_string("Descrição", profile_.description, 256);
+    input_string(TR("Description"), profile_.description, 256);
 
     ImGui::SetNextItemWidth(260);
-    input_string("Pasta", profile_.folder, 128);
+    input_string(TR("Folder"), profile_.folder, 128);
     help_marker("Agrupa a conexão na árvore. Use / para subpastas.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "Tipo de conexão");
+    ImGui::TextColored(col4(palette::data), TR("Connection type"));
     ImGui::Separator();
 
     for (int i = 0; i < 3; ++i) {
@@ -688,3 +695,5 @@ void ConnectionDialog::draw_tab_general() {
 }
 
 } // namespace otter::ui
+
+

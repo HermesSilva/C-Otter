@@ -1,5 +1,6 @@
 // C-Otter -- ponto de entrada.
 #include "base/error.hpp"
+#include "base/i18n.hpp"
 #include "ui/app_window.hpp"
 #include "ui/main_shell.hpp"
 
@@ -8,6 +9,13 @@
 namespace {
 
 int run() {
+    // Idioma: catalogos embutidos, depois .lang ao lado do executavel (que
+    // podem sobrescreve-los), e enfim o idioma do sistema. Ingles e' o padrao
+    // e dispensa catalogo -- as chaves ja' sao o texto em ingles.
+    otter::i18n::load_builtin_catalogs();
+    otter::i18n::load_catalogs("lang");
+    otter::i18n::set_language(otter::i18n::detect_system_language());
+
     otter::ui::WindowConfig config;
     config.title = "C-Otter - every JOIN is an OTTER JOIN";
 
