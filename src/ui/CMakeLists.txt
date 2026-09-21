@@ -14,6 +14,11 @@ otter_add_library(otter_ui
         sql_document.cpp
         session.cpp
         app_window_glfw.cpp
+        # Os dois entram sempre: cada um se anula por #ifdef fora da sua
+        # plataforma. Listar so' o "certo" por if(WIN32) foi o que deixou o
+        # Linux sem AppWindow, descoberto apenas no link.
+        file_dialog_win32.cpp
+        file_dialog_posix.cpp
     DEPS
         otter::otter_base
         otter::otter_db

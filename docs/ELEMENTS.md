@@ -51,8 +51,8 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **Arquivo** → Importar do DBeaver... | — | ✅ | Lê os workspaces reais; nunca escreve neles |
 | **Arquivo** → Desconectar | — | ✅ | Desabilitado quando não há conexão |
 | **Arquivo** → Sair | `Alt+F4` | ✅ | |
-| **Arquivo** → Abrir script | `Ctrl+O` | ⬜ | |
-| **Arquivo** → Salvar script | `Ctrl+S` | ⬜ | |
+| **Arquivo** → Abrir script | `Ctrl+O` | ✅ | Diálogo nativo do sistema; abre em aba nova |
+| **Arquivo** → Salvar script | `Ctrl+S` | ✅ | `Ctrl+Shift+S` para "salvar como" |
 | **Editar** → Desfazer | `Ctrl+Z` | 🟡 | Item funciona; atalho vem do widget, não do menu |
 | **Editar** → Refazer | `Ctrl+Y` | 🟡 | Idem |
 | **Editar** → Selecionar tudo | `Ctrl+A` | ✅ | |
@@ -356,7 +356,7 @@ visualizador, não uma ferramenta de trabalho.
 | # | Onde | Problema |
 |---|------|----------|
 | 1 | Conexão | Senha em disco tem a proteção fraca do DBeaver (chave pública) — **avisado na tela**, ADR 0012 |
-| 2 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
+
 | 4 | Raft | As conexões abertas não são restauradas ao reiniciar — só a última volta preenchida no diálogo |
 | 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
 
@@ -365,6 +365,7 @@ visualizador, não uma ferramenta de trabalho.
 | Onde | O que era | Como foi resolvido |
 |------|-----------|--------------------|
 | Grade | `SELECT` sem `LIMIT` numa tabela grande travava a UI até o servidor enviar tudo | Paginação de 200 linhas (ADR 0011). `SELECT *` em 2 M de linhas volta em <1 ms |
+| Editor | O `●` de modificado aparecia na primeira edição e nunca mais saía | Existe "salvar"; `mark_saved()` finalmente é chamado |
 | Grade | Mais de 64 colunas eram truncadas **em silêncio** | Aviso na barra dizendo quantas colunas ficaram de fora |
 | Navigator | Tooltips respondiam só sobre o último trecho de texto da linha | Cada linha dentro de `BeginGroup`/`EndGroup` |
 | Catálogo | `load_routine_definition()` montava uma assinatura que o servidor recusava | Localiza pelo OID; coberto por `otter_tests_live` |

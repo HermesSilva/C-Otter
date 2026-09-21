@@ -106,6 +106,11 @@ private:
     // (ou DELIMITER, ou $$...$$), um apos o outro.
     void execute_script();
 
+    // --- Arquivo -------------------------------------------------------------
+    void open_script_file();
+    // `save_as` forca o dialogo mesmo quando o documento ja' tem caminho.
+    void save_script_file(bool save_as);
+
     // Executa uma pagina da consulta guardada no documento (ADR 0011).
     void execute_page(SqlDocument& document, std::size_t page);
 

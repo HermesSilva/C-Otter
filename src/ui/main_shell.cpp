@@ -4,6 +4,7 @@
 #include "db/ddl.hpp"
 #include "db/export.hpp"
 #include "sql/paging.hpp"
+#include "ui/file_dialog.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 
@@ -15,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -444,6 +447,81 @@ void MainShell::execute_current_sql() {
     execute_page(*document, 0);
 }
 
+namespace {
+
+const std::vector<FileFilter>& sql_filters() {
+    // Em ingles: sao chaves de traducao (base/i18n.hpp).
+    static const std::vector<FileFilter> kFilters = {
+        {"SQL scripts", "*.sql"},
+        {"Text files",  "*.txt"},
+    };
+    return kFilters;
+}
+
+} // namespace
+
+void MainShell::open_script_file() {
+    const auto path = open_file_dialog(TR("Open script"), sql_filters());
+    if (!path) return;   // cancelou
+
+    std::ifstream file(*path, std::ios::binary);
+    if (!file) {
+        if (SqlDocument* document = active_document()) {
+            document->set_status(std::string(TRF("cannot open %s",
+                                                 path->c_str())));
+        }
+        return;
+    }
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+
+    // Aba nova em vez de sobrescrever a atual: o que esta' aberto pode ter
+    // trabalho nao salvo, e descarta-lo sem perguntar seria pior que uma aba
+    // a mais.
+    SqlDocument& document = new_document();
+    document.editor().SetText(buffer.str());
+    document.set_file_path(*path);
+    document.mark_saved();   // recem-aberto nao esta' modificado
+}
+
+void MainShell::save_script_file(bool save_as) {
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    std::string path = document->file_path();
+
+    if (path.empty() || save_as) {
+        // Sugere o titulo da aba com .sql: "Script 2" vira "Script 2.sql".
+        const auto chosen = save_file_dialog(
+            TR("Save script"), sql_filters(), document->title() + ".sql");
+        if (!chosen) return;
+        path = *chosen;
+    }
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        document->set_status(std::string(TRF("cannot write %s", path.c_str())));
+        return;
+    }
+
+    const std::string text = document->editor().GetText();
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+
+    if (!file) {
+        document->set_status(std::string(TRF("write failed: %s", path.c_str())));
+        return;
+    }
+
+    document->set_file_path(path);
+
+    // O ponto de salvamento e' o que faz o indicador de modificado funcionar.
+    // Sem "salvar", ele aparecia na primeira edicao e nunca mais saia -- era
+    // o defeito 4 de docs/ELEMENTS.md.
+    document->mark_saved();
+    document->set_status(std::string(TRF("saved to %s", path.c_str())));
+}
+
 void MainShell::execute_script() {
     if (session().state() != SessionState::connected || session().busy()) return;
 
@@ -559,6 +637,16 @@ void MainShell::draw() {
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Alt | ImGuiKey_X)) {
         execute_script();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
+        open_script_file();
+    }
+    // Shift primeiro: Ctrl+Shift+S tambem satisfaz Ctrl+S, e testar na ordem
+    // inversa faria "salvar como" nunca acontecer.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
+        save_script_file(/*save_as=*/true);
+    } else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+        save_script_file(/*save_as=*/false);
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
         connection_dialog_.open_new();
@@ -681,6 +769,15 @@ void MainShell::draw_menu_bar() {
         }
         ImGui::Separator();
         if (ImGui::MenuItem(TR("New SQL tab"), "Ctrl+T")) new_document();
+        if (ImGui::MenuItem(TR("Open script..."), "Ctrl+O")) open_script_file();
+        if (ImGui::MenuItem(TR("Save script"), "Ctrl+S", false,
+                            active_document() != nullptr)) {
+            save_script_file(/*save_as=*/false);
+        }
+        if (ImGui::MenuItem(TR("Save script as..."), "Ctrl+Shift+S", false,
+                            active_document() != nullptr)) {
+            save_script_file(/*save_as=*/true);
+        }
         if (ImGui::MenuItem(TR("Close tab"), "Ctrl+W",
                             false, documents_.size() > 1)) {
             close_document(active_document_);
