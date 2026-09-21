@@ -821,6 +821,18 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
 }
 
 void MainShell::draw() {
+    // A navegacao por teclado do ImGui consome as setas dentro do NewFrame --
+    // ANTES de qualquer codigo nosso rodar. Desliga-la no meio do quadro nao
+    // adianta: a tecla ja' foi consumida.
+    //
+    // Por isso a decisao e' aplicada AQUI, no inicio do quadro, com base no
+    // que a grade observou no quadro ANTERIOR. Um quadro de atraso e' de
+    // 16 ms e nao se percebe; sem ele, as setas da grade nunca funcionam.
+    ImGui::GetIO().ConfigFlags =
+        grid_owns_arrows_
+            ? (ImGui::GetIO().ConfigFlags & ~ImGuiConfigFlags_NavEnableKeyboard)
+            : (ImGui::GetIO().ConfigFlags | ImGuiConfigFlags_NavEnableKeyboard);
+
     // Colhe o resultado e entrega ao documento que o pediu -- nao ao que
     // estiver ativo agora, porque o usuario pode ter trocado de aba.
     // Constraints chegaram: recalcula se o resultado da' para editar. Sem
@@ -2966,6 +2978,18 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                                with_alpha(p.warn, 0.22f));
     }
 
+    // Selecao por cima de tudo -- inclusive da marca de alterado.
+    //
+    // A cor e' de ACENTO, nao a de "alterado": se as duas fossem parecidas,
+    // uma celula selecionada pareceria alterada, e o usuario gravaria
+    // esperando uma alteracao que nao existe.
+    const bool selected = has_selection_ && selected_document_ == document.id() &&
+                          selected_row_ == row && selected_column_ == column;
+    if (selected) {
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                               with_alpha(p.accent, 0.35f));
+    }
+
     // Guarda o inicio da celula: o alvo clicavel volta para ca' e cobre a
     // largura toda, incluindo a area do texto.
     const ImVec2 cell_origin = ImGui::GetCursorPos();
@@ -3008,11 +3032,46 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     //
     // Desenhado POR CIMA do texto (cursor recuado), nao ao lado: ao lado, a
     // celula com valor curto teria alvo so' na sobra.
+    // O PushID vem ANTES do botao, nao depois.
+    //
+    // Depois, as 9 celulas visiveis compartilhavam o id "##cellhit" -- o
+    // ImGui acusa "conflicting ID" e o ESTADO de um item vaza para o outro.
+    // Com duplo clique e menu de contexto nao dava para notar; bastou pedir
+    // IsItemClicked para o erro aparecer na tela, em vermelho.
+    ImGui::PushID(static_cast<int>(row * rs.column_count() + column));
+
     ImGui::SetCursorPos(cell_origin);
     ImGui::InvisibleButton("##cellhit",
                            ImVec2(cell_width, ImGui::GetTextLineHeight()),
                            ImGuiButtonFlags_MouseButtonLeft |
                            ImGuiButtonFlags_MouseButtonRight);
+
+    // Clique simples seleciona; o duplo continua abrindo o editor. Os dois
+    // convivem porque o ImGui entrega o clique simples TAMBEM no duplo -- e
+    // selecionar antes de editar e' o que o usuario espera de qualquer forma.
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) ||
+        ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+        selected_document_ = document.id();
+        selected_row_      = row;
+        selected_column_   = column;
+        has_selection_     = true;
+
+        // Focar a janela do resultado EXPLICITAMENTE.
+        //
+        // Clicar num InvisibleButton nao da' foco a' janela que o contem, e
+        // sem foco `IsWindowFocused` responde falso -- o que desligava todas
+        // as teclas da grade. O sintoma era a seta simplesmente nao fazer
+        // nada; um trace mostrou a funcao rodando a cada quadro com foco=0.
+        ImGui::FocusWindow(ImGui::GetCurrentWindow()->RootWindow);
+    }
+
+    // Rolar ate' a selecao quando ela mudou por TECLADO. So' neste caso: com
+    // o mouse a celula ja' esta' visivel por definicao, e rolar ali daria um
+    // solavanco a cada clique numa celula meio cortada na borda.
+    if (selected && scroll_to_selection_) {
+        ImGui::SetScrollHereY(0.5f);
+        scroll_to_selection_ = false;
+    }
 
     if (ImGui::IsItemHovered()) {
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !row_deleted) {
@@ -3033,7 +3092,6 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         }
     }
 
-    ImGui::PushID(static_cast<int>(row * rs.column_count() + column));
     if (ImGui::BeginPopupContextItem("##cellmenu")) {
         if (ImGui::MenuItem(TR("Set NULL"))) {
             // Botao proprio porque digitar nada significa string vazia, nao
@@ -4719,6 +4777,135 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
     }
 }
 
+// Teclas da grade. Mapa completo do DBeaver em docs/GRID-KEYS.md (50 teclas);
+// aqui estao as de navegacao e as que ja' tinham acao no menu de contexto.
+//
+// So' age quando a JANELA do resultado tem foco. Sem esse teste, `Alt+Delete`
+// marcaria uma linha para exclusao enquanto o usuario digita no editor SQL --
+// e' a mesma razao pela qual o DBeaver prende estes atalhos ao contexto
+// `resultset.focused`.
+void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs) {
+    // Anota para o PROXIMO quadro quem fica com as setas. Ver o comentario
+    // em draw(): a decisao precisa estar tomada antes do NewFrame.
+    const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    grid_owns_arrows_ = focused && !editing_active_;
+
+    if (!focused) return;
+
+    // As setas sao consumidas pela NAVEGACAO por teclado do ImGui
+    // (ConfigFlags_NavEnableKeyboard, ligado em app_window_glfw.cpp) antes de
+    // qualquer IsKeyPressed nosso. Um trace que registrava TODA tecla
+    // recebida mostrou "A" chegando e as setas nunca -- foi o que separou
+    // "a tecla nao chega" de "a logica a ignora".
+    //
+    // Nem SetKeyOwner nem Shortcut(RouteFocused) resolveram: os dois disputam
+    // a rota, e a navegacao ja' consumiu a tecla antes da disputa.
+    //
+    // Desligar a navegacao enquanto a grade tem foco e' o que sobra. E' o
+    // mesmo efeito do contexto `resultset.focused` do DBeaver: dentro da
+    // grade, as setas sao da grade.
+    constexpr ImGuiInputFlags kRoute = ImGuiInputFlags_RouteFocused;
+
+    // Repeticao LIGADA nas setas: segurar a seta para descer varias linhas e'
+    // o comportamento de qualquer grade, e sem isso cada linha exigiria um
+    // toque. O atraso e a cadencia sao os do sistema, herdados do ImGui.
+    const auto pressed = [&](ImGuiKey key) {
+        return ImGui::IsKeyPressed(key, /*repeat=*/true);
+    };
+    if (editing_active_) return;   // o editor da celula consome as teclas
+    if (rs.row_count() == 0 || rs.column_count() == 0) return;
+
+    // Primeira tecla sem selecao comeca no canto, em vez de nao fazer nada.
+    if (!has_selection_ || selected_document_ != document.id()) {
+        if (pressed(ImGuiKey_DownArrow) ||
+            pressed(ImGuiKey_UpArrow) ||
+            pressed(ImGuiKey_LeftArrow) ||
+            pressed(ImGuiKey_RightArrow)) {
+            selected_document_ = document.id();
+            selected_row_      = 0;
+            selected_column_   = 0;
+            has_selection_     = true;
+            scroll_to_selection_ = true;
+        }
+        return;
+    }
+
+    const std::size_t last_row = rs.row_count() - 1;
+    const std::size_t last_col = rs.column_count() - 1;
+
+    std::size_t row = selected_row_;
+    std::size_t col = selected_column_;
+
+    // Saturar nas bordas, nao dar a volta: uma seta para baixo na ultima
+    // linha que pula para a primeira faz perder o lugar sem aviso.
+    if (pressed(ImGuiKey_DownArrow))  row = std::min(row + 1, last_row);
+    if (pressed(ImGuiKey_UpArrow))    row = row > 0 ? row - 1 : 0;
+    if (pressed(ImGuiKey_RightArrow)) col = std::min(col + 1, last_col);
+    if (pressed(ImGuiKey_LeftArrow))  col = col > 0 ? col - 1 : 0;
+
+    // Home/End andam na LINHA; com Ctrl, no resultado inteiro -- e' a
+    // convencao de toda planilha, e quebra-la aqui custaria mais que seguir.
+    const bool ctrl = ImGui::GetIO().KeyCtrl;
+    if (pressed(ImGuiKey_Home)) { col = 0; if (ctrl) row = 0; }
+    if (pressed(ImGuiKey_End))  { col = last_col; if (ctrl) row = last_row; }
+
+    // Uma "pagina" e' o que cabe na tela, nao a pagina do resultado: sao
+    // conceitos diferentes, e PageDown que buscasse a proxima pagina do
+    // servidor surpreenderia quem so' queria rolar.
+    const std::size_t screen_rows = std::max<std::size_t>(
+        1, static_cast<std::size_t>(ImGui::GetContentRegionAvail().y /
+                                    std::max(ImGui::GetTextLineHeightWithSpacing(), 1.0f)));
+    if (pressed(ImGuiKey_PageDown)) {
+        row = std::min(row + screen_rows, last_row);
+    }
+    if (pressed(ImGuiKey_PageUp)) {
+        row = row > screen_rows ? row - screen_rows : 0;
+    }
+
+    if (row != selected_row_ || col != selected_column_) {
+        selected_row_        = row;
+        selected_column_     = col;
+        scroll_to_selection_ = true;
+        return;   // uma tecla por quadro: navegar e agir juntos surpreenderia
+    }
+
+    if (!document.edit_target().editable()) return;
+
+    // Acoes. As teclas sao as do DBeaver (docs/GRID-KEYS.md).
+    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_Delete, kRoute)) {
+        if (document.edits().is_deleted(row)) document.edits().unmark_deleted(row);
+        else                                  document.edits().mark_deleted(row);
+    }
+    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_Insert, kRoute)) {
+        document.edits().add_row();
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, kRoute) && row > 0) {
+        document.edits().copy_cell_from(rs, row - 1, row, col);
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_D, kRoute) &&
+        row < last_row) {
+        document.edits().copy_cell_from(rs, row + 1, row, col);
+    }
+
+    // Enter edita a celula sob a selecao -- o `row.edit.inline` do DBeaver.
+    if (ImGui::Shortcut(ImGuiKey_Enter, ImGuiInputFlags_RouteFocused) &&
+        !document.edits().is_deleted(row)) {
+        editing_active_   = true;
+        editing_document_ = document.id();
+        editing_row_      = row;
+        editing_column_   = col;
+
+        const db::CellEdit* pending = document.edits().find(row, col);
+        const bool is_null = pending != nullptr ? pending->is_null
+                                                : rs.is_null(row, col);
+        const std::string_view text =
+            pending != nullptr ? std::string_view(pending->value)
+                               : rs.text(row, col);
+        std::snprintf(edit_buffer_, sizeof edit_buffer_, "%s",
+                      is_null ? "" : std::string(text).c_str());
+    }
+}
+
 void MainShell::draw_grid_panel() {
     if (ImGui::Begin(TRW("Result", "###ResultPanel"))) {
         // O resultado pertence ao documento: trocar de aba troca a grade.
@@ -4738,6 +4925,11 @@ void MainShell::draw_grid_panel() {
 
         const db::ResultSet& rs = *document->result();
         const Palette& p = colors();
+
+        // Teclado ANTES de desenhar: a celula selecionada precisa ja' estar
+        // no lugar novo quando as celulas forem desenhadas, senao o destaque
+        // e a rolagem ficam um quadro atrasados -- visivel como um piscar.
+        handle_grid_keys(*document, rs);
 
         draw_grid_toolbar(*document, rs);
 

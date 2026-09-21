@@ -100,6 +100,7 @@ private:
     // Contas do servidor, com os GRANTs de cada uma.
     void draw_users_folder();
     void draw_editor_panel();
+    void handle_grid_keys(SqlDocument& document, const db::ResultSet& rs);
     void draw_grid_panel();
 
     // Linha acima da grade: contagem, navegacao de paginas e avisos.
@@ -378,6 +379,27 @@ private:
     std::size_t        editing_row_ = 0;
     std::size_t        editing_column_ = 0;
     bool               editing_active_ = false;
+
+    // Celula SELECIONADA: (documento, linha, coluna). Diferente da que esta'
+    // em edicao -- selecionar e' so' apontar, e e' o que da' aos atalhos de
+    // teclado uma "linha atual" sobre a qual agir.
+    //
+    // Sem isso nenhum dos 50 atalhos de grade do DBeaver tem sentido: nao ha'
+    // o que excluir com Alt+Delete nem de onde copiar com Ctrl+D. Mapa em
+    // docs/GRID-KEYS.md.
+    std::size_t        selected_document_ = 0;
+    std::size_t        selected_row_ = 0;
+    std::size_t        selected_column_ = 0;
+    bool               has_selection_ = false;
+
+    // A selecao mudou por TECLADO neste quadro, e a grade precisa rolar para
+    // mostra-la. Navegar para uma linha fora da area visivel sem rolar deixa
+    // a selecao invisivel -- o usuario ve' a tecla nao fazer nada.
+    bool               scroll_to_selection_ = false;
+
+    // A grade fica com as setas no proximo quadro? Ver draw(): a navegacao do
+    // ImGui consome a tecla dentro do NewFrame, antes de o nosso codigo rodar.
+    bool               grid_owns_arrows_ = false;
     bool               saving_edits_ = false;
 
     // Uma releitura foi disparada logo apos gravar edicoes. Ela REUSA

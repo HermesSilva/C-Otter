@@ -204,9 +204,8 @@ esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 1. **TLS no Linux** — `lib/net/tls_openssl.cpp` ainda é esboço, e
    `tls_available()` responde `false` lá: a caixa "usar SSL" aparece desligada
    em vez de falhar na conexão
-2. **Atalhos de teclado da grade** — os cinco comandos de linha existem no
-   menu de contexto, nenhum tem atalho. O DBeaver usa `Alt+Insert`,
-   `Ctrl+Alt+Insert`, `Alt+Delete`, `Ctrl+D` e `Ctrl+Alt+D`.
+2. **Atalhos de teclado da grade** — 5 de 47, mais a navegação por setas.
+   Mapa completo em `docs/GRID-KEYS.md`.
 
 3. **Comandos de linha que faltam** — o DBeaver tem **sete**, extraídos de
    `plugin.xml:1073-1079` do `ui.editors.data`; o C-Otter tem três:
