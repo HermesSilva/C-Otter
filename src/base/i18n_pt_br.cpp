@@ -772,6 +772,19 @@ const char* const kPtBr[] = {
     "%zu cell edit(s) not written to the database",
         "%zu alteração(oes) de célula não gravada(s) no banco",
     "Exit and discard",           "Sair e descartar",
+
+    // --- Inspetor de queries ---
+    "Show:",                      "Mostrar:",
+    "failed only",                "só as que falharam",
+    "catalog queries",            "queries de catálogo",
+    "The queries C-Otter runs on its own to read the catalog. DBeaver hides "
+    "these.",
+        "As queries que o C-Otter executa por conta própria para ler o "
+        "catálogo. O DBeaver as esconde.",
+    "Clear log",                  "Limpar log",
+    "%zu of %zu query(s)",        "%zu de %zu query(s)",
+    "Open in SQL editor",         "Abrir no editor SQL",
+    "Copy error",                 "Copiar erro",
 };
 
 } // namespace

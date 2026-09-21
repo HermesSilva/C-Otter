@@ -695,6 +695,11 @@ std::vector<db::QueryLog> Session::query_log() const {
     return holt_ ? holt_->query_log() : std::vector<db::QueryLog>{};
 }
 
+void Session::clear_query_log() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (holt_) holt_->clear_query_log();
+}
+
 // --- Informacao do servidor (System Info) ----------------------------------------
 
 void Session::load_server_info_async(ServerInfo what) {

@@ -5723,9 +5723,40 @@ void MainShell::draw_query_log_panel() {
             return;
         }
 
-        ImGui::TextColored(col4(colors().text_dim),
-                           "%zu query(s)  |  inclusive as internas de catálogo",
-                           log.size());
+        // Filtro por estado, como o SQLLogFilter do DBeaver. Depois de um
+        // script de 40 comandos, achar o que falhou exige rolar a lista
+        // inteira -- e as internas de catalogo enchem o log entre eles.
+        ImGui::TextColored(col4(colors().text_dim), "%s", TR("Show:"));
+        ImGui::SameLine();
+        ImGui::Checkbox(TR("failed only"), &query_log_failed_only_);
+        ImGui::SameLine();
+        ImGui::Checkbox(TR("catalog queries"), &query_log_show_internal_);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s",
+                              TR("The queries C-Otter runs on its own to read "
+                                 "the catalog. DBeaver hides these."));
+        }
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton(TR("Clear log"))) session().clear_query_log();
+
+        // Contagem do que esta' VISIVEL, nao do log inteiro: com filtro
+        // ligado, dizer "412 queries" e mostrar 3 linhas seria contradicao.
+        std::size_t shown = 0;
+        for (const db::QueryLog& entry : log) {
+            if (query_log_failed_only_ && !entry.failed) continue;
+            if (!query_log_show_internal_ && entry.internal) continue;
+            ++shown;
+        }
+
+        if (shown == log.size()) {
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR("%zu query(s)  |  including internal catalog ones"),
+                               log.size());
+        } else {
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR("%zu of %zu query(s)"), shown, log.size());
+        }
         ImGui::Separator();
 
         constexpr ImGuiTableFlags flags =
@@ -5743,6 +5774,10 @@ void MainShell::draw_query_log_panel() {
             // Mais recentes primeiro: e' o que se quer ver ao diagnosticar.
             for (std::size_t i = log.size(); i > 0; --i) {
                 const db::QueryLog& entry = log[i - 1];
+                if (query_log_failed_only_ && !entry.failed) continue;
+                if (!query_log_show_internal_ && entry.internal) continue;
+
+                ImGui::PushID(static_cast<int>(i));
                 ImGui::TableNextRow();
 
                 ImGui::TableSetColumnIndex(0);
@@ -5760,11 +5795,42 @@ void MainShell::draw_query_log_panel() {
                 // Uma linha so': quebras de linha do SQL viram espaco.
                 std::string single_line = entry.sql;
                 std::replace(single_line.begin(), single_line.end(), '\n', ' ');
-                ImGui::TextUnformatted(single_line.c_str());
+
+                // Selecionavel de largura total para o menu de contexto ter
+                // onde pegar: TextUnformatted nao responde a clique.
+                ImGui::Selectable(single_line.c_str(), false,
+                                  ImGuiSelectableFlags_SpanAllColumns);
 
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", entry.sql.c_str());
+                    // O erro junto do SQL: sem isto, descobrir POR QUE a
+                    // query falhou exigia procurar a mensagem na barra, que
+                    // ja' tinha sido substituida pela query seguinte.
+                    if (entry.failed && !entry.error.empty()) {
+                        ImGui::SetTooltip("%s\n\n%s", entry.sql.c_str(),
+                                          entry.error.c_str());
+                    } else {
+                        ImGui::SetTooltip("%s", entry.sql.c_str());
+                    }
                 }
+
+                // Menu de contexto, nas acoes do QueryLogViewer do DBeaver.
+                if (ImGui::BeginPopupContextItem("##logmenu")) {
+                    if (ImGui::MenuItem(TR("Copy SQL"))) {
+                        ImGui::SetClipboardText(entry.sql.c_str());
+                    }
+                    if (ImGui::MenuItem(TR("Open in SQL editor"))) {
+                        // Abre numa aba nova SEM executar: o log guarda o que
+                        // ja' rodou, e reexecutar um UPDATE por engano ao
+                        // inspecionar o historico seria destrutivo.
+                        open_sql_tab(entry.sql, /*run=*/false);
+                    }
+                    if (ImGui::MenuItem(TR("Copy error"), nullptr, false,
+                                        entry.failed && !entry.error.empty())) {
+                        ImGui::SetClipboardText(entry.error.c_str());
+                    }
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }

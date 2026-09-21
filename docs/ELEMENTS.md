@@ -379,9 +379,12 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | Mais recentes primeiro | ✅ | |
 | **Queries internas de catálogo** | ✅ | **Melhor que o DBeaver**, que as esconde |
 | Limite de 2000 entradas | ✅ | Descarta as mais antigas |
-| Copiar SQL | ⬜ | |
-| Filtrar por estado | ⬜ | |
-| Reexecutar do histórico | ⬜ | |
+| **Copiar SQL** | ✅ | Menu de contexto, como o `QueryLogViewer` do DBeaver |
+| **Filtrar por estado** | ✅ | "só as que falharam" e "queries de catálogo"; a contagem mostra `N de M` |
+| **Abrir no editor SQL** | ✅ | Aba nova **sem executar** — reexecutar um UPDATE ao inspecionar seria destrutivo |
+| **Copiar erro** | ✅ | Desabilitado quando a query não falhou |
+| **Limpar log** | ✅ | Sem confirmação: é só histórico de diagnóstico |
+| Mensagem de erro no tooltip | ✅ | Junto do SQL; antes era preciso achá-la na barra de status |
 | Persistir entre sessões | ⬜ | |
 
 ## 9. Barra de status
@@ -462,12 +465,12 @@ ficam de fora do total.
 | Navigator | 32 | 0 | 1 | 0 | 33 |
 | Editor SQL | 52 | 3 | 5 | 0 | 60 |
 | Grade | 51 | 0 | 3 | 0 | 54 |
-| Inspetor de queries | 9 | 0 | 4 | 0 | 13 |
+| Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **241** | **5** | **29** | **0** | **275** |
+| **Total** | **247** | **5** | **26** | **0** | **278** |
 
-**241 de 275 elementos existentes funcionam.**
+**247 de 278 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

@@ -386,6 +386,12 @@ private:
     unsigned int editor_dock_id_ = 0;
     bool wants_quit_         = false;
 
+    // Filtro do inspetor de queries. As internas de catalogo aparecem por
+    // padrao -- e' a diferenca deliberada para o DBeaver, que as esconde:
+    // ferramenta que nao mostra o que faz e' dificil de confiar (ADR 0008).
+    bool query_log_failed_only_   = false;
+    bool query_log_show_internal_ = true;
+
     // Confirmacao de saida aberta. A saida so' acontece se o usuario
     // escolher sair; qualquer outra coisa apenas fecha o dialogo.
     bool confirm_quit_       = false;

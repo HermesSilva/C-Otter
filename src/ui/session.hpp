@@ -159,6 +159,10 @@ public:
     [[nodiscard]] std::optional<db::ResultSet> take_result();
     [[nodiscard]] std::vector<db::QueryLog> query_log() const;
 
+    // Esvazia o log. E' so' o historico de diagnostico -- nao toca em nada do
+    // servidor nem no resultado exibido, entao nao pede confirmacao.
+    void clear_query_log();
+
     // Carregamento tardio por pasta da arvore. Cada uma consulta o catalogo
     // apenas quando o no e' expandido -- expandir "Colunas" nao deve custar
     // uma leitura de indices.
