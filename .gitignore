@@ -1,0 +1,26 @@
+# Build
+/build/
+/out/
+compile_commands.json
+CMakeUserPresets.json
+
+# MSVC / Visual Studio
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.lib
+*.exe
+.vs/
+*.user
+
+# Ferramentas
+.cache/
+.idea/
+*.swp
+*~
+
+# Dependencias baixadas
+/third_party/*/
+!/third_party/README.md
