@@ -54,6 +54,33 @@ const char* const kPtBr[] = {
     "Pin tab",                    "Fixar aba",
     "Copy SQL",                   "Copiar SQL",
 
+    // --- Temas ---
+    "Theme",                      "Tema",
+    "Dark",                       "Escuro",
+    "Light",                      "Claro",
+    "Amber",                      "Âmbar",
+
+    // --- Barra de ferramentas e transacoes ---
+    "Connect",                    "Conectar",
+    "Execute (Ctrl+Enter)",       "Executar (Ctrl+Enter)",
+    "Cancel query",               "Cancelar query",
+    "Auto-commit: on",            "Auto-commit: ligado",
+    "Auto-commit: off",           "Auto-commit: desligado",
+    "Commit (Ctrl+Shift+C)",      "Confirmar (Ctrl+Shift+C)",
+    "Rollback (Ctrl+Shift+R)",    "Desfazer (Ctrl+Shift+R)",
+    "New connection (Ctrl+Shift+N)", "Nova conexão (Ctrl+Shift+N)",
+    "Commit",                     "Confirmar",
+    "Rollback",                   "Desfazer",
+    "transaction open",           "transação aberta",
+    "uncommitted changes",        "alterações pendentes",
+    "transaction aborted",        "transação abortada",
+    "transaction committed",      "transação confirmada",
+    "transaction rolled back",    "transação desfeita",
+    "auto-commit on",             "auto-commit ligado",
+    "auto-commit off",            "auto-commit desligado",
+    "connected, but the catalog failed: ",
+        "conectado, mas o catálogo falhou: ",
+
     // --- Editor ---
     "Execute  (Ctrl+Enter)",      "Executar  (Ctrl+Enter)",
     " (%lld row(s) affected)",    " (%lld linha(s) afetada(s))",

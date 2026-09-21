@@ -8,6 +8,7 @@ otter_add_library(otter_ui
     UI_LAYER
     SOURCES
         theme.cpp
+        icons.cpp
         main_shell.cpp
         connection_dialog.cpp
         sql_document.cpp
@@ -20,4 +21,5 @@ otter_add_library(otter_ui
         imgui
         texteditor
 )
+
 

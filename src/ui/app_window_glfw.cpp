@@ -159,7 +159,7 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.IniFilename = nullptr;   // layout persistido por nos, nao pelo imgui.ini
 
-    apply_otter_theme(ImGui::GetStyle());
+    apply_theme(ImGui::GetStyle());
     if (impl.scale != 1.0f) ImGui::GetStyle().ScaleAllSizes(impl.scale);
 
     load_ui_font(io, impl.scale);
@@ -209,7 +209,13 @@ void AppWindow::run(const FrameFn& draw_frame) {
         glfwGetFramebufferSize(impl.window, &fb_width, &fb_height);
         glViewport(0, 0, fb_width, fb_height);
 
-        glClearColor(0.102f, 0.086f, 0.075f, 1.0f);   // palette::bg_darkest
+        // Fundo do tema ativo: fixar a cor deixaria o tema claro com uma
+        // moldura escura nas bordas.
+        const std::uint32_t bg = colors().bg_darkest;
+        glClearColor(static_cast<float>((bg >> 0)  & 0xFF) / 255.0f,
+                     static_cast<float>((bg >> 8)  & 0xFF) / 255.0f,
+                     static_cast<float>((bg >> 16) & 0xFF) / 255.0f,
+                     1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

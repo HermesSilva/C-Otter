@@ -1,6 +1,7 @@
 #include "ui/main_shell.hpp"
 
 #include "base/i18n.hpp"
+#include "ui/icons.hpp"
 #include "ui/theme.hpp"
 
 #include "imgui.h"
@@ -19,6 +20,7 @@ namespace otter::ui {
 namespace {
 
 constexpr float kStatusBarHeight = 26.0f;
+constexpr float kToolbarHeight   = 34.0f;
 
 ImU32 col(std::uint32_t c) { return static_cast<ImU32>(c); }
 
@@ -72,35 +74,41 @@ constexpr std::string_view kWelcomeSql =
 // o resto da UI, para que o painel de SQL nao pareca um corpo estranho.
 void apply_editor_palette(TextEditor& editor) {
     using Color = TextEditor::Color;
-    TextEditor::Palette p = editor.GetPalette();
+
+    // Parte da paleta base do widget adequada ao tema, e NAO da paleta atual
+    // do editor: reaproveitar a anterior deixaria cores nao listadas abaixo
+    // com o resíduo do tema antigo -- foi assim que o tema claro ficou com
+    // texto claro sobre fundo claro.
+    TextEditor::Palette p = current_theme().is_dark
+                                ? TextEditor::GetDarkPalette()
+                                : TextEditor::GetLightPalette();
 
     auto set = [&p](Color c, std::uint32_t value) {
         p[static_cast<std::size_t>(c)] = static_cast<ImU32>(value);
     };
 
-    set(Color::background,      palette::bg_darkest);
-    set(Color::text,            palette::text);
-    set(Color::keyword,         palette::fur_light);   // SELECT, FROM, JOIN
-    set(Color::declaration,     palette::data_light);
-    set(Color::number,          0xFFB0A450);
-    set(Color::string,          0xFF7CC47C);
-    set(Color::punctuation,     palette::text_dim);
-    set(Color::preprocessor,    palette::warn);
-    set(Color::identifier,      palette::text);
-    set(Color::knownIdentifier, palette::data);        // tabelas e colunas
-    set(Color::comment,         palette::text_dim);
-    set(Color::cursor,          palette::data_light);
-    set(Color::selection,       (palette::data & 0x00FFFFFFu) | 0x50000000u);
-    set(Color::whitespace,      0xFF3D332C);
-    set(Color::lineNumber,      palette::text_dim);
-    set(Color::currentLineNumber, palette::fur_light);
-    set(Color::currentLineHighlight,
-        (palette::fur & 0x00FFFFFFu) | 0x18000000u);
-    set(Color::currentLineHighlightBorder,
-        (palette::fur & 0x00FFFFFFu) | 0x30000000u);
-    set(Color::matchingBracketBackground,
-        (palette::data & 0x00FFFFFFu) | 0x40000000u);
-    set(Color::matchingBracketActive, palette::data_light);
+    const Palette& t = colors();
+
+    set(Color::background,      t.bg_darkest);
+    set(Color::text,            t.text);
+    set(Color::keyword,         t.syntax_keyword);   // SELECT, FROM, JOIN
+    set(Color::declaration,     t.data_light);
+    set(Color::number,          t.syntax_number);
+    set(Color::string,          t.syntax_string);
+    set(Color::punctuation,     t.text_dim);
+    set(Color::preprocessor,    t.warn);
+    set(Color::identifier,      t.text);
+    set(Color::knownIdentifier, t.data);             // tabelas e colunas
+    set(Color::comment,         t.syntax_comment);
+    set(Color::cursor,          t.data_light);
+    set(Color::selection,       with_alpha(t.data, 0.31f));
+    set(Color::whitespace,      t.bg_light);
+    set(Color::lineNumber,      t.text_dim);
+    set(Color::currentLineNumber, t.accent_light);
+    set(Color::currentLineHighlight,       with_alpha(t.accent, 0.09f));
+    set(Color::currentLineHighlightBorder, with_alpha(t.accent, 0.19f));
+    set(Color::matchingBracketBackground,  with_alpha(t.data, 0.25f));
+    set(Color::matchingBracketActive, t.data_light);
 
     editor.SetPalette(p);
 }
@@ -109,7 +117,7 @@ void apply_editor_palette(TextEditor& editor) {
 void draw_busy_indicator() {
     const float t = static_cast<float>(ImGui::GetTime());
     const float alpha = 0.4f + 0.6f * std::abs(std::sin(t * 3.0f));
-    ImVec4 color = col4(palette::data_light);
+    ImVec4 color = col4(colors().data_light);
     color.w = alpha;
     ImGui::TextColored(color, "  ●");
 }
@@ -405,8 +413,16 @@ void MainShell::draw() {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_W)) {
         close_document(active_document_);
     }
+    // Commit e rollback: mesmos atalhos do DBeaver.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_C)) {
+        session_.commit_async();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_R)) {
+        session_.rollback_async();
+    }
 
     draw_menu_bar();
+    draw_toolbar();
     draw_dockspace();
 
     draw_raft_panel();
@@ -433,10 +449,14 @@ void MainShell::draw() {
 void MainShell::draw_dockspace() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
 
-    // Host ocupa a area de trabalho menos a faixa da barra de status.
-    const ImVec2 host_size(vp->WorkSize.x, vp->WorkSize.y - kStatusBarHeight);
+    // Host ocupa a area de trabalho menos as faixas da barra de ferramentas
+    // (no topo) e da barra de status (no rodape).
+    const ImVec2 host_size(
+        vp->WorkSize.x,
+        vp->WorkSize.y - kToolbarHeight - kStatusBarHeight);
+    const ImVec2 host_pos(vp->WorkPos.x, vp->WorkPos.y + kToolbarHeight);
 
-    ImGui::SetNextWindowPos(vp->WorkPos);
+    ImGui::SetNextWindowPos(host_pos);
     ImGui::SetNextWindowSize(host_size);
     ImGui::SetNextWindowViewport(vp->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -537,10 +557,43 @@ void MainShell::draw_menu_bar() {
         if (ImGui::MenuItem(TR("Execute"), "Ctrl+Enter", false, can_run)) {
             execute_current_sql();
         }
+        ImGui::Separator();
+
+        const bool auto_commit = session_.auto_commit();
+        const bool in_txn = session_.txn_state() != db::TxnState::idle;
+
+        bool toggle = auto_commit;
+        if (ImGui::MenuItem(TR("Auto-commit"), nullptr, &toggle, can_run)) {
+            session_.set_auto_commit_async(toggle);
+        }
+        if (ImGui::MenuItem(TR("Commit"), "Ctrl+Shift+C", false,
+                            can_run && !auto_commit && in_txn)) {
+            session_.commit_async();
+        }
+        if (ImGui::MenuItem(TR("Rollback"), "Ctrl+Shift+R", false,
+                            can_run && !auto_commit && in_txn)) {
+            session_.rollback_async();
+        }
         ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu(TR("Help"))) {
+        // Seletor de tema: troca em tempo real, sem reiniciar.
+        if (ImGui::BeginMenu(TR("Theme"))) {
+            const std::string active_theme = current_theme().id;
+            for (const Theme& theme : available_themes()) {
+                const bool selected = active_theme == theme.id;
+                if (ImGui::MenuItem(TR(theme.name.c_str()), nullptr, selected)) {
+                    set_theme(theme.id);
+                    // Os editores já criados guardam a paleta antiga.
+                    for (auto& document : documents_) {
+                        apply_editor_palette(document->editor());
+                    }
+                }
+            }
+            ImGui::EndMenu();
+        }
+
         // Seletor de idioma: troca em tempo real, sem reiniciar.
         if (ImGui::BeginMenu(TR("Language"))) {
             const std::string_view active = i18n::current_language();
@@ -567,7 +620,7 @@ void MainShell::draw_menu_bar() {
                   static_cast<double>(1000.0f / io.Framerate));
     const float width = ImGui::CalcTextSize(fps).x;
     ImGui::SameLine(ImGui::GetWindowWidth() - width - 16.0f);
-    ImGui::TextColored(col4(palette::text_dim), "%s", fps);
+    ImGui::TextColored(col4(colors().text_dim), "%s", fps);
 
     ImGui::EndMainMenuBar();
 }
@@ -587,15 +640,15 @@ void MainShell::draw_raft_panel() {
         ImGui::Separator();
 
         if (state == SessionState::disconnected) {
-            ImGui::TextColored(col4(palette::text_dim), TR("no connection"));
+            ImGui::TextColored(col4(colors().text_dim), TR("no connection"));
             ImGui::End();
             return;
         }
 
         const std::uint32_t status_color =
-            connected                        ? palette::ok
-            : state == SessionState::failed  ? palette::error
-                                             : palette::warn;
+            connected                        ? colors().ok
+            : state == SessionState::failed  ? colors().error
+                                             : colors().warn;
 
         ImGui::TextColored(col4(status_color), "●");
         ImGui::SameLine();
@@ -624,21 +677,21 @@ void MainShell::draw_raft_panel() {
         ImGui::TextColored(col4(type.color), "%s", type.name);
 
         if (connected) {
-            ImGui::TextColored(col4(palette::text_dim), "PostgreSQL %s",
+            ImGui::TextColored(col4(colors().text_dim), "PostgreSQL %s",
                                session_.server_version().c_str());
-            ImGui::TextColored(col4(palette::text_dim), "%s:%u",
+            ImGui::TextColored(col4(colors().text_dim), "%s:%u",
                                active_profile_.host.c_str(),
                                active_profile_.port);
-            ImGui::TextColored(col4(palette::text_dim), "%s",
+            ImGui::TextColored(col4(colors().text_dim), "%s",
                                active_profile_.auto_commit ? TR("auto-commit")
                                                            : TR("manual transaction"));
             if (active_profile_.read_only) {
-                ImGui::TextColored(col4(palette::warn), TR("read only"));
+                ImGui::TextColored(col4(colors().warn), TR("read only"));
             }
         }
 
         if (!active_profile_.description.empty()) {
-            ImGui::TextColored(col4(palette::text_dim), "%s",
+            ImGui::TextColored(col4(colors().text_dim), "%s",
                                active_profile_.description.c_str());
         }
 
@@ -650,7 +703,7 @@ void MainShell::draw_raft_panel() {
 void MainShell::draw_navigator_panel() {
     if (ImGui::Begin(TRW("Navigator", "###NavigatorPanel"))) {
         if (session_.state() != SessionState::connected) {
-            ImGui::TextColored(col4(palette::text_dim),
+            ImGui::TextColored(col4(colors().text_dim),
                                TR("connect to browse the schema"));
             ImGui::End();
             return;
@@ -671,14 +724,14 @@ void MainShell::draw_navigator_panel() {
                                      table.kind == db::ObjKind::materialized_view;
 
                 ImGui::PushStyleColor(ImGuiCol_Text,
-                                      col(is_view ? palette::data : palette::text));
+                                      col(is_view ? colors().data : colors().text));
                 const bool open = ImGui::TreeNode(table.name.c_str());
                 ImGui::PopStyleColor();
 
                 // Tamanho e estimativa de linhas a direita, em tom apagado.
                 if (!table.size_pretty.empty()) {
                     ImGui::SameLine();
-                    ImGui::TextColored(col4(palette::text_dim), "  %s",
+                    ImGui::TextColored(col4(colors().text_dim), "  %s",
                                        table.size_pretty.c_str());
                 }
 
@@ -689,19 +742,19 @@ void MainShell::draw_navigator_panel() {
                     }
 
                     if (table.columns.empty()) {
-                        ImGui::TextColored(col4(palette::text_dim), TR("  loading..."));
+                        ImGui::TextColored(col4(colors().text_dim), TR("  loading..."));
                     }
 
                     for (const db::ColumnMeta& column : table.columns) {
                         ImGui::PushStyleColor(
                             ImGuiCol_Text,
-                            col(column.primary_key ? palette::data_light
-                                                   : palette::text));
+                            col(column.primary_key ? colors().data_light
+                                                   : colors().text));
                         ImGui::BulletText("%s", column.name.c_str());
                         ImGui::PopStyleColor();
 
                         ImGui::SameLine();
-                        ImGui::TextColored(col4(palette::text_dim), "%s%s%s",
+                        ImGui::TextColored(col4(colors().text_dim), "%s%s%s",
                                            column.type_name.c_str(),
                                            column.primary_key ? "  PK" : "",
                                            column.nullable ? "" : "  NOT NULL");
@@ -713,6 +766,163 @@ void MainShell::draw_navigator_panel() {
         }
     }
     ImGui::End();
+}
+
+void MainShell::draw_toolbar() {
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+
+    ImGui::SetNextWindowPos(vp->WorkPos);
+    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, kToolbarHeight));
+
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 4));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, col4(colors().bg_darkest));
+
+    if (ImGui::Begin("##toolbar", nullptr, flags)) {
+        const Palette& p = colors();
+
+        const bool connected = session_.state() == SessionState::connected;
+        const bool busy      = session_.busy();
+        const bool can_act   = connected && !busy;
+
+        // Separador vertical fino entre grupos de ações.
+        auto group_separator = [&p] {
+            ImGui::SameLine(0.0f, 6.0f);
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const float h = toolbar_button_size();
+            ImGui::GetWindowDrawList()->AddLine(
+                ImVec2(pos.x, pos.y + h * 0.22f),
+                ImVec2(pos.x, pos.y + h * 0.78f),
+                with_alpha(p.bg_light, 0.65f), 1.0f);
+            ImGui::SameLine(0.0f, 7.0f);
+        };
+
+        // --- Conexão ---------------------------------------------------------
+        if (icon_button("##connect", Icon::connect,
+                        TR("New connection (Ctrl+Shift+N)"))) {
+            connection_dialog_.open_new();
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (icon_button("##disconnect", Icon::disconnect, TR("Disconnect"),
+                        connected)) {
+            session_.disconnect();
+        }
+
+        group_separator();
+
+        // --- Execução --------------------------------------------------------
+        if (icon_button("##execute", Icon::play, TR("Execute (Ctrl+Enter)"),
+                        can_act, can_act ? p.ok : 0)) {
+            execute_current_sql();
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (icon_button("##cancel", Icon::stop, TR("Cancel query"), busy,
+                        busy ? p.error : 0)) {
+            // Cancelamento entra quando a Session expuser cancel_async().
+        }
+
+        group_separator();
+
+        // --- Transações ------------------------------------------------------
+        //
+        // A razão de a barra e as transações virem juntas: commit e rollback
+        // precisam de um lugar visível e permanente.
+        const bool auto_commit    = session_.auto_commit();
+        const db::TxnState txn    = session_.txn_state();
+        const std::size_t pending = session_.uncommitted_changes();
+        const bool in_txn         = txn != db::TxnState::idle;
+
+        // Auto-commit como botão de alternância, tingido quando ligado.
+        if (icon_button("##autocommit", Icon::refresh,
+                        auto_commit ? TR("Auto-commit: on") : TR("Auto-commit: off"),
+                        can_act, auto_commit ? p.data_light : p.text_dim)) {
+            session_.set_auto_commit_async(!auto_commit);
+        }
+
+        ImGui::SameLine(0.0f, 2.0f);
+        const bool can_txn = can_act && !auto_commit && in_txn;
+
+        if (icon_button("##commit", Icon::commit, TR("Commit (Ctrl+Shift+C)"),
+                        can_txn, pending > 0 ? p.ok : 0)) {
+            session_.commit_async();
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        if (icon_button("##rollback", Icon::rollback, TR("Rollback (Ctrl+Shift+R)"),
+                        can_txn, pending > 0 ? p.error : 0)) {
+            session_.rollback_async();
+        }
+
+        // --- Indicador de estado da transação --------------------------------
+        ImGui::SameLine(0.0f, 10.0f);
+        ImGui::AlignTextToFramePadding();
+
+        if (!connected) {
+            ImGui::TextColored(col4(p.text_dim), "—");
+        } else if (auto_commit) {
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("auto-commit"));
+        } else {
+            // Cores do monitor de transação do DBeaver: verde parado, âmbar
+            // com trabalho pendente, vermelho abortada.
+            const std::uint32_t color =
+                txn == db::TxnState::failed ? p.error
+                : pending > 0               ? p.warn
+                                            : p.ok;
+
+            const char* label =
+                txn == db::TxnState::failed ? TR("transaction aborted")
+                : pending > 0               ? TR("uncommitted changes")
+                                            : TR("transaction open");
+
+            // Ponto com glow: o estado da transação merece destaque.
+            const ImVec2 dot = ImGui::GetCursorScreenPos();
+            const ImVec2 dot_center(dot.x + 5.0f,
+                                    dot.y + ImGui::GetFontSize() * 0.5f);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            if (p.glow_strength > 0.0f) {
+                for (int i = 3; i > 0; --i) {
+                    const float t = static_cast<float>(i) / 3.0f;
+                    dl->AddCircleFilled(
+                        dot_center, 4.0f + t * 5.0f,
+                        with_alpha(color, p.glow_strength * 0.16f * (1.0f - t)),
+                        16);
+                }
+            }
+            dl->AddCircleFilled(dot_center, 4.0f, color, 16);
+
+            ImGui::Dummy(ImVec2(14.0f, ImGui::GetFontSize()));
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::TextColored(col4(color), "%s", label);
+
+            if (pending > 0) {
+                ImGui::SameLine(0.0f, 5.0f);
+                ImGui::TextColored(col4(p.text_dim), "(%zu)", pending);
+            }
+        }
+
+        // --- Contexto, alinhado à direita ------------------------------------
+        if (connected) {
+            char context[160];
+            std::snprintf(context, sizeof(context), "%s  ·  %s",
+                          active_profile_.effective_name().c_str(),
+                          db::connection_type_info(active_profile_.type).name);
+
+            const float width = ImGui::CalcTextSize(context).x;
+            ImGui::SameLine(ImGui::GetWindowWidth() - width - 16.0f);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(
+                col4(db::connection_type_info(active_profile_.type).color),
+                "%s", context);
+        }
+    }
+    ImGui::End();
+
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
 }
 
 void MainShell::draw_document_tabs() {
@@ -793,7 +1003,7 @@ void MainShell::draw_document_body(SqlDocument& document) {
     const TextEditor::DocPos cursor =
         document.editor().GetCurrentCursorPosition();
 
-    ImGui::TextColored(col4(palette::text_dim),
+    ImGui::TextColored(col4(colors().text_dim),
                        TR("  Ln %zu, Col %zu  |  %zu lines%s"),
                        cursor.line + 1, cursor.index + 1,
                        document.editor().GetLineCount(),
@@ -821,11 +1031,11 @@ void MainShell::draw_grid_panel() {
         SqlDocument* document = active_document();
 
         if (document == nullptr || !document->result().has_value()) {
-            ImGui::TextColored(col4(palette::text_dim),
+            ImGui::TextColored(col4(colors().text_dim),
                                TR("run a query to see the result"));
             // Um erro da última execução aparece mesmo sem resultado.
             if (document != nullptr && !document->status().empty()) {
-                ImGui::TextColored(col4(palette::error), "%s",
+                ImGui::TextColored(col4(colors().error), "%s",
                                    document->status().c_str());
             }
             ImGui::End();
@@ -834,16 +1044,16 @@ void MainShell::draw_grid_panel() {
 
         const db::ResultSet& rs = *document->result();
 
-        ImGui::TextColored(col4(palette::text_dim),
+        ImGui::TextColored(col4(colors().text_dim),
                            TR("%zu row(s) x %zu column(s)  |  %zu bytes"),
                            rs.row_count(), rs.column_count(), rs.bytes_used());
         ImGui::Separator();
 
         if (rs.column_count() == 0) {
-            ImGui::TextColored(col4(palette::ok), TR("command executed"));
+            ImGui::TextColored(col4(colors().ok), TR("command executed"));
             if (rs.affected_rows() >= 0) {
                 ImGui::SameLine();
-                ImGui::TextColored(col4(palette::text_dim),
+                ImGui::TextColored(col4(colors().text_dim),
                                    TR(" (%lld row(s) affected)"),
                                    static_cast<long long>(rs.affected_rows()));
             }
@@ -885,7 +1095,7 @@ void MainShell::draw_grid_panel() {
 
                         if (rs.is_null(r, ci)) {
                             // Nulo visualmente distinto de string vazia.
-                            ImGui::TextColored(col4(palette::text_dim), "[null]");
+                            ImGui::TextColored(col4(colors().text_dim), "[null]");
                             continue;
                         }
 
@@ -917,12 +1127,12 @@ void MainShell::draw_query_log_panel() {
         const std::vector<db::QueryLog> log = session_.query_log();
 
         if (log.empty()) {
-            ImGui::TextColored(col4(palette::text_dim), TR("no queries yet"));
+            ImGui::TextColored(col4(colors().text_dim), TR("no queries yet"));
             ImGui::End();
             return;
         }
 
-        ImGui::TextColored(col4(palette::text_dim),
+        ImGui::TextColored(col4(colors().text_dim),
                            "%zu query(s)  |  inclusive as internas de catálogo",
                            log.size());
         ImGui::Separator();
@@ -952,7 +1162,7 @@ void MainShell::draw_query_log_panel() {
                 ImGui::Text("%zu", entry.rows);
 
                 ImGui::TableSetColumnIndex(2);
-                ImGui::TextColored(col4(entry.failed ? palette::error : palette::ok),
+                ImGui::TextColored(col4(entry.failed ? colors().error : colors().ok),
                                    entry.failed ? TR("error") : "ok");
 
                 ImGui::TableSetColumnIndex(3);
@@ -986,28 +1196,28 @@ void MainShell::draw_status_bar() {
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 4));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, col4(palette::bg_darkest));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, col4(colors().bg_darkest));
 
     if (ImGui::Begin("##status", nullptr, flags)) {
         const SessionState state = session_.state();
 
         const std::uint32_t color =
-            state == SessionState::connected ? palette::ok
-            : state == SessionState::failed  ? palette::error
-            : state == SessionState::connecting ? palette::warn
-                                                : palette::text_dim;
+            state == SessionState::connected ? colors().ok
+            : state == SessionState::failed  ? colors().error
+            : state == SessionState::connecting ? colors().warn
+                                                : colors().text_dim;
         ImGui::TextColored(col4(color), "●");
         ImGui::SameLine();
 
         if (state == SessionState::connected) {
-            ImGui::TextColored(col4(palette::data), "%s",
+            ImGui::TextColored(col4(colors().data), "%s",
                                session_.database_name().c_str());
             ImGui::SameLine();
-            ImGui::TextColored(col4(palette::text_dim), "| PostgreSQL %s |",
+            ImGui::TextColored(col4(colors().text_dim), "| PostgreSQL %s |",
                                session_.server_version().c_str());
             ImGui::SameLine();
         }
-        ImGui::TextColored(col4(palette::text_dim), "%s",
+        ImGui::TextColored(col4(colors().text_dim), "%s",
                            session_.status_message().c_str());
     }
     ImGui::End();
@@ -1020,7 +1230,7 @@ void MainShell::draw_about_window() {
     ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
     if (ImGui::Begin(TR("About C-Otter"), &show_about_,
                      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::PushStyleColor(ImGuiCol_Text, col(palette::fur_light));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(colors().accent_light));
         ImGui::TextUnformatted("C-Otter 0.1.0");
         ImGui::PopStyleColor();
 
@@ -1034,12 +1244,12 @@ void MainShell::draw_about_window() {
             "were born for databases.");
         ImGui::Spacing();
 
-        ImGui::PushStyleColor(ImGuiCol_Text, col(palette::data));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(colors().data));
         ImGui::TextUnformatted("Here, every JOIN is an OTTER JOIN.");
         ImGui::PopStyleColor();
 
         ImGui::Separator();
-        ImGui::TextColored(col4(palette::text_dim),
+        ImGui::TextColored(col4(colors().text_dim),
                            "Dear ImGui %s  |  protocolo PostgreSQL v3 nativo",
                            IMGUI_VERSION);
     }

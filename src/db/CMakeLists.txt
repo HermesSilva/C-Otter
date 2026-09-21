@@ -6,6 +6,7 @@
 otter_add_library(otter_db
     SOURCES
         types.cpp
+        holt.cpp
         result_set.cpp
         catalog.cpp
         connection_config.cpp
@@ -14,3 +15,4 @@ otter_add_library(otter_db
         otter::otter_base
         otter::otter_pgwire
 )
+

@@ -1,5 +1,6 @@
 #include "ui/session.hpp"
 
+#include "base/i18n.hpp"
 #include "db/drivers/postgres.hpp"
 
 #include <utility>
@@ -27,8 +28,8 @@ void Session::connect_async(const db::ConnConfig& config) {
 
     {
         const std::lock_guard<std::mutex> lock(mutex_);
-        status_message_ = "conectando a " + config.host + ":" +
-                          std::to_string(config.port) + "...";
+        status_message_ = TRF("connecting to %s:%u...", config.host.c_str(),
+                              static_cast<unsigned>(config.port));
         database_name_  = config.database;
         schemas_.clear();
         foreign_keys_.clear();
@@ -76,11 +77,10 @@ void Session::connect_async(const db::ConnConfig& config) {
             for (const db::SchemaMeta& schema : schemas) {
                 table_count += schema.tables.size();
             }
-            message = "conectado | " + std::to_string(schemas.size()) +
-                      " schema(s), " + std::to_string(table_count) +
-                      " tabela(s), " + std::to_string(keys.size()) + " FK(s)";
+            message = TRF("connected | %zu schema(s), %zu table(s), %zu FK(s)",
+                          schemas.size(), table_count, keys.size());
         } else {
-            message = "conectado, mas o catálogo falhou: " +
+            message = std::string(TR("connected, but the catalog failed: ")) +
                       loaded.error().to_string();
         }
 
@@ -120,8 +120,7 @@ void Session::execute_async(std::string sql) {
             const std::size_t rows = result->row_count();
             const std::size_t cols = result->column_count();
             result_ = std::move(*result);
-            status_message_ = std::to_string(rows) + " linha(s), " +
-                              std::to_string(cols) + " coluna(s)";
+            status_message_ = TRF("%zu row(s), %zu column(s)", rows, cols);
         } else {
             result_.reset();
             status_message_ = result.error().to_string();
@@ -169,6 +168,67 @@ void Session::load_columns_async(std::string schema, std::string table) {
     });
 }
 
+bool Session::auto_commit() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return holt_ ? holt_->auto_commit() : true;
+}
+
+db::TxnState Session::txn_state() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return holt_ ? holt_->txn_state() : db::TxnState::idle;
+}
+
+std::size_t Session::uncommitted_changes() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return holt_ ? holt_->uncommitted_changes() : 0;
+}
+
+// Fator comum das tres operacoes de transacao: rodar no worker e refletir o
+// resultado na mensagem de estado.
+void Session::run_txn_async(std::function<Status(db::Holt&)> operation,
+                            std::string success_message) {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+
+    worker_ = std::thread([this, operation = std::move(operation),
+                           success_message = std::move(success_message)] {
+        db::Holt* holt = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt = holt_.get();
+        }
+        if (holt == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        const Status status = operation(*holt);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        status_message_ = status ? success_message : status.error().to_string();
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+void Session::set_auto_commit_async(bool enabled) {
+    run_txn_async(
+        [enabled](db::Holt& holt) { return holt.set_auto_commit(enabled); },
+        enabled ? TR("auto-commit on") : TR("auto-commit off"));
+}
+
+void Session::commit_async() {
+    run_txn_async([](db::Holt& holt) { return holt.commit(); },
+                  TR("transaction committed"));
+}
+
+void Session::rollback_async() {
+    run_txn_async([](db::Holt& holt) { return holt.rollback(); },
+                  TR("transaction rolled back"));
+}
+
 void Session::disconnect() {
     join_worker();
 
@@ -178,7 +238,7 @@ void Session::disconnect() {
     schemas_.clear();
     foreign_keys_.clear();
     result_.reset();
-    status_message_ = "desconectado";
+    status_message_ = TR("disconnected");
     state_.store(SessionState::disconnected, std::memory_order_release);
 }
 
@@ -222,3 +282,4 @@ std::vector<db::QueryLog> Session::query_log() const {
 }
 
 } // namespace otter::ui
+

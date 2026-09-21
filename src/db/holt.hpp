@@ -39,6 +39,26 @@ struct Capabilities {
     bool explain_plan      = false;
 };
 
+// Estado da transacao na conexao. Vem do servidor, nao de um palpite do
+// cliente: o PostgreSQL informa em cada ReadyForQuery.
+enum class TxnState : std::uint8_t {
+    idle,        // fora de transacao
+    active,      // transacao aberta, com alteracoes pendentes
+    failed,      // transacao abortada; so' ROLLBACK e' aceito
+};
+
+[[nodiscard]] std::string_view to_string(TxnState state) noexcept;
+
+// Nivel de isolamento, na ordem do padrao SQL.
+enum class IsolationLevel : std::uint8_t {
+    read_uncommitted,
+    read_committed,
+    repeatable_read,
+    serializable,
+};
+
+[[nodiscard]] std::string_view to_string(IsolationLevel level) noexcept;
+
 // Registro de uma query executada -- alimenta o inspetor de queries (ADR 0008).
 // Toda query e' registrada, inclusive as internas de metadados: ferramenta que
 // esconde o que faz e' dificil de confiar.
@@ -70,6 +90,30 @@ public:
     // Cancela a query em andamento, de outra thread.
     virtual Status cancel() = 0;
 
+    // --- Transacoes ---------------------------------------------------------
+
+    [[nodiscard]] virtual bool auto_commit() const noexcept = 0;
+    virtual Status set_auto_commit(bool enabled) = 0;
+
+    // Estado reportado pelo servidor apos a ultima query.
+    [[nodiscard]] virtual TxnState txn_state() const noexcept = 0;
+
+    virtual Status commit() = 0;
+    virtual Status rollback() = 0;
+
+    virtual Status savepoint(std::string_view name) = 0;
+    virtual Status rollback_to(std::string_view name) = 0;
+    virtual Status release_savepoint(std::string_view name) = 0;
+
+    [[nodiscard]] virtual Result<IsolationLevel> isolation_level() = 0;
+    virtual Status set_isolation_level(IsolationLevel level) = 0;
+
+    // Quantas instrucoes de alteracao rodaram desde o ultimo commit. A UI usa
+    // para avisar antes de fechar com trabalho pendente.
+    [[nodiscard]] std::size_t uncommitted_changes() const noexcept {
+        return uncommitted_changes_;
+    }
+
     [[nodiscard]] virtual Capabilities capabilities() const noexcept = 0;
     [[nodiscard]] virtual std::string server_version() const = 0;
     [[nodiscard]] virtual std::string current_schema() const = 0;
@@ -93,8 +137,14 @@ protected:
         query_log_.push_back(std::move(entry));
     }
 
+    // Contabiliza alteracoes pendentes. Chamado pelo driver ao ver um comando
+    // que modifica dados fora de auto-commit.
+    void note_change() noexcept { ++uncommitted_changes_; }
+    void clear_changes() noexcept { uncommitted_changes_ = 0; }
+
 private:
     std::vector<QueryLog> query_log_;
+    std::size_t           uncommitted_changes_ = 0;
 };
 
 // Driver de um SGBD. Interface virtual pura, registrada estaticamente

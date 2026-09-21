@@ -83,6 +83,95 @@ public:
 
     Status cancel() override { return conn_.cancel_current_query(); }
 
+    // --- Transacoes ---------------------------------------------------------
+    //
+    // O PostgreSQL nao tem um "modo autocommit" no protocolo: ele esta' sempre
+    // em autocommit, a menos que um BEGIN explicito abra uma transacao. Entao
+    // desligar autocommit significa abrir uma transacao e reabri-la apos cada
+    // commit ou rollback.
+
+    [[nodiscard]] bool auto_commit() const noexcept override {
+        return auto_commit_;
+    }
+
+    Status set_auto_commit(bool enabled) override {
+        if (enabled == auto_commit_) return {};
+
+        if (enabled) {
+            // Saindo do modo manual: encerra a transacao aberta. Commit, e nao
+            // rollback -- descartar trabalho do usuario sem pedir seria pior.
+            if (conn_.transaction_status() != pgwire::TransactionStatus::idle) {
+                OTTER_RETURN_IF_ERROR(run_silent("COMMIT"));
+            }
+            auto_commit_ = true;
+            clear_changes();
+            return {};
+        }
+
+        auto_commit_ = false;
+        return begin_if_needed();
+    }
+
+    [[nodiscard]] TxnState txn_state() const noexcept override {
+        switch (conn_.transaction_status()) {
+            case pgwire::TransactionStatus::in_block: return TxnState::active;
+            case pgwire::TransactionStatus::failed:   return TxnState::failed;
+            case pgwire::TransactionStatus::idle:     break;
+        }
+        return TxnState::idle;
+    }
+
+    Status commit() override {
+        if (conn_.transaction_status() == pgwire::TransactionStatus::idle) {
+            return {};   // nada a confirmar
+        }
+        OTTER_RETURN_IF_ERROR(run_silent("COMMIT"));
+        clear_changes();
+        return begin_if_needed();
+    }
+
+    Status rollback() override {
+        if (conn_.transaction_status() == pgwire::TransactionStatus::idle) {
+            return {};
+        }
+        OTTER_RETURN_IF_ERROR(run_silent("ROLLBACK"));
+        clear_changes();
+        return begin_if_needed();
+    }
+
+    Status savepoint(std::string_view name) override {
+        OTTER_RETURN_IF_ERROR(begin_if_needed());
+        return run_silent("SAVEPOINT " + quote_identifier(name));
+    }
+
+    Status rollback_to(std::string_view name) override {
+        return run_silent("ROLLBACK TO SAVEPOINT " + quote_identifier(name));
+    }
+
+    Status release_savepoint(std::string_view name) override {
+        return run_silent("RELEASE SAVEPOINT " + quote_identifier(name));
+    }
+
+    [[nodiscard]] Result<IsolationLevel> isolation_level() override {
+        OTTER_ASSIGN_OR_RETURN(auto rs,
+                               run("SHOW transaction_isolation", true));
+        if (rs.row_count() == 0) return IsolationLevel::read_committed;
+
+        const std::string_view value = rs.text(0, 0);
+        if (value == "read uncommitted") return IsolationLevel::read_uncommitted;
+        if (value == "repeatable read")  return IsolationLevel::repeatable_read;
+        if (value == "serializable")     return IsolationLevel::serializable;
+        return IsolationLevel::read_committed;
+    }
+
+    Status set_isolation_level(IsolationLevel level) override {
+        // SESSION CHARACTERISTICS vale para as proximas transacoes; aplicar
+        // dentro de uma transacao aberta afetaria so' ela.
+        return run_silent(
+            "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL " +
+            std::string(to_string(level)));
+    }
+
     [[nodiscard]] Capabilities capabilities() const noexcept override {
         Capabilities caps;
         caps.transactions       = true;
@@ -103,8 +192,44 @@ public:
     [[nodiscard]] std::string current_schema() const override { return schema_; }
 
 private:
+    // Abre transacao quando estamos em modo manual e nao ha' uma aberta.
+    Status begin_if_needed() {
+        if (auto_commit_) return {};
+        if (conn_.transaction_status() != pgwire::TransactionStatus::idle) {
+            return {};
+        }
+        return run_silent("BEGIN");
+    }
+
+    // Comando de controle: registrado no log como interno, sem resultado.
+    Status run_silent(std::string_view sql) {
+        auto result = run(sql, /*internal=*/true);
+        if (!result) return std::unexpected(result.error());
+        return {};
+    }
+
+    // Delimita um identificador para SAVEPOINT. O nome vem da UI, entao nao
+    // pode ser interpolado cru.
+    static std::string quote_identifier(std::string_view name) {
+        std::string out;
+        out.reserve(name.size() + 2);
+        out.push_back('"');
+        for (char c : name) {
+            if (c == '"') out.push_back('"');
+            out.push_back(c);
+        }
+        out.push_back('"');
+        return out;
+    }
+
     Result<ResultSet> run(std::string_view sql, bool internal) {
         if (!conn_.is_open()) return fail(Errc::closed, "conexão fechada");
+
+        // Em modo manual, a primeira query do usuario precisa de um BEGIN.
+        // Comandos internos (incluindo o proprio BEGIN) nao recursam aqui.
+        if (!internal && !auto_commit_) {
+            OTTER_RETURN_IF_ERROR(begin_if_needed());
+        }
 
         const auto started = std::chrono::steady_clock::now();
 
@@ -174,12 +299,20 @@ private:
         builder.set_row_count(rows);
         builder.set_affected_rows(conn_.last_affected_rows());
 
+        // Comando do usuario que alterou linhas fora de auto-commit: conta como
+        // trabalho pendente, para a UI avisar antes de descartar.
+        if (!internal && !auto_commit_ && conn_.last_affected_rows() > 0 &&
+            rows == 0) {
+            note_change();
+        }
+
         record(QueryLog{std::string(sql), elapsed, rows, internal, false, {}});
         return builder.take();
     }
 
     pgwire::Connection conn_;
     std::string        schema_ = "public";
+    bool               auto_commit_ = true;
 };
 
 class PostgresDriver final : public Driver {

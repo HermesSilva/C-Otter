@@ -38,6 +38,7 @@ public:
 
 private:
     void draw_menu_bar();
+    void draw_toolbar();
     void draw_dockspace();
     void draw_raft_panel();
     void draw_navigator_panel();

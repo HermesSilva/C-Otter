@@ -52,7 +52,7 @@ bool input_seconds(const char* label, std::chrono::seconds& value) {
 // Rotulo com tooltip de ajuda, como o "(?)" do DBeaver.
 void help_marker(const char* text) {
     ImGui::SameLine();
-    ImGui::TextColored(col4(palette::text_dim), "(?)");
+    ImGui::TextColored(col4(colors().text_dim), "(?)");
     if (ImGui::BeginItemTooltip()) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
         ImGui::TextUnformatted(text);
@@ -146,8 +146,8 @@ void ConnectionDialog::draw(const Feedback& feedback) {
 }
 
 void ConnectionDialog::draw_driver_catalog() {
-    ImGui::TextColored(col4(palette::fur_light), TR("Select the database"));
-    ImGui::TextColored(col4(palette::text_dim),
+    ImGui::TextColored(col4(colors().accent_light), TR("Select the database"));
+    ImGui::TextColored(col4(colors().text_dim),
                        TR("Choose the driver for the new connection."));
     ImGui::Separator();
 
@@ -202,13 +202,13 @@ void ConnectionDialog::draw_driver_catalog() {
             ImGui::EndDisabled();
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextColored(col4(palette::text_dim), "%s", TR(driver.category));
+            ImGui::TextColored(col4(colors().text_dim), "%s", TR(driver.category));
 
             ImGui::TableSetColumnIndex(2);
             if (driver.available) {
-                ImGui::TextColored(col4(palette::ok), TR("available"));
+                ImGui::TextColored(col4(colors().ok), TR("available"));
             } else {
-                ImGui::TextColored(col4(palette::text_dim), "%s", TR(driver.note));
+                ImGui::TextColored(col4(colors().text_dim), "%s", TR(driver.note));
             }
 
             ImGui::PopID();
@@ -229,7 +229,7 @@ void ConnectionDialog::draw_driver_catalog() {
 
     if (!can_advance) {
         ImGui::SameLine();
-        ImGui::TextColored(col4(palette::text_dim),
+        ImGui::TextColored(col4(colors().text_dim),
                            TR("  select an available driver"));
     }
 }
@@ -242,7 +242,7 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     ImGui::BeginChild("##typeband", ImVec2(0, 26), ImGuiChildFlags_None);
     ImGui::TextColored(col4(type.color), "  %s", type.name);
     ImGui::SameLine();
-    ImGui::TextColored(col4(palette::text_dim), " | %s",
+    ImGui::TextColored(col4(colors().text_dim), " | %s",
                        profile_.effective_name().c_str());
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -309,22 +309,22 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     if (feedback.busy) {
         ImGui::SameLine();
         const float t = static_cast<float>(ImGui::GetTime());
-        ImVec4 pulse = col4(palette::data_light);
+        ImVec4 pulse = col4(colors().data_light);
         pulse.w = 0.4f + 0.6f * std::abs(std::sin(t * 3.0f));
         ImGui::TextColored(pulse, TR("  * connecting..."));
     } else if (feedback.failed) {
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(col4(palette::error), "%s", feedback.message.c_str());
+        ImGui::TextColored(col4(colors().error), "%s", feedback.message.c_str());
         ImGui::PopTextWrapPos();
     } else if (feedback.succeeded) {
-        ImGui::TextColored(col4(palette::ok), "%s", feedback.message.c_str());
+        ImGui::TextColored(col4(colors().ok), "%s", feedback.message.c_str());
     }
 }
 
 void ConnectionDialog::draw_tab_main() {
     ImGui::BeginChild("##main", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), TR("Server"));
+    ImGui::TextColored(col4(colors().data), TR("Server"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(320);
@@ -338,7 +338,7 @@ void ConnectionDialog::draw_tab_main() {
     input_string(TR("Database"), profile_.database, 128);
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), TR("Authentication"));
+    ImGui::TextColored(col4(colors().data), TR("Authentication"));
     ImGui::Separator();
 
     static constexpr const char* kAuthModels[] = {
@@ -375,7 +375,7 @@ void ConnectionDialog::draw_tab_main() {
 void ConnectionDialog::draw_tab_postgres() {
     ImGui::BeginChild("##pg", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), TR("Navigator settings"));
+    ImGui::TextColored(col4(colors().data), TR("Navigator settings"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Show all databases"),
@@ -391,7 +391,7 @@ void ConnectionDialog::draw_tab_postgres() {
     help_marker("Inclui bancos aos quais o usuário não tem permissão de conectar.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), TR("Performance"));
+    ImGui::TextColored(col4(colors().data), TR("Performance"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Read size statistics"),
@@ -413,7 +413,7 @@ void ConnectionDialog::draw_tab_postgres() {
                     &profile_.postgres.use_prepared_statements);
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), "SQL");
+    ImGui::TextColored(col4(colors().data), "SQL");
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
@@ -430,8 +430,8 @@ void ConnectionDialog::draw_tab_postgres() {
 void ConnectionDialog::draw_tab_driver_properties() {
     ImGui::BeginChild("##driverprops", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), TR("Driver properties"));
-    ImGui::TextColored(col4(palette::text_dim),
+    ImGui::TextColored(col4(colors().data), TR("Driver properties"));
+    ImGui::TextColored(col4(colors().text_dim),
                        TR("Parameters passed directly to the driver on connect."));
     ImGui::Separator();
 
@@ -487,7 +487,7 @@ void ConnectionDialog::draw_tab_ssh() {
     ImGui::BeginChild("##ssh", ImVec2(0, -80));
 
     ImGui::Checkbox(TR("Use SSH tunnel"), &profile_.ssh.enabled);
-    ImGui::TextColored(col4(palette::warn),
+    ImGui::TextColored(col4(colors().warn),
                        "Não implementado — a configuração é salva, mas o túnel "
                        "não é estabelecido.");
     ImGui::Separator();
@@ -541,7 +541,7 @@ void ConnectionDialog::draw_tab_ssl() {
     ImGui::BeginChild("##ssl", ImVec2(0, -80));
 
     ImGui::Checkbox(TR("Use SSL"), &profile_.ssl.enabled);
-    ImGui::TextColored(col4(palette::warn),
+    ImGui::TextColored(col4(colors().warn),
                        "Não implementado — o protocolo ainda não negocia TLS.");
     ImGui::Separator();
 
@@ -573,7 +573,7 @@ void ConnectionDialog::draw_tab_proxy() {
     ImGui::BeginChild("##proxy", ImVec2(0, -80));
 
     ImGui::Checkbox(TR("Use SOCKS proxy"), &profile_.proxy.enabled);
-    ImGui::TextColored(col4(palette::warn), TR("Not implemented."));
+    ImGui::TextColored(col4(colors().warn), TR("Not implemented."));
     ImGui::Separator();
 
     ImGui::BeginDisabled(!profile_.proxy.enabled);
@@ -597,7 +597,7 @@ void ConnectionDialog::draw_tab_proxy() {
 void ConnectionDialog::draw_tab_initialization() {
     ImGui::BeginChild("##init", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), TR("Transactions"));
+    ImGui::TextColored(col4(colors().data), TR("Transactions"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Auto-commit"), &profile_.auto_commit);
@@ -608,7 +608,7 @@ void ConnectionDialog::draw_tab_initialization() {
     help_marker("Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), TR("Session"));
+    ImGui::TextColored(col4(colors().data), TR("Session"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
@@ -628,7 +628,7 @@ void ConnectionDialog::draw_tab_initialization() {
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), TR("Connection"));
+    ImGui::TextColored(col4(colors().data), TR("Connection"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
@@ -649,7 +649,7 @@ void ConnectionDialog::draw_tab_initialization() {
 void ConnectionDialog::draw_tab_general() {
     ImGui::BeginChild("##general", ImVec2(0, -80));
 
-    ImGui::TextColored(col4(palette::data), TR("Identification"));
+    ImGui::TextColored(col4(colors().data), TR("Identification"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(360);
@@ -664,7 +664,7 @@ void ConnectionDialog::draw_tab_general() {
     help_marker("Agrupa a conexão na árvore. Use / para subpastas.");
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::data), TR("Connection type"));
+    ImGui::TextColored(col4(colors().data), TR("Connection type"));
     ImGui::Separator();
 
     for (int i = 0; i < 3; ++i) {
@@ -684,7 +684,7 @@ void ConnectionDialog::draw_tab_general() {
 
     const db::ConnectionTypeInfo& current = db::connection_type_info(profile_.type);
     ImGui::Spacing();
-    ImGui::TextColored(col4(palette::text_dim),
+    ImGui::TextColored(col4(colors().text_dim),
                        "auto-commit: %s | confirmar execução: %s | "
                        "confirmar alteração de dados: %s",
                        current.auto_commit ? "ligado" : "desligado",

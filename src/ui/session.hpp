@@ -10,6 +10,7 @@
 #include "db/holt.hpp"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,8 +64,26 @@ public:
     // Carrega as colunas de uma tabela sob demanda (lazy).
     void load_columns_async(std::string schema, std::string table);
 
+    // --- Transacoes ---------------------------------------------------------
+    //
+    // Consultas baratas e sincronas: leem estado ja' conhecido pela conexao,
+    // sem ida ao servidor. Chamadas a cada frame pela barra de ferramentas.
+    [[nodiscard]] bool auto_commit() const;
+    [[nodiscard]] db::TxnState txn_state() const;
+    [[nodiscard]] std::size_t uncommitted_changes() const;
+
+    // Executadas no worker: emitem SQL de verdade.
+    void set_auto_commit_async(bool enabled);
+    void commit_async();
+    void rollback_async();
+
 private:
     void join_worker();
+
+    // Fator comum de commit/rollback/auto-commit: roda no worker e reflete o
+    // resultado na mensagem de estado.
+    void run_txn_async(std::function<Status(db::Holt&)> operation,
+                       std::string success_message);
 
     mutable std::mutex mutex_;
     std::unique_ptr<db::Holt> holt_;
@@ -83,3 +102,4 @@ private:
 };
 
 } // namespace otter::ui
+
