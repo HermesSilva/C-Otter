@@ -16,13 +16,11 @@ além dos nós faltantes:
 |---|---|---|
 | **Nó raiz da conexão** | `postgres  localhost:5432` no topo, com os bancos dentro | os schemas penduram na raiz do painel; o host só aparece no painel de cima |
 | **Pasta `Databases`** | agrupa os bancos do servidor | ausente — não há onde listar outros bancos |
-| **Tamanho da tabela** | coluna à direita de cada tabela (`72K`, `112K`, `128K`) | ausente |
+| **Tamanho da tabela** | coluna à direita (`72K`, `112K`) | ✅ **já existia** (`32 kB`, `40 kB`) — eu havia afirmado que faltava, e estava errado |
 
-O tamanho à direita é o que mais muda o uso: permite achar a tabela grande de
-relance, sem consultar `pg_total_relation_size` à mão.
-
-**Nada disso está implementado.** Está registrado aqui para não ser esquecido,
-e nenhuma das três aparece como ✅ em lugar nenhum.
+Das três, **só duas faltam**: o nó raiz da conexão e a pasta `Databases`. O
+tamanho da tabela já é exibido — verificado na tela em 2026-09-21, com as 67
+tabelas do `public` mostrando `32 kB`, `40 kB`, `48 kB` ao lado do nome.
 
 ## A árvore completa do DBeaver (PostgreSQL)
 

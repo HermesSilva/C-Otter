@@ -1,0 +1,1 @@
+remember: name='MySQL Local' driver=mysql localhost:3306/ user=root

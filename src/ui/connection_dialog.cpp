@@ -33,6 +33,23 @@ bool input_string(const char* label, std::string& value, std::size_t capacity = 
     return false;
 }
 
+// Campo com texto-fantasma: o que aparece em cinza enquanto esta' vazio.
+//
+// Para o nome da conexao, o fantasma e' o nome DERIVADO ("banco@host"). Sem
+// ele, um campo vazio nao diria com que rotulo a conexao vai aparecer na
+// lista -- e o usuario descobriria depois de salvar.
+bool input_string_hint(const char* label, const char* hint, std::string& value,
+                       std::size_t capacity = 256) {
+    std::vector<char> buffer(std::max(capacity, value.size() + 1), char{0});
+    std::snprintf(buffer.data(), buffer.size(), "%s", value.c_str());
+
+    if (ImGui::InputTextWithHint(label, hint, buffer.data(), buffer.size())) {
+        value = buffer.data();
+        return true;
+    }
+    return false;
+}
+
 bool input_uint16(const char* label, std::uint16_t& value) {
     int temporary = value;
     if (ImGui::InputInt(label, &temporary, 0, 0)) {
@@ -245,13 +262,35 @@ void ConnectionDialog::draw_driver_catalog() {
 void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     // Faixa colorida do tipo de conexão -- o mesmo recurso que o DBeaver usa
     // para diferenciar produção de desenvolvimento num olhar.
+    // O nome da conexao fica AQUI, no topo, e nao escondido na ultima aba.
+    //
+    // Ele estava em "Geral", a oitava aba, e a faixa do topo so' o EXIBIA --
+    // quem queria renomear via o nome na tela, clicava nele, nada acontecia,
+    // e concluia que a aplicacao nao deixava renomear. O campo funcionava; o
+    // problema era onde ele estava.
+    //
+    // No DBeaver o nome tambem fica sempre visivel, fora das abas. Quem vem
+    // de la' procura no topo.
     const db::ConnectionTypeInfo& type = db::connection_type_info(profile_.type);
     ImGui::PushStyleColor(ImGuiCol_ChildBg, col4(type.color & 0x40FFFFFFu));
-    ImGui::BeginChild("##typeband", ImVec2(0, 26), ImGuiChildFlags_None);
+    ImGui::BeginChild("##typeband", ImVec2(0, 30), ImGuiChildFlags_None);
+
+    ImGui::AlignTextToFramePadding();
     ImGui::TextColored(col4(type.color), "  %s", type.name);
     ImGui::SameLine();
-    ImGui::TextColored(col4(colors().text_dim), " | %s",
-                       profile_.effective_name().c_str());
+    ImGui::TextColored(col4(colors().text_dim), "|");
+    ImGui::SameLine();
+
+    // O placeholder mostra o nome DERIVADO ("banco@host") quando o campo esta'
+    // vazio: e' o que a lista lateral vai exibir, e ve-lo aqui evita a
+    // surpresa de salvar sem nome e achar a conexao com outro rotulo.
+    ImGui::SetNextItemWidth(-8.0f);
+    input_string_hint("##connname", profile_.effective_name().c_str(),
+                      profile_.name, 128);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", TR("Connection name. Empty uses \"database@host\"."));
+    }
+
     ImGui::EndChild();
     ImGui::PopStyleColor();
 

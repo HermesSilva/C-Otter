@@ -571,6 +571,9 @@ const char* const kPtBr[] = {
 
     // Barra na celula (ADR 0005). "Barra" e nao "sparkline": o termo ingles
     // e' de quem le' Tufte, nao de quem usa um cliente de banco.
+    "Connection name. Empty uses \"database@host\".",
+        "Nome da conexão. Vazio usa \"banco@host\".",
+
     "Bar",                        "Barra",
     "Bar from zero",              "Barra a partir do zero",
     "Bar over the column range",  "Barra na faixa da coluna",
