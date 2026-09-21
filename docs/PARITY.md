@@ -72,7 +72,7 @@ Distribuição dos 275 comandos por área:
 | Filtro/busca na árvore | ✅ | ✅ |
 | Menu de contexto (DDL, dados, renomear) | ✅ | ✅ exceto renomear |
 | Esconder pasta que o SGBD não tem | ✅ `visibleIf` | ✅ |
-| Criar/alterar/remover objeto | ✅ | 🟡 coluna e tabela (ADR 0016) |
+| Criar/alterar/remover objeto | ✅ | 🟡 tabela, coluna, view, índice, constraint, FK |
 | Confirmação antes de DDL destrutivo | ✅ aba Persist | ✅ |
 | Gerar DDL | ✅ | ✅ |
 | Copiar nome qualificado | ✅ | ✅ |
@@ -201,11 +201,9 @@ esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 
 ## Próximos passos, por impacto
 
-1. **Telas de `CREATE`** — os geradores de tabela, view, sequence, índice e
-   constraint já existem e são testados contra o servidor; falta o formulário
+1. **TLS** — destrava o `caching_sha2_password` sem RSA e as conexões remotas
 2. **Inserir e duplicar linha na grade** — excluir já funciona; o buffer de
    edição já comporta os três
-3. **TLS** — destrava o `caching_sha2_password` sem RSA e as conexões remotas
 4. **Editar no painel de valor** — hoje ele só mostra; JSON e texto longo
    mereciam edição multilinha, que a célula não comporta
 5. **Savepoints na UI** — o driver já os implementa

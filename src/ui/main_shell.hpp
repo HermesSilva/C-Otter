@@ -145,6 +145,10 @@ private:
     // formulario precisa sobreviver a varios.
     void open_add_column(const std::string& schema, const db::TableMeta& table);
     void open_add_index(const std::string& schema, const db::TableMeta& table);
+
+    // Criar objeto. Pertence ao SCHEMA -- e' ele que os contem.
+    void open_create_table(const std::string& schema);
+    void open_create_view(const std::string& schema);
     void open_rename_table(const std::string& schema, const db::TableMeta& table);
     void draw_ddl_forms();
 
@@ -287,6 +291,33 @@ private:
         int  after_index = 0;
     };
     ColumnForm column_form_;
+
+    struct CreateTableForm {
+        bool        open = false;
+        std::string schema;
+
+        char name[128]    = {};
+        char comment[256] = {};
+
+        struct Column {
+            char name[128] = {};
+            char type[128] = {};
+            bool nullable = true;
+            bool key = false;
+        };
+        std::vector<Column> columns;
+    };
+    CreateTableForm create_table_;
+
+    struct CreateViewForm {
+        bool        open = false;
+        std::string schema;
+
+        char name[128]        = {};
+        char definition[4096] = {};
+        bool or_replace = true;
+    };
+    CreateViewForm create_view_;
 
     struct IndexForm {
         bool        open = false;

@@ -13,7 +13,7 @@ operações: `create`, `modify`, `rename`, `delete`.
 
 | Objeto | PostgreSQL | MySQL | C-Otter |
 |---|:---:|:---:|:---:|
-| Tabela | ✅ | ✅ | 🟡 renomear, comentário, remover |
+| Tabela | ✅ | ✅ | ✅ criar, renomear, comentário, remover |
 | Coluna | ✅ | ✅ | ✅ add, drop, rename, tipo, nulidade, default, comentário |
 | Índice | ✅ | ✅ | ✅ criar e remover |
 | Constraint (PK, UNIQUE, CHECK) | ✅ | ✅ | ✅ criar e remover |
@@ -115,13 +115,13 @@ Perderia dados. Parece óbvio, mas é um atalho tentador quando o SGBD não tem
 | Coluna: add, drop, rename, tipo, nulidade, default, comentário | ✅ |
 | Posição da coluna (`FIRST`/`AFTER`) no MySQL | ✅ escondido no PostgreSQL |
 | Tabela: renomear, comentário, `DROP` | ✅ |
-| `CREATE TABLE` (gerador pronto, sem tela) | 🟡 |
+| **`CREATE TABLE`** com formulário de colunas | ✅ |
 | Recarga da árvore depois do DDL | ✅ |
 | **Índice: criar e remover** | ✅ |
 | **Constraint: PK, UNIQUE, CHECK** | ✅ |
 | **Chave estrangeira: criar e remover** | ✅ |
 | Índice de constraint é RECUSADO | ✅ o MySQL aceitaria e perderia a chave |
-| **View** (`CREATE OR REPLACE`, que preserva permissões) | ✅ |
+| **View** (`CREATE OR REPLACE`, que preserva permissões) | ✅ com formulário |
 | **Sequence** | ✅ |
 | **Trigger** (com o `USE` que o MySQL exige) | ✅ gerador |
 | Procedure e function | ⬜ |
@@ -175,8 +175,7 @@ quando a consulta não tem nome qualificado.
 
 ## 5. O que falta
 
-1. Tela de `CREATE TABLE` (o gerador já existe) — ⬜
-2. Telas de view, sequence e trigger (os geradores já existem) — ⬜
-3. Procedure e function — ⬜
-4. Schema/database — ⬜
-5. `ALTER` de índice: renomear, trocar método — ⬜
+1. Telas de sequence e trigger (os geradores já existem) — ⬜
+2. Procedure e function — ⬜
+3. Schema/database — ⬜
+4. `ALTER` de índice: renomear, trocar método — ⬜

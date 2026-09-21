@@ -1515,6 +1515,30 @@ void MainShell::draw_navigator_panel() {
                 ImGui::TreeNodeEx(schema.name.c_str(),
                                   ImGuiTreeNodeFlags_DefaultOpen);
 
+            // Criar objeto pertence ao SCHEMA: é ele que os contém. No nó da
+            // tabela ficaria ambíguo -- "nova tabela" a partir de uma tabela
+            // sugere duplicá-la.
+            if (ImGui::BeginPopupContextItem("##schemamenu")) {
+                const bool can_create =
+                    session().state() == SessionState::connected &&
+                    !session().busy();
+
+                if (ImGui::MenuItem(TR("New table..."), nullptr, false,
+                                    can_create)) {
+                    open_create_table(schema.name);
+                }
+                if (ImGui::MenuItem(TR("New view..."), nullptr, false,
+                                    can_create)) {
+                    open_create_view(schema.name);
+                }
+
+                ImGui::Separator();
+                if (ImGui::MenuItem(TR("Copy name"))) {
+                    ImGui::SetClipboardText(schema.name.c_str());
+                }
+                ImGui::EndPopup();
+            }
+
             if (schema_open) {
                 // Ordem do DBeaver: tabelas, views, materialized views,
                 // sequences, rotinas.
@@ -3521,6 +3545,43 @@ void MainShell::open_add_column(const std::string& schema,
     column_form_.current = table;
 }
 
+void MainShell::open_create_table(const std::string& schema) {
+    create_table_ = CreateTableForm{};
+    create_table_.schema = schema;
+    create_table_.open   = true;
+
+    // Começa com UMA coluna de chave preenchida. Uma tabela sem PK não é
+    // editável na grade (ADR 0014), e pedir ao usuário que descubra isso
+    // depois de criá-la seria atrito evitável.
+    const bool mysql = db::sql_dialect() == db::QuoteStyle::backticks;
+
+    CreateTableForm::Column id;
+    std::snprintf(id.name, sizeof id.name, "id");
+    std::snprintf(id.type, sizeof id.type, "%s",
+                  mysql ? "INT AUTO_INCREMENT" : "serial");
+    id.nullable = false;
+    id.key      = true;
+
+    create_table_.columns.push_back(id);
+
+    CreateTableForm::Column first;
+    std::snprintf(first.type, sizeof first.type, "%s",
+                  mysql ? "varchar(100)" : "text");
+    create_table_.columns.push_back(first);
+}
+
+void MainShell::open_create_view(const std::string& schema) {
+    create_view_ = CreateViewForm{};
+    create_view_.schema = schema;
+    create_view_.open   = true;
+
+    // Modelo com o schema já qualificado: a view guarda o corpo COMO ESCRITO,
+    // e um FROM sem banco depende do banco corrente -- o que faz o MySQL
+    // recusar com "No database selected".
+    std::snprintf(create_view_.definition, sizeof create_view_.definition,
+                  "SELECT *\n  FROM %s.", schema.c_str());
+}
+
 void MainShell::open_add_index(const std::string& schema,
                                const db::TableMeta& table) {
     index_form_ = IndexForm{};
@@ -3654,6 +3715,199 @@ void MainShell::draw_ddl_forms() {
             if (!valid) {
                 ImGui::SameLine();
                 ImGui::TextColored(col4(p.text_dim), TR("(name and type)"));
+            }
+        }
+        ImGui::End();
+    }
+
+    // --- Tabela nova -------------------------------------------------------------
+
+    if (create_table_.open) {
+        ImGui::SetNextWindowSize(ImVec2(720, 0), ImGuiCond_Appearing);
+        if (ImGui::Begin(TRW("New table", "###CreateTable"),
+                         &create_table_.open,
+                         ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+
+            ImGui::TextColored(col4(p.text_dim), "%s",
+                               create_table_.schema.c_str());
+            ImGui::Separator();
+
+            ImGui::SetNextItemWidth(280);
+            ImGui::InputText(TR("Name"), create_table_.name,
+                             sizeof create_table_.name);
+
+            ImGui::SetNextItemWidth(280);
+            ImGui::InputText(TR("Comment"), create_table_.comment,
+                             sizeof create_table_.comment);
+
+            ImGui::Spacing();
+            ImGui::TextColored(col4(p.text_dim), TR("Columns"));
+
+            // Tabela de edição: nome, tipo, nulo, chave, e o botão de remover.
+            // Uma tabela e não linhas soltas porque as colunas precisam estar
+            // alinhadas para serem comparáveis de relance.
+            constexpr ImGuiTableFlags flags =
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingFixedFit;
+
+            std::size_t remove = create_table_.columns.size();
+
+            if (ImGui::BeginTable("##newcols", 5, flags)) {
+                ImGui::TableSetupColumn(TR("Name"),
+                                        ImGuiTableColumnFlags_WidthFixed, 200);
+                ImGui::TableSetupColumn(TR("Type"),
+                                        ImGuiTableColumnFlags_WidthFixed, 200);
+                ImGui::TableSetupColumn(TR("Null"),
+                                        ImGuiTableColumnFlags_WidthFixed, 50);
+                ImGui::TableSetupColumn(TR("Key"),
+                                        ImGuiTableColumnFlags_WidthFixed, 50);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 40);
+                ImGui::TableHeadersRow();
+
+                for (std::size_t i = 0; i < create_table_.columns.size(); ++i) {
+                    CreateTableForm::Column& column = create_table_.columns[i];
+
+                    ImGui::TableNextRow();
+                    ImGui::PushID(static_cast<int>(i));
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::InputText("##n", column.name, sizeof column.name);
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::InputText("##t", column.type, sizeof column.type);
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Checkbox("##null", &column.nullable);
+
+                    ImGui::TableSetColumnIndex(3);
+                    // Marcar como chave implica NOT NULL: uma PK anulável não
+                    // existe em SGBD nenhum, e deixar as duas caixas
+                    // independentes geraria um DDL que o servidor recusa.
+                    if (ImGui::Checkbox("##key", &column.key) && column.key) {
+                        column.nullable = false;
+                    }
+
+                    ImGui::TableSetColumnIndex(4);
+                    // A última coluna não se remove: uma tabela sem colunas
+                    // não existe, e o gerador recusaria de todo jeito.
+                    ImGui::BeginDisabled(create_table_.columns.size() <= 1);
+                    if (ImGui::SmallButton("x")) remove = i;
+                    ImGui::EndDisabled();
+
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+
+            if (remove < create_table_.columns.size()) {
+                create_table_.columns.erase(
+                    create_table_.columns.begin() +
+                    static_cast<std::ptrdiff_t>(remove));
+            }
+
+            if (ImGui::SmallButton(TR("Add column"))) {
+                create_table_.columns.emplace_back();
+            }
+
+            ImGui::Separator();
+
+            bool valid = create_table_.name[0] != 0;
+            for (const CreateTableForm::Column& column : create_table_.columns) {
+                if (column.name[0] == 0 || column.type[0] == 0) valid = false;
+            }
+
+            ImGui::BeginDisabled(!valid);
+            if (ImGui::Button(TR("Review SQL"), ImVec2(140, 0))) {
+                std::vector<db::NewColumn> columns;
+                std::vector<std::string>   keys;
+
+                for (const CreateTableForm::Column& column :
+                     create_table_.columns) {
+                    db::NewColumn out;
+                    out.name      = column.name;
+                    out.type_name = column.type;
+                    out.nullable  = column.nullable;
+                    columns.push_back(std::move(out));
+
+                    if (column.key) keys.emplace_back(column.name);
+                }
+
+                confirm_ddl(TRF("Create table %s", create_table_.name),
+                            db::generate_create_table(create_table_.schema,
+                                                      create_table_.name,
+                                                      columns, keys,
+                                                      create_table_.comment),
+                            create_table_.schema, create_table_.name);
+                create_table_.open = false;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (ImGui::Button(TR("Cancel"), ImVec2(120, 0))) {
+                create_table_.open = false;
+            }
+
+            if (!valid) {
+                ImGui::SameLine();
+                ImGui::TextColored(col4(p.text_dim),
+                                   TR("(every column needs a name and a type)"));
+            }
+        }
+        ImGui::End();
+    }
+
+    // --- View nova ---------------------------------------------------------------
+
+    if (create_view_.open) {
+        ImGui::SetNextWindowSize(ImVec2(640, 420), ImGuiCond_Appearing);
+        if (ImGui::Begin(TRW("New view", "###CreateView"), &create_view_.open,
+                         ImGuiWindowFlags_NoDocking)) {
+
+            ImGui::TextColored(col4(p.text_dim), "%s",
+                               create_view_.schema.c_str());
+            ImGui::Separator();
+
+            ImGui::SetNextItemWidth(280);
+            ImGui::InputText(TR("Name"), create_view_.name,
+                             sizeof create_view_.name);
+
+            ImGui::Checkbox(TR("Replace if it exists"), &create_view_.or_replace);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s",
+                                  TR("CREATE OR REPLACE preserves the grants on "
+                                     "the view; dropping and recreating loses "
+                                     "them"));
+            }
+
+            ImGui::Spacing();
+            ImGui::TextColored(col4(p.text_dim), TR("Query"));
+
+            const float footer = ImGui::GetFrameHeightWithSpacing() * 1.6f;
+            ImGui::InputTextMultiline("##viewsql", create_view_.definition,
+                                      sizeof create_view_.definition,
+                                      ImVec2(-1, -footer));
+
+            const bool valid = create_view_.name[0] != 0 &&
+                               create_view_.definition[0] != 0;
+
+            ImGui::BeginDisabled(!valid);
+            if (ImGui::Button(TR("Review SQL"), ImVec2(140, 0))) {
+                confirm_ddl(TRF("Create view %s", create_view_.name),
+                            db::generate_create_view(create_view_.schema,
+                                                     create_view_.name,
+                                                     create_view_.definition,
+                                                     create_view_.or_replace),
+                            create_view_.schema, create_view_.name);
+                create_view_.open = false;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (ImGui::Button(TR("Cancel"), ImVec2(120, 0))) {
+                create_view_.open = false;
             }
         }
         ImGui::End();
