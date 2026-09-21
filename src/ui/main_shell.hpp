@@ -103,6 +103,10 @@ private:
     void draw_column_header_menu(SqlDocument& document, const db::ResultSet& rs,
                                  std::size_t column);
 
+    // Menu de cor condicional de uma coluna: presets, nao formulario cru.
+    void draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
+                         std::size_t column);
+
     // Uma celula da grade: valor, marca de alteracao pendente e o editor
     // embutido quando o usuario da' duplo clique (ADR 0014).
     void draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,

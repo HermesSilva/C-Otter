@@ -5,7 +5,20 @@
 
 > **Implementado:** agregação local com as 7 funções, agrupamento por múltiplas colunas,
 > linha de totais, marca de resultado parcial e "calcular no servidor" (`db/aggregate.cpp`).
-> **Falta:** pivot, coluna calculada, sparkline, formatação condicional, fetch progressivo.
+> **Falta:** pivot, coluna calculada, sparkline, fetch progressivo.
+>
+> **Formatação condicional: feita** em 2026-09-21. `src/db/coloring.cpp`, com
+> 12 operadores, regra por célula ou por linha inteira, e o modo gradiente
+> (mapa de calor) que interpola pela faixa da própria coluna. A UI oferece
+> presets no menu do cabeçalho -- "Mapa de calor", "Marcar negativos",
+> "Destacar linhas onde x = y" --, porque quem abre o menu quer o resultado,
+> não escolher operador e duas cores em RGB.
+>
+> Três decisões que o teste fixou: comparar "10" com "9" como NÚMERO (como
+> texto daria 10 < 9); NULL não casa com comparação de valor, só com `is null`
+> explícito (é o que o SQL faz); e o mínimo/máximo do gradiente é calculado
+> UMA vez por resultado, não por célula -- por célula seria O(n²) e a grade
+> engasgaria com 200 linhas.
 
 ## Contexto
 

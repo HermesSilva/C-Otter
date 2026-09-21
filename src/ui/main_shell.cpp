@@ -908,6 +908,12 @@ void MainShell::draw() {
                 // calculado uma vez, aqui, e nao a cada quadro.
                 document->edits().clear();
                 recompute_groups(*document);
+
+                // As regras de cor guardam índice de coluna e a faixa de cada
+                // coluna em gradiente. Sem recalcular, a regra apontaria para
+                // a coluna de índice N do resultado ANTERIOR -- colorindo a
+                // coisa errada sem erro nenhum.
+                document->color_rules().prepare(*document->result());
                 document->set_edit_target(
                     db::find_edit_target(*document->result(),
                                          session().schemas()));
@@ -2619,6 +2625,19 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     // e' o que torna a edicao em buffer util.
     const bool row_deleted = document.edits().is_deleted(row);
 
+    // Cor condicional (ADR 0005). Vem ANTES das marcas de edição, que a
+    // sobrepõem: o estado pendente do usuário é mais urgente que uma regra de
+    // cor -- esconder "esta célula foi alterada" atrás de um mapa de calor
+    // faria o usuário gravar sem saber o que ia gravar.
+    db::CellColor conditional;
+    if (!document.color_rules().empty()) {
+        conditional = document.color_rules().color_for(rs, row, column);
+        if (conditional.background != 0) {
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                                   conditional.background);
+        }
+    }
+
     if (row_deleted) {
         // Linha inteira em vermelho apagado: marcada para exclusao, ainda
         // nao excluida.
@@ -2650,7 +2669,14 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - width);
             }
         }
-        ImGui::TextUnformatted(value.data(), value.data() + value.size());
+
+        if (conditional.foreground != 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, conditional.foreground);
+            ImGui::TextUnformatted(value.data(), value.data() + value.size());
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::TextUnformatted(value.data(), value.data() + value.size());
+        }
     }
 
     // --- Interacao -----------------------------------------------------------
@@ -3231,6 +3257,106 @@ void MainShell::save_pending_edits(SqlDocument& document) {
     session().execute_script_async(std::move(statements));
 }
 
+// Menu de cor de uma coluna.
+//
+// Presets em vez de um formulário genérico: quem abre o menu quer "marcar os
+// negativos de vermelho", não escolher operador, dois operandos e duas cores
+// em RGB. O formulário completo existe na janela de regras, para quem precisa.
+//
+// A escolha é a mesma do DBeaver, que oferece "Set color by value" no menu da
+// célula e o editor completo em Virtual Model.
+void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
+                                std::size_t column) {
+    const Palette& p = colors();
+    const db::ColumnInfo& info = rs.column(column).info();
+
+    auto add = [&](db::ColorOp op, std::string value, std::string value2,
+                   std::uint32_t foreground, std::uint32_t background,
+                   bool whole_row) {
+        db::ColorRule rule;
+        rule.column     = info.name;
+        rule.op         = op;
+        rule.value      = std::move(value);
+        rule.value2     = std::move(value2);
+        rule.foreground = foreground;
+        rule.background = background;
+        rule.whole_row  = whole_row;
+
+        document.color_rules().add(std::move(rule));
+        if (document.result()) {
+            document.color_rules().prepare(*document.result());
+        }
+    };
+
+    // Gradiente só faz sentido em coluna numérica: num texto o mínimo e o
+    // máximo não existem, e a regra ficaria sem efeito -- um item de menu que
+    // finge funcionar.
+    // is_right_aligned é exatamente "é número": alinhar à direita e ter
+    // mínimo/máximo comparáveis são a mesma propriedade.
+    const bool numeric = db::is_right_aligned(info.kind);
+
+    ImGui::BeginDisabled(!numeric);
+    if (ImGui::MenuItem(TR("Heat map"))) {
+        add(db::ColorOp::range, {}, {},
+            with_alpha(p.ok, 0.30f), with_alpha(p.error, 0.35f), false);
+    }
+    if (ImGui::MenuItem(TR("Mark negatives"))) {
+        add(db::ColorOp::less, "0", {}, p.error, 0, false);
+    }
+    if (ImGui::MenuItem(TR("Mark zeros"))) {
+        add(db::ColorOp::equals, "0", {}, 0, with_alpha(p.text_dim, 0.20f), false);
+    }
+    ImGui::EndDisabled();
+
+    if (!numeric) {
+        ImGui::TextColored(col4(p.text_dim), TR("(numeric columns only)"));
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::MenuItem(TR("Mark nulls"))) {
+        add(db::ColorOp::is_null, {}, {}, 0, with_alpha(p.warn, 0.18f), false);
+    }
+
+    // Colorir a linha pelo valor DESTA célula: é como se marca "cancelado"
+    // sem repetir a regra em cada coluna.
+    if (!rs.is_null(0, column)) {
+        ImGui::Separator();
+        ImGui::TextColored(col4(p.text_dim), TR("Highlight rows where"));
+
+        // Os valores distintos desta coluna, até um limite. Com alta
+        // cardinalidade a lista seria inútil e enorme -- e é justamente onde
+        // um preset não serve.
+        constexpr std::size_t kMaxDistinct = 12;
+
+        std::vector<std::string> distinct;
+        for (std::size_t row = 0;
+             row < rs.row_count() && distinct.size() < kMaxDistinct + 1; ++row) {
+            if (rs.is_null(row, column)) continue;
+
+            std::string value(rs.text(row, column));
+            if (std::find(distinct.begin(), distinct.end(), value) ==
+                distinct.end()) {
+                distinct.push_back(std::move(value));
+            }
+        }
+
+        if (distinct.size() > kMaxDistinct) {
+            ImGui::TextColored(col4(p.text_dim),
+                               TR("too many distinct values"));
+        } else {
+            for (const std::string& value : distinct) {
+                ImGui::PushID(value.c_str());
+                if (ImGui::MenuItem((info.name + " = " + value).c_str())) {
+                    add(db::ColorOp::equals, value, {}, 0,
+                        with_alpha(p.accent, 0.20f), /*whole_row=*/true);
+                }
+                ImGui::PopID();
+            }
+        }
+    }
+}
+
 void MainShell::draw_column_header_menu(SqlDocument& document,
                                         const db::ResultSet& rs,
                                         std::size_t column) {
@@ -3243,6 +3369,25 @@ void MainShell::draw_column_header_menu(SqlDocument& document,
 
     ImGui::TextColored(col4(p.accent_light), "%s", info.name.c_str());
     ImGui::TextColored(col4(p.text_dim), "%s", info.type_name.c_str());
+    ImGui::Separator();
+
+    // Cor condicional vem ANTES do retorno por paginação: ela funciona sobre
+    // o que está na tela, e não precisa refazer a consulta como o filtro.
+    if (ImGui::BeginMenu(TR("Color"))) {
+        draw_color_menu(document, rs, column);
+        ImGui::EndMenu();
+    }
+
+    if (document.color_rules().affects_column(info.name)) {
+        if (ImGui::MenuItem(TR("Clear color rules of this column"))) {
+            db::ColorRules& rules = document.color_rules();
+            for (std::size_t i = rules.rules().size(); i-- > 0;) {
+                if (rules.rules()[i].column == info.name) rules.remove(i);
+            }
+            if (document.result()) rules.prepare(*document.result());
+        }
+    }
+
     ImGui::Separator();
 
     // Filtrar exige refazer a consulta, o que so' vale para resultado

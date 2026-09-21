@@ -160,6 +160,18 @@ const char* const kPtBr[] = {
 
     // --- DDL de escrita (docs/DDL-WRITE.md) ---
     "Review SQL",                 "Conferir SQL",
+
+    // --- Cor condicional (ADR 0005) ---
+    "Color",                      "Cor",
+    "Heat map",                   "Mapa de calor",
+    "Mark negatives",             "Marcar negativos",
+    "Mark zeros",                 "Marcar zeros",
+    "Mark nulls",                 "Marcar nulos",
+    "(numeric columns only)",     "(só em colunas numéricas)",
+    "Highlight rows where",       "Destacar linhas onde",
+    "too many distinct values",   "valores distintos demais",
+    "Clear color rules of this column",
+    "Limpar regras de cor desta coluna",
     "Add index...",               "Acrescentar índice...",
     "Add index",                  "Acrescentar índice",
     "Drop index",                 "Remover índice",

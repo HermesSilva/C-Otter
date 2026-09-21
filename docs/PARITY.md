@@ -129,7 +129,7 @@ Distribuição dos 275 comandos por área:
 | Agrupamento e subtotais (ADR 0005) | ✅ | ⬜ |
 | Linha de totais | ✅ | ⬜ |
 | Pivot | ✅ | ⬜ |
-| Formatação condicional | ✅ | ⬜ |
+| Formatação condicional | ✅ | ✅ 12 operadores, célula ou linha, mapa de calor |
 | Editores de valor (JSON, hex, data) | ✅ | ⬜ |
 | Copiar como CSV/Markdown/SQL | ✅ | ⬜ |
 | Exportar resultado | ✅ | ⬜ |

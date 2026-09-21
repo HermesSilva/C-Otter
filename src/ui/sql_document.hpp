@@ -9,6 +9,7 @@
 #include "TextEditor.h"
 
 #include "db/aggregate.hpp"
+#include "db/coloring.hpp"
 #include "db/edit.hpp"
 #include "db/result_set.hpp"
 #include "sql/paging.hpp"
@@ -111,6 +112,16 @@ public:
     [[nodiscard]] db::EditBuffer& edits() noexcept { return edits_; }
     [[nodiscard]] const db::EditBuffer& edits() const noexcept { return edits_; }
 
+    // Regras de cor condicional (ADR 0005).
+    //
+    // Por DOCUMENTO, e nao global: duas abas podem mostrar consultas
+    // diferentes, e uma regra sobre "situacao" nao faz sentido numa aba que
+    // nao tem essa coluna.
+    [[nodiscard]] db::ColorRules& color_rules() noexcept { return color_rules_; }
+    [[nodiscard]] const db::ColorRules& color_rules() const noexcept {
+        return color_rules_;
+    }
+
     // Onde gravar. Recalculado quando o resultado muda.
     [[nodiscard]] const db::EditTarget& edit_target() const noexcept {
         return edit_target_;
@@ -139,6 +150,7 @@ private:
     sql::SortOrder              sort_;
     sql::ColumnFilter           filter_;
     db::EditBuffer              edits_;
+    db::ColorRules              color_rules_;
     db::EditTarget              edit_target_;
     db::GroupSpec               group_spec_;
     db::GroupResult             groups_;
