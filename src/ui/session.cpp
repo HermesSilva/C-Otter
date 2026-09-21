@@ -315,6 +315,30 @@ void Session::load_routine_definition_async(std::string schema, std::string name
     });
 }
 
+void Session::invalidate_table(std::string_view schema,
+                               std::string_view table) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    db::TableMeta* t = find_table(schema, table);
+    if (t == nullptr) return;
+
+    // Limpa os dados E as flags: manter `columns_loaded` com o vector vazio
+    // faria a arvore mostrar "Colunas (0)" para sempre, sem reconsultar.
+    t->columns.clear();
+    t->constraints.clear();
+    t->indexes.clear();
+    t->foreign_keys.clear();
+    t->references.clear();
+    t->triggers.clear();
+    t->definition.clear();
+
+    t->columns_loaded     = false;
+    t->constraints_loaded = false;
+    t->indexes_loaded     = false;
+    t->keys_loaded        = false;
+    t->triggers_loaded    = false;
+    t->definition_loaded  = false;
+}
+
 bool Session::auto_commit() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return holt_ ? holt_->auto_commit() : true;

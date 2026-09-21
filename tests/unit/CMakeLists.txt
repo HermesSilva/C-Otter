@@ -4,6 +4,7 @@ add_executable(otter_tests
     test_catalog.cpp
     test_connection_store.cpp
     test_crypto_json.cpp
+    test_ddl.cpp
     test_error.cpp
     test_i18n.cpp
     test_icons.cpp

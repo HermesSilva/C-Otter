@@ -1,6 +1,7 @@
 #include "ui/main_shell.hpp"
 
 #include "base/i18n.hpp"
+#include "db/ddl.hpp"
 #include "sql/paging.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
@@ -956,6 +957,10 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         const bool open = ImGui::TreeNode(relation.name.c_str());
         ImGui::PopStyleColor();
 
+        // Logo apos o TreeNode: BeginPopupContextItem usa o ultimo item, e
+        // qualquer TextColored entre os dois roubaria o alvo do menu.
+        draw_relation_context_menu(schema, relation);
+
         if (!relation.size_pretty.empty()) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "  %s",
@@ -1171,6 +1176,102 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
 
     // --- Corpo da view -------------------------------------------------------
     if (table.is_view()) draw_view_definition(schema, table);
+}
+
+void MainShell::open_sql_tab(std::string sql, bool run) {
+    // new_document() ja' torna a aba nova a ativa, e execute_current_sql()
+    // opera sobre a ativa -- a ordem aqui nao e' acidental.
+    SqlDocument& document = new_document();
+    document.editor().SetText(sql);
+
+    // Executar so' quando pedido: "ver dados" e' uma acao, "gerar SELECT" e'
+    // um ponto de partida para editar.
+    if (run) execute_current_sql();
+}
+
+void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
+                                           const db::TableMeta& relation) {
+    if (!ImGui::BeginPopupContextItem("##relmenu")) return;
+
+    const std::string full = db::qualified_name(schema.name, relation.name);
+
+    // Carrega as colunas enquanto o menu esta' aberto, nao ao clicar num item.
+    //
+    // Sem isto, "Ver dados" numa tabela nunca expandida gerava `SELECT *` com
+    // um comentario pedindo para expandir -- o usuario pediu os dados, nao um
+    // recado.
+    //
+    // `relation` e' uma copia do quadro corrente: o resultado do worker so'
+    // aparece no quadro seguinte. Como o menu sobrevive entre quadros, o
+    // clique acontece depois -- mas se acontecer antes, o SQL sai com `*` em
+    // vez de errado, que e' a degradacao aceitavel.
+    if (!relation.columns_loaded && !session().busy()) {
+        session().load_columns_async(schema.name, relation.name);
+    }
+
+    // Ver dados: a acao mais frequente, no topo e destacada.
+    if (ImGui::MenuItem(TR("View data"))) {
+        open_sql_tab(db::generate_select(schema.name, relation), /*run=*/true);
+    }
+    if (ImGui::MenuItem(TR("Count rows"))) {
+        open_sql_tab(db::generate_count(schema.name, relation), /*run=*/true);
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginMenu(TR("Generate SQL"))) {
+        // Sem as colunas carregadas, o SQL gerado seria '*' ou vazio. Em vez
+        // de gerar algo pobre, o menu diz o que falta.
+        if (!relation.columns_loaded) {
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR("expand the table first"));
+        }
+
+        if (ImGui::MenuItem("SELECT")) {
+            open_sql_tab(db::generate_select(schema.name, relation, 0), false);
+        }
+
+        // INSERT, UPDATE e DELETE nao se aplicam a view: escrever numa view
+        // exige trigger INSTEAD OF, e oferecer o comando sugeriria que
+        // funciona.
+        ImGui::BeginDisabled(relation.is_view());
+        if (ImGui::MenuItem("INSERT")) {
+            open_sql_tab(db::generate_insert(schema.name, relation), false);
+        }
+        if (ImGui::MenuItem("UPDATE")) {
+            open_sql_tab(db::generate_update(schema.name, relation), false);
+        }
+        if (ImGui::MenuItem("DELETE")) {
+            open_sql_tab(db::generate_delete(schema.name, relation), false);
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
+        if (ImGui::MenuItem("DDL")) {
+            open_sql_tab(db::generate_ddl(schema.name, relation), false);
+        }
+        ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::MenuItem(TR("Copy qualified name"))) {
+        ImGui::SetClipboardText(full.c_str());
+    }
+    if (ImGui::MenuItem(TR("Copy name"))) {
+        ImGui::SetClipboardText(relation.name.c_str());
+    }
+
+    ImGui::Separator();
+
+    // Atualizar: descarta o cache do no' para que a proxima expansao releia
+    // o catalogo. Sem isso, um ALTER TABLE feito fora do C-Otter ficaria
+    // invisivel ate' reconectar.
+    if (ImGui::MenuItem(TR("Refresh"), "F5")) {
+        session().invalidate_table(schema.name, relation.name);
+    }
+
+    ImGui::EndPopup();
 }
 
 void MainShell::draw_view_definition(const db::SchemaMeta& schema,
@@ -2108,13 +2209,13 @@ void MainShell::remember_profile(const db::ConnectionProfile& profile) {
     fresh.driver    = "postgres-jdbc";
     fresh.supported = true;
 
-    // Sem nome, a lista de conexoes mostraria uma linha em branco. O rotulo
-    // "banco@host" e' o mesmo que a barra de status ja' usa.
-    if (fresh.profile.name.empty()) {
-        fresh.profile.name = profile.database.empty()
-                                 ? profile.host
-                                 : profile.database + "@" + profile.host;
-    }
+    // O nome fica VAZIO quando o usuario nao deu um. effective_name() deriva
+    // "banco@host" na hora de exibir.
+    //
+    // Gravar o nome derivado congelaria o rotulo: um perfil salvo como
+    // "TokenGuard@localhost" e reaberto apontando para outro banco continuaria
+    // exibindo TokenGuard, contradizendo a barra de status. Foi o defeito
+    // observado ao testar as variaveis de ambiente sobre um perfil salvo.
     saved_profiles_.push_back(std::move(fresh));
     persist_profiles();
 }

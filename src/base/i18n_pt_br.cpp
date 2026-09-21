@@ -117,6 +117,12 @@ const char* const kPtBr[] = {
     "nada. Deixe desligado para credenciais que importam.",
 
     // --- Arvore de objetos ---
+    "View data",                  "Ver dados",
+    "Count rows",                 "Contar linhas",
+    "Generate SQL",               "Gerar SQL",
+    "expand the table first",     "expanda a tabela antes",
+    "Copy qualified name",        "Copiar nome qualificado",
+    "Refresh",                    "Atualizar",
     "Tables",                     "Tabelas",
     "Data types",                 "Tipos de dados",
     "Views",                      "Views",

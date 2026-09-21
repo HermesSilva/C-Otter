@@ -77,6 +77,11 @@ public:
     void load_routines_async(std::string schema);
     void load_types_async(std::string schema);
 
+    // Descarta o cache de uma tabela, para que a proxima expansao releia o
+    // catalogo. Sem isto, um ALTER TABLE feito fora do C-Otter ficaria
+    // invisivel ate' reconectar.
+    void invalidate_table(std::string_view schema, std::string_view table);
+
     // Corpo de uma funcao ou procedure. Precisa da assinatura alem do nome:
     // sobrecargas compartilham o nome, e pg_get_functiondef identifica a
     // rotina por regprocedure.

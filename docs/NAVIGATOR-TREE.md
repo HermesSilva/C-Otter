@@ -167,6 +167,28 @@ Quatro desenhos foram refeitos depois de olhar a captura, não o código:
 | `function` | O `(f)` desaparecia no tamanho da árvore — letras não sobrevivem a 14 px |
 | `tablespace` | Elipses empilhadas ficavam iguais à materialized view |
 
+**Menu de contexto por tipo de nó.** Extraído dos `plugin.xml` de
+`org.jkiss.dbeaver.ui.navigator` e `.ui.editors.sql`. O DBeaver oferece dezenas de
+comandos; a coluna de estado diz o que o C-Otter faz hoje:
+
+| Comando | Tabela | View | Coluna | Estado |
+|---|:---:|:---:|:---:|---|
+| Ver dados (`SELECT *`) | ✔ | ✔ | — | ✅ abre aba com a consulta |
+| Gerar SELECT | ✔ | ✔ | ✔ | ✅ lista de colunas explícita |
+| Gerar INSERT | ✔ | — | — | ✅ |
+| Gerar UPDATE | ✔ | — | — | ✅ com `WHERE` pela PK |
+| Gerar DELETE | ✔ | — | — | ✅ com `WHERE` pela PK |
+| Gerar DDL (`CREATE TABLE`) | ✔ | ✔ | — | ✅ colunas, PK, constraints, índices |
+| Copiar nome | ✔ | ✔ | ✔ | ✅ qualificado com o schema |
+| Contar linhas | ✔ | ✔ | — | ✅ `SELECT count(*)` |
+| Atualizar (F5) | ✔ | ✔ | ✔ | ✅ descarta o cache do nó |
+| Criar / alterar / excluir objeto | ✔ | ✔ | ✔ | ⬜ exige DDL de escrita |
+| Filtro de objetos | ✔ | ✔ | — | ⬜ |
+| Mover na árvore | ✔ | ✔ | ✔ | ➖ organização do DBeaver |
+
+O **DDL é gerado pelo C-Otter**, não lido do servidor: o PostgreSQL não tem
+`SHOW CREATE TABLE`. Montá-lo a partir do catálogo é o que o DBeaver também faz.
+
 **Tooltip com detalhe.** Comentário do objeto, definição da constraint, expressão do
 índice — informação que não cabe no rótulo.
 

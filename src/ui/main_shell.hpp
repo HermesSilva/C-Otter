@@ -59,6 +59,14 @@ private:
     void draw_view_definition(const db::SchemaMeta& schema,
                               const db::TableMeta& view);
 
+    // Menu de contexto de uma relacao: ver dados, gerar SQL, copiar nome.
+    // Mapeado do plugin.xml do Navigator (docs/NAVIGATOR-TREE.md).
+    void draw_relation_context_menu(const db::SchemaMeta& schema,
+                                    const db::TableMeta& relation);
+
+    // Abre uma aba nova com o SQL e, quando `run`, ja' executa.
+    void open_sql_tab(std::string sql, bool run);
+
     // Caixa rolavel com um corpo de SQL, mais os botoes de copiar e abrir no
     // editor. Serve para view e para funcao: o conteudo muda, a apresentacao
     // nao.

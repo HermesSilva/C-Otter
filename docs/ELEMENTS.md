@@ -177,7 +177,13 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Corpo da função** | ✅ | `pg_get_functiondef`, com Copiar / Abrir no editor |
 | **Tipos de dados** | ✅ | enum com valores ordenados, composto com campos, domain com CHECK |
 | Campo de filtro/busca | ⬜ | |
-| Menu de contexto | ⬜ | Sem "ver dados", "gerar DDL", "renomear" |
+| **Menu de contexto** | ✅ | Ver dados, contar linhas, gerar SQL, copiar nome, atualizar |
+| Ver dados | ✅ | `SELECT` das colunas, executado |
+| Gerar SELECT / INSERT / UPDATE / DELETE | ✅ | `WHERE` pela PK; **aviso** quando não há PK |
+| Gerar DDL | ✅ | `CREATE TABLE` com tipos, constraints e índices |
+| INSERT/UPDATE/DELETE em view | ✅ | Desabilitados — exigiriam `INSTEAD OF` |
+| Atualizar nó (F5) | ✅ | Descarta o cache e relê o catálogo |
+| Criar / alterar / excluir objeto | ⬜ | Exige DDL de escrita |
 | Duplo clique abre dados | ⬜ | |
 | Arrastar tabela para o editor | ⬜ | |
 | Atualizar (F5) | ⬜ | |
@@ -463,7 +469,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (148, todos verdes):
+Testes automatizados (164, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe
