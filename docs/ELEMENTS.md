@@ -294,14 +294,29 @@ Esta é a lista de maior retorno por esforço: o trabalho difícil já está fei
 | Transações | 0 | 0 | 5 | 0 | 5 |
 | **Total** | **94** | **6** | **55** | **0** | **155** |
 
-**Cobertura: ~63% dos elementos** (94 prontos + 6 parciais em 155).
+**94 de 155 elementos existentes funcionam.**
 
-O número difere do de [`PARITY.md`](PARITY.md) (~37%) porque ali a unidade é a
-*funcionalidade* frente ao DBeaver, e aqui é o *elemento de interface* do C-Otter. Uma
-funcionalidade como "editar célula" conta como um item lá e se desdobra em vários aqui.
-
-Ambos os números são reais; medem coisas diferentes. Para saber quanto falta para competir
-com o DBeaver, use `PARITY.md`. Para saber se um botão funciona, use este arquivo.
+> ### ⚠️ Este número NÃO é indicador de progresso
+>
+> O denominador aqui são os elementos que o C-Otter **tem**, não os que **precisa ter**.
+> Ele mede "o que existe está funcionando?" — não "quanto falta?".
+>
+> O mapa completo do DBeaver ([`DBEAVER-MAP.md`](DBEAVER-MAP.md)) tem **281 comandos**,
+> **147 atalhos**, **151 diálogos**, **112 assistentes**, **109 páginas de preferências**,
+> **309 managers de DDL** e **81 value handlers**. Contra esse denominador:
+>
+> | | DBeaver | C-Otter | |
+> |---|---|---|---|
+> | Comandos | 281 | 7 | **2,5%** |
+> | Atalhos | 147 | 6 | **4,1%** |
+>
+> Um diálogo de conexão com 5 campos conta como 10 elementos prontos aqui; o equivalente no
+> DBeaver tem catálogo de drivers, abas de propriedades, SSH, SSL e teste de conexão — algo
+> como 80. Medir a própria interface contra si mesma produz um número que sobe enquanto o
+> produto não se aproxima do alvo.
+>
+> **Para progresso, use [`UI-SCOPE.md`](UI-SCOPE.md) e [`PARITY.md`](PARITY.md).**
+> Este arquivo responde apenas: *"este botão funciona?"*
 
 ## Registro visual
 
