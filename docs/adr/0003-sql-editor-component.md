@@ -1,7 +1,16 @@
 # ADR 0003 — Componente do editor SQL
 
 **Data:** 2026-09-21
-**Status:** Aceito — Scintilla + Lexilla, com fronteira abstrata
+**Status:** ⚠️ **REVOGADO** pelo [ADR 0007](0007-editor-single-codebase.md) no mesmo dia
+
+> **Por que caiu.** A decisão por Scintilla era correta para os pesos de então. Dois
+> requisitos posteriores mudaram esses pesos: o backend único do ADR 0006 e a exigência
+> explícita de **escrita única** para o editor. Scintilla é um controle *nativo* — Win32 no
+> Windows, GTK no Linux — exatamente o oposto de escrita única.
+>
+> A análise abaixo **permanece válida e útil**: a rejeição do Notepad++ (GPL v3, é um `.exe`),
+> a avaliação das 8 alternativas, e sobretudo o argumento dos *dois lexers divergentes*, que
+> o ADR 0007 resolve do mesmo modo.
 
 ## Contexto
 

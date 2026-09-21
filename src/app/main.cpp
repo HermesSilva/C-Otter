@@ -5,10 +5,6 @@
 
 #include <cstdio>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 namespace {
 
 int run() {
@@ -34,14 +30,9 @@ int run() {
 
 } // namespace
 
-#ifdef _WIN32
-// Subsystem WINDOWS: sem console atras da janela. O CMake aponta o entry point
-// para wWinMain; definir tambem main() daria conflito de simbolo.
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    return run();
-}
-#else
+// Entry point unico nas duas plataformas: com GLFW nao ha' wWinMain. No Windows
+// o CMake usa WIN32_EXECUTABLE + /ENTRY:mainCRTStartup para nao abrir console
+// atras da janela, mantendo main() padrao (ADR 0006).
 int main() {
     return run();
 }
-#endif

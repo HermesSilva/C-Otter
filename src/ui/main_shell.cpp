@@ -4,7 +4,10 @@
 #include "imgui.h"
 #include "imgui_internal.h"   // DockBuilder: layout inicial programatico
 
+#include "TextEditor.h"
+
 #include <cstdio>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -78,44 +81,57 @@ constexpr float kStatusBarHeight = 26.0f;
 
 ImU32 col(std::uint32_t c) { return static_cast<ImU32>(c); }
 
-// Realce ilustrativo: as cores reais virao do lexer do otter_sql via ILexer5
-// (ADR 0003/0004). Aqui so' mostramos a paleta aplicada a texto SQL.
-void draw_fake_sql(std::string_view sql) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float line_height = ImGui::GetTextLineHeightWithSpacing();
-    ImVec2 pos = ImGui::GetCursorScreenPos();
+// Tema da lontra aplicado ao editor: as cores vem da mesma paleta do logo que
+// o resto da UI, para que o painel de SQL nao pareca um corpo estranho.
+void apply_editor_palette(TextEditor& editor) {
+    using Color = TextEditor::Color;
+    TextEditor::Palette p = editor.GetPalette();
 
-    std::size_t start = 0;
-    int line_no = 1;
-    while (start <= sql.size()) {
-        const std::size_t end = sql.find('\n', start);
-        const std::string_view line =
-            sql.substr(start, end == std::string_view::npos ? std::string_view::npos
-                                                            : end - start);
+    auto set = [&p](Color c, std::uint32_t value) {
+        p[static_cast<std::size_t>(c)] = static_cast<ImU32>(value);
+    };
 
-        // Numero da linha, em calha propria.
-        char gutter[8];
-        std::snprintf(gutter, sizeof(gutter), "%3d", line_no);
-        dl->AddText(pos, col(palette::text_dim), gutter);
+    set(Color::background,      palette::bg_darkest);
+    set(Color::text,            palette::text);
+    set(Color::keyword,         palette::fur_light);   // SELECT, FROM, JOIN
+    set(Color::declaration,     palette::data_light);
+    set(Color::number,          0xFFB0A450);
+    set(Color::string,          0xFF7CC47C);
+    set(Color::punctuation,     palette::text_dim);
+    set(Color::preprocessor,    palette::warn);
+    set(Color::identifier,      palette::text);
+    set(Color::knownIdentifier, palette::data);        // tabelas e colunas
+    set(Color::comment,         palette::text_dim);
+    set(Color::cursor,          palette::data_light);
+    set(Color::selection,       (palette::data & 0x00FFFFFFu) | 0x50000000u);
+    set(Color::whitespace,      0xFF3D332C);
+    set(Color::lineNumber,      palette::text_dim);
+    set(Color::currentLineNumber, palette::fur_light);
+    set(Color::currentLineHighlight,
+        (palette::fur & 0x00FFFFFFu) | 0x18000000u);
+    set(Color::currentLineHighlightBorder,
+        (palette::fur & 0x00FFFFFFu) | 0x30000000u);
+    set(Color::matchingBracketBackground,
+        (palette::data & 0x00FFFFFFu) | 0x40000000u);
+    set(Color::matchingBracketActive, palette::data_light);
 
-        const ImVec2 text_pos(pos.x + 38.0f, pos.y);
-        const bool is_comment = line.starts_with("--");
-        dl->AddText(text_pos,
-                    is_comment ? col(palette::text_dim) : col(palette::text),
-                    line.data(), line.data() + line.size());
-
-        pos.y += line_height;
-        ++line_no;
-        if (end == std::string_view::npos) break;
-        start = end + 1;
-    }
-
-    ImGui::Dummy(ImVec2(0.0f, static_cast<float>(line_no) * line_height));
+    editor.SetPalette(p);
 }
 
 } // namespace
 
-MainShell::MainShell() = default;
+MainShell::MainShell() : editor_(std::make_unique<TextEditor>()) {
+    editor_->SetLanguage(TextEditor::Language::Sql());
+    editor_->SetText(std::string(kSampleSql));
+    editor_->SetShowWhitespacesEnabled(false);
+    editor_->SetShowMatchingBrackets(true);
+    editor_->SetCompletePairedGlyphs(true);
+    editor_->SetTabSize(4);
+
+    apply_editor_palette(*editor_);
+}
+
+MainShell::~MainShell() = default;
 
 void MainShell::draw() {
     // A barra de menu primeiro: ela reduz o WorkSize do viewport, e o dockspace
@@ -293,16 +309,19 @@ void MainShell::draw_editor_panel() {
         ImGui::SameLine();
         ImGui::Button("Explicar");
         ImGui::SameLine();
+
+        // Posicao do cursor e estado, como qualquer editor de codigo decente.
+        const TextEditor::DocPos cursor = editor_->GetCurrentCursorPosition();
+        const bool modified = editor_->GetUndoIndex() != save_point_;
+
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(col(palette::text_dim)),
-                           "  |  Scintilla entra aqui (ADR 0003)");
+                           "  |  Ln %zu, Col %zu  |  %zu linhas%s",
+                           cursor.line + 1, cursor.index + 1,
+                           editor_->GetLineCount(),
+                           modified ? "  *" : "");
         ImGui::Separator();
 
-        ImGui::PushStyleColor(ImGuiCol_ChildBg,
-                              ImGui::ColorConvertU32ToFloat4(col(palette::bg_darkest)));
-        ImGui::BeginChild("##sqltext", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        draw_fake_sql(kSampleSql);
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
+        editor_->Render("##sql", ImGui::GetContentRegionAvail());
     }
     ImGui::End();
 }

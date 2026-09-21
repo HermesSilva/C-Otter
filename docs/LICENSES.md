@@ -5,40 +5,36 @@ que as licenças abaixo impõem em troca do uso.
 
 ---
 
-## Scintilla 5.6.6
+## Dear ImGui 1.93 (branch docking)
 
-Componente de edição de texto. `third_party/scintilla/`
-Licença: **HPND** (Historical Permission Notice and Disclaimer)
-
-> Copyright 1998-2021 by Neil Hodgson <neilh@scintilla.org>
->
-> All Rights Reserved
->
-> Permission to use, copy, modify, and distribute this software and its documentation for
-> any purpose and without fee is hereby granted, provided that the above copyright notice
-> appear in all copies and that both that copyright notice and this permission notice appear
-> in supporting documentation.
->
-> NEIL HODGSON DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED
-> WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL NEIL HODGSON BE LIABLE FOR
-> ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-> LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
-> TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
-> SOFTWARE.
-
-Texto integral: `third_party/scintilla/License.txt`
+Toolkit de UI em modo imediato. `third_party/imgui/`
+Licença: **MIT** — Copyright (c) 2014-2026 Omar Cornut
 
 ---
 
-## Lexilla 5.5.3
+## GLFW 3.4
 
-Infraestrutura de lexers (`lexlib`). `third_party/lexilla/`
-Licença: **HPND**, mesmos termos acima.
+Janela, contexto OpenGL e entrada. `third_party/glfw/`
+Licença: **zlib/libpng** — Copyright (c) 2002-2006 Marcus Geelnard,
+Copyright (c) 2006-2019 Camilla Löwy
 
-Texto integral: `third_party/lexilla/License.txt`
+Compatível com link estático (ADR 0002). Backend único para todas as plataformas (ADR 0006).
 
-**Nota:** compilamos apenas `lexlib` — a infraestrutura para registrar um `ILexer5` próprio.
-Os ~100 lexers de linguagens do Lexilla não são compilados nem distribuídos.
+---
+
+## ImGuiColorTextEdit
+
+Widget de edição de código com realce de sintaxe. `third_party/texteditor/`
+Licença: **MIT** — Copyright (c) 2024-2026 Johan A. Goossens
+
+Texto integral: `third_party/texteditor/LICENSE`
+
+Inclui `dtl.h` (diff template library) sob **BSD**, usado apenas por `TextDiff.cpp`, que não
+compilamos.
+
+**Nota histórica:** Scintilla e Lexilla foram vendorados e removidos em 2026-09-21, quando o
+ADR 0007 revogou o ADR 0003. Motivo: Scintilla é um controle nativo por plataforma, o que
+contraria o requisito de escrita única.
 
 ---
 
@@ -59,13 +55,17 @@ e ao Apache 2.0 para as porções derivadas.
 
 | Componente | Licença | Link estático em produto fechado |
 |------------|---------|----------------------------------|
-| Scintilla | HPND | **Sim** |
-| Lexilla | HPND | **Sim** |
+| Dear ImGui | MIT | **Sim** |
+| GLFW | zlib/libpng | **Sim** |
+| ImGuiColorTextEdit | MIT | **Sim** |
 | SQLite | Domínio público | **Sim** |
 | PostgreSQL (libpq) | PostgreSQL License | **Sim** |
 | ODBC | API do sistema | **Sim** |
-| Dear ImGui | MIT | **Sim** |
 | MySQL (libmysqlclient) | GPL | **Não** — bloqueado |
 | MariaDB Connector/C | LGPL | **Não** com link estático |
 | Qt / QScintilla | LGPL / GPL | **Não** — rejeitado (ADR 0003) |
+| GTK | LGPL | **Não** com link estático — evitado pelo ADR 0007 |
 | Oracle OCI | Proprietária | Verificar antes da Fase 3 |
+
+**Todo o stack de UI é permissivo (MIT/zlib)** e compatível com link estático — nenhuma
+dependência LGPL restou após o ADR 0007.
