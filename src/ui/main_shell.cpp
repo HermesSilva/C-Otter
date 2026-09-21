@@ -843,6 +843,19 @@ void MainShell::draw() {
         if (auto fresh = session().take_plan()) plan_ = std::move(*fresh);
     }
 
+    // DDL terminou: descarta o cache do nó para que a próxima expansão releia.
+    // Sem isso a coluna recém-criada não apareceria até o usuário mandar
+    // atualizar, e ele concluiria que o comando não funcionou.
+    if (ddl_pending_reload_ && !session().busy()) {
+        ddl_pending_reload_ = false;
+
+        if (!session().last_script_failed() && !ddl_reload_table_.empty()) {
+            session().invalidate_table(ddl_reload_schema_, ddl_reload_table_);
+        }
+        ddl_reload_schema_.clear();
+        ddl_reload_table_.clear();
+    }
+
     if (!session().busy() && executing_document_id_ != 0) {
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
@@ -1015,6 +1028,18 @@ void MainShell::draw() {
         feedback.message = session().status_message();
     }
     connection_dialog_.draw(feedback);
+
+    // Confirmacao de DDL. `ddl_in_transaction` vem das capabilities do driver:
+    // no MySQL cada comando confirma sozinho, e a janela precisa dizer isso.
+    {
+        const bool connected = session().state() == SessionState::connected;
+        bool transactional = true;
+        if (connected && session().capabilities()) {
+            transactional = session().capabilities()->ddl_in_transaction;
+        }
+        ddl_dialog_.draw(connected && !session().busy(), transactional);
+    }
+    draw_ddl_forms();
 
     if (show_about_) draw_about_window();
     if (show_plan_) draw_plan_window();
@@ -1891,6 +1916,59 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         ImGui::EndMenu();
     }
 
+    // --- Alterar a estrutura (docs/DDL-WRITE.md) -----------------------------
+    //
+    // Toda ação aqui passa pela janela de confirmação: DDL não tem desfazer, e
+    // o usuário precisa ver o comando antes de ele rodar.
+
+    ImGui::Separator();
+
+    const bool can_alter = session().state() == SessionState::connected &&
+                           !session().busy();
+
+    if (ImGui::BeginMenu(TR("Alter"), can_alter && !relation.is_view())) {
+        if (!relation.columns_loaded) {
+            // Sem as colunas não dá para montar um MODIFY completo no MySQL.
+            // Dizer o que falta é melhor que oferecer um menu que gera erro.
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR("expand the table first"));
+        }
+
+        ImGui::BeginDisabled(!relation.columns_loaded);
+        if (ImGui::MenuItem(TR("Add column..."))) {
+            open_add_column(schema.name, relation);
+        }
+        if (ImGui::BeginMenu(TR("Drop column"))) {
+            for (const db::ColumnMeta& column : relation.columns) {
+                if (ImGui::MenuItem(column.name.c_str())) {
+                    db::TableAlteration wanted;
+                    wanted.schema = schema.name;
+                    wanted.table  = relation.name;
+                    wanted.drop_columns.push_back(column.name);
+
+                    confirm_ddl(TRF("Drop column %s from %s",
+                                    column.name.c_str(), relation.name.c_str()),
+                                db::generate_alter(relation, wanted),
+                                schema.name, relation.name);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("Rename table..."))) {
+            open_rename_table(schema.name, relation);
+        }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::MenuItem(TR("Drop table..."), nullptr, false, can_alter)) {
+        confirm_ddl(TRF("Drop %s", relation.name.c_str()),
+                    db::generate_drop(schema.name, relation.name, relation.kind),
+                    schema.name, relation.name);
+    }
+
     ImGui::Separator();
 
     if (ImGui::MenuItem(TR("Copy qualified name"))) {
@@ -2711,6 +2789,242 @@ void MainShell::draw_group_panel(SqlDocument& document,
         }
         ImGui::EndTable();
     }
+}
+
+// Prepara o formulário de coluna nova. O DDL só é gerado ao confirmar, para
+// que os avisos (NOT NULL sem DEFAULT numa tabela com linhas) reflitam o que
+// o usuário acabou de digitar.
+void MainShell::open_add_column(const std::string& schema,
+                                const db::TableMeta& table) {
+    column_form_ = ColumnForm{};
+    column_form_.schema = schema;
+    column_form_.table  = table.name;
+    column_form_.open   = true;
+
+    // Tipo padrão por SGBD: sugerir `serial` num MySQL daria erro de sintaxe.
+    const bool mysql = db::sql_dialect() == db::QuoteStyle::backticks;
+    std::snprintf(column_form_.type, sizeof column_form_.type, "%s",
+                  mysql ? "varchar(100)" : "text");
+
+    // A lista de colunas alimenta o AFTER do MySQL.
+    column_form_.existing.clear();
+    for (const db::ColumnMeta& column : table.columns) {
+        column_form_.existing.push_back(column.name);
+    }
+    column_form_.current = table;
+}
+
+void MainShell::open_rename_table(const std::string& schema,
+                                  const db::TableMeta& table) {
+    rename_form_ = RenameForm{};
+    rename_form_.schema = schema;
+    rename_form_.table  = table.name;
+    rename_form_.open   = true;
+    std::snprintf(rename_form_.new_name, sizeof rename_form_.new_name, "%s",
+                  table.name.c_str());
+    rename_form_.current = table;
+}
+
+void MainShell::draw_ddl_forms() {
+    const Palette& p = colors();
+
+    // --- Coluna nova ---------------------------------------------------------
+
+    if (column_form_.open) {
+        ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+        if (ImGui::Begin(TRW("Add column", "###AddColumn"), &column_form_.open,
+                         ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+
+            ImGui::TextColored(col4(p.text_dim), "%s.%s",
+                               column_form_.schema.c_str(),
+                               column_form_.table.c_str());
+            ImGui::Separator();
+
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("Name"), column_form_.name,
+                             sizeof column_form_.name);
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("Type"), column_form_.type,
+                             sizeof column_form_.type);
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("Default"), column_form_.default_value,
+                             sizeof column_form_.default_value);
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("Comment"), column_form_.comment,
+                             sizeof column_form_.comment);
+
+            ImGui::Checkbox(TR("Nullable"), &column_form_.nullable);
+
+            // Posição só existe no MySQL. Esconder no PostgreSQL em vez de
+            // desabilitar: um campo que nunca vai funcionar ali é ruído.
+            if (db::sql_dialect() == db::QuoteStyle::backticks &&
+                !column_form_.existing.empty()) {
+                ImGui::Separator();
+                ImGui::TextColored(col4(p.text_dim), TR("Position"));
+
+                ImGui::RadioButton(TR("last"), &column_form_.position, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton(TR("first"), &column_form_.position, 1);
+                ImGui::SameLine();
+                ImGui::RadioButton(TR("after"), &column_form_.position, 2);
+
+                if (column_form_.position == 2) {
+                    ImGui::SetNextItemWidth(260);
+                    if (ImGui::BeginCombo(
+                            "##after",
+                            column_form_.after_index <
+                                    static_cast<int>(column_form_.existing.size())
+                                ? column_form_.existing[column_form_.after_index].c_str()
+                                : "")) {
+                        for (int i = 0;
+                             i < static_cast<int>(column_form_.existing.size()); ++i) {
+                            if (ImGui::Selectable(column_form_.existing[i].c_str(),
+                                                  column_form_.after_index == i)) {
+                                column_form_.after_index = i;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+            }
+
+            ImGui::Separator();
+
+            const bool valid = column_form_.name[0] != 0 &&
+                               column_form_.type[0] != 0;
+
+            ImGui::BeginDisabled(!valid);
+            if (ImGui::Button(TR("Review SQL"), ImVec2(140, 0))) {
+                db::NewColumn column;
+                column.name          = column_form_.name;
+                column.type_name     = column_form_.type;
+                column.nullable      = column_form_.nullable;
+                column.default_value = column_form_.default_value;
+                column.comment       = column_form_.comment;
+                column.first         = column_form_.position == 1;
+                if (column_form_.position == 2 &&
+                    column_form_.after_index <
+                        static_cast<int>(column_form_.existing.size())) {
+                    column.after = column_form_.existing[column_form_.after_index];
+                }
+
+                db::TableAlteration wanted;
+                wanted.schema = column_form_.schema;
+                wanted.table  = column_form_.table;
+                wanted.add_columns.push_back(std::move(column));
+
+                confirm_ddl(TRF("Add column %s to %s", column_form_.name,
+                                column_form_.table.c_str()),
+                            db::generate_alter(column_form_.current, wanted),
+                            column_form_.schema, column_form_.table);
+                column_form_.open = false;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (ImGui::Button(TR("Cancel"), ImVec2(120, 0))) {
+                column_form_.open = false;
+            }
+
+            if (!valid) {
+                ImGui::SameLine();
+                ImGui::TextColored(col4(p.text_dim), TR("(name and type)"));
+            }
+        }
+        ImGui::End();
+    }
+
+    // --- Renomear tabela ------------------------------------------------------
+
+    if (rename_form_.open) {
+        ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Appearing);
+        if (ImGui::Begin(TRW("Rename table", "###RenameTable"),
+                         &rename_form_.open,
+                         ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+
+            ImGui::TextColored(col4(p.text_dim), "%s.%s",
+                               rename_form_.schema.c_str(),
+                               rename_form_.table.c_str());
+            ImGui::Separator();
+
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("New name"), rename_form_.new_name,
+                             sizeof rename_form_.new_name);
+
+            ImGui::Separator();
+
+            const bool valid = rename_form_.new_name[0] != 0 &&
+                               rename_form_.new_name != rename_form_.table;
+
+            ImGui::BeginDisabled(!valid);
+            if (ImGui::Button(TR("Review SQL"), ImVec2(140, 0))) {
+                db::TableAlteration wanted;
+                wanted.schema   = rename_form_.schema;
+                wanted.table    = rename_form_.table;
+                wanted.new_name = rename_form_.new_name;
+
+                confirm_ddl(TRF("Rename %s to %s", rename_form_.table.c_str(),
+                                rename_form_.new_name),
+                            db::generate_alter(rename_form_.current, wanted),
+                            rename_form_.schema, rename_form_.table);
+                rename_form_.open = false;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (ImGui::Button(TR("Cancel"), ImVec2(120, 0))) {
+                rename_form_.open = false;
+            }
+        }
+        ImGui::End();
+    }
+}
+
+// Abre a janela de confirmação com um script já gerado.
+//
+// Ponto único por onde TODA alteração de estrutura passa. Executar direto de
+// um item de menu seria mais curto e indefensável: um `DROP TABLE` disparado
+// por um clique errado não tem desfazer (docs/DDL-WRITE.md §3).
+void MainShell::confirm_ddl(std::string title, db::AlterScript script,
+                            std::string schema, std::string table) {
+    // Guardado AQUI, e nao no run_ddl: quando a janela confirma, o menu de
+    // contexto que originou a acao ja' fechou e a referencia a' tabela nao
+    // existe mais.
+    ddl_reload_schema_ = std::move(schema);
+    ddl_reload_table_  = std::move(table);
+
+    ddl_dialog_.open(std::move(title), std::move(script),
+                     [this](const std::vector<std::string>& statements) {
+                         run_ddl(statements);
+                     });
+}
+
+// Executa o DDL confirmado e recarrega a árvore.
+//
+// Sem o recarregamento, a coluna recém-criada não apareceria até o usuário
+// mandar atualizar — e ele concluiria que o comando não funcionou, como a
+// grade fazia ao exibir o valor antigo depois de gravar.
+void MainShell::run_ddl(const std::vector<std::string>& statements) {
+    if (statements.empty()) return;
+    if (session().state() != SessionState::connected || session().busy()) return;
+
+    std::vector<std::string> script = statements;
+
+    // Em transação onde o SGBD permite: um script de três ALTERs que falha no
+    // terceiro deixaria dois aplicados. No MySQL não adianta -- cada DDL faz
+    // commit implícito --, e por isso a janela avisa em vez de prometer.
+    const bool transactional =
+        session().capabilities() && session().capabilities()->ddl_in_transaction;
+
+    if (transactional && script.size() > 1) {
+        script.insert(script.begin(), "BEGIN");
+        script.emplace_back("COMMIT");
+    }
+
+    ddl_pending_reload_ = true;
+    session().execute_script_async(std::move(script));
 }
 
 void MainShell::save_pending_edits(SqlDocument& document) {

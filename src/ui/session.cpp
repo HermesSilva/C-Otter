@@ -85,6 +85,7 @@ void Session::connect_async(const db::ConnConfig& config) {
 
         const bool sequences  = catalog->has_sequences();
         const bool user_types = catalog->has_user_types();
+        const db::Capabilities caps = holt->capabilities();
 
         std::vector<db::SchemaMeta>     schemas;
         std::vector<db::ForeignKeyMeta> keys;
@@ -130,6 +131,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         status_message_  = std::move(message);
         has_sequences_   = sequences;
         has_user_types_  = user_types;
+        capabilities_    = caps;
         state_.store(SessionState::connected, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
     });

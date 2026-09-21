@@ -46,6 +46,14 @@ void set_sql_dialect_for(std::string_view driver_id);
 // visual em 99% dos casos -- e o SQL gerado e' para o usuario ler e editar.
 [[nodiscard]] std::string quote_if_needed(std::string_view identifier);
 
+// Literal de string no dialeto corrente, para COMMENT e DEFAULT.
+//
+// A diferenca importa: o MySQL trata a barra invertida como ESCAPE por padrao,
+// ao contrario do padrao SQL. Escapar so' a aspa deixaria passar uma barra
+// invertida final, que engoliria a aspa de fechamento -- um comentario de
+// tabela vindo da UI viraria injecao.
+[[nodiscard]] std::string quote_literal(std::string_view text);
+
 // schema.tabela, com cada parte citada so' se precisar.
 [[nodiscard]] std::string qualified_name(std::string_view schema,
                                          std::string_view table);

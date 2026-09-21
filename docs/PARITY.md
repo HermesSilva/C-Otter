@@ -72,11 +72,13 @@ Distribuição dos 275 comandos por área:
 | Filtro/busca na árvore | ✅ | ✅ |
 | Menu de contexto (DDL, dados, renomear) | ✅ | ✅ exceto renomear |
 | Esconder pasta que o SGBD não tem | ✅ `visibleIf` | ✅ |
-| Criar/alterar/remover objeto | ✅ | ⬜ |
-| Gerar DDL | ✅ | ⬜ |
-| Copiar nome qualificado | ✅ | ⬜ |
+| Criar/alterar/remover objeto | ✅ | 🟡 coluna e tabela (ADR 0016) |
+| Confirmação antes de DDL destrutivo | ✅ aba Persist | ✅ |
+| Gerar DDL | ✅ | ✅ |
+| Copiar nome qualificado | ✅ | ✅ |
 | Navegar para referência (FK) | ✅ | ⬜ |
 | Arrastar tabela para o editor | ✅ | ⬜ |
+| Renomear objeto | ✅ | 🟡 tabela |
 
 ## 3. Editor SQL (63 comandos no DBeaver)
 

@@ -8,6 +8,7 @@
 // adiante, entao o header entra aqui.
 #include "TextEditor.h"
 
+#include "db/alter.hpp"
 #include "db/holt.hpp"
 #include "db/connection_store.hpp"
 #include "db/export.hpp"
@@ -16,6 +17,7 @@
 #include "sql/dialect.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
+#include "ui/ddl_dialog.hpp"
 #include "ui/icons.hpp"
 #include "ui/session.hpp"
 #include "ui/sql_document.hpp"
@@ -107,6 +109,21 @@ private:
 
     // Grava as alteracoes pendentes, em transacao.
     void save_pending_edits(SqlDocument& document);
+
+    // --- DDL de escrita (docs/DDL-WRITE.md) ----------------------------------
+    //
+    // Ponto UNICO por onde toda alteracao de estrutura passa: mostra o SQL e
+    // pede confirmacao antes de executar. DDL nao tem desfazer.
+    void confirm_ddl(std::string title, db::AlterScript script,
+                     std::string schema, std::string table);
+    void run_ddl(const std::vector<std::string>& statements);
+
+    // Formularios de coluna nova e de renomear. Desenhados fora do menu de
+    // contexto: um menu se fecha ao primeiro clique fora dele, e um
+    // formulario precisa sobreviver a varios.
+    void open_add_column(const std::string& schema, const db::TableMeta& table);
+    void open_rename_table(const std::string& schema, const db::TableMeta& table);
+    void draw_ddl_forms();
 
     // --- Agrupamento e totais (ADR 0005) -------------------------------------
     //
@@ -201,6 +218,48 @@ private:
 
     // Assistente de conexao completo (abas Principal/PostgreSQL/SSH/SSL/...).
     ConnectionDialog connection_dialog_;
+
+    // Confirmacao de DDL. Uma so' para o programa inteiro: duas janelas de
+    // confirmacao abertas ao mesmo tempo seriam um convite a confirmar a
+    // errada.
+    DdlDialog        ddl_dialog_;
+
+    // A arvore precisa ser relida depois de um DDL: sem isso a coluna nova
+    // nao apareceria ate' o usuario mandar atualizar, e ele concluiria que o
+    // comando nao funcionou.
+    bool             ddl_pending_reload_ = false;
+    std::string      ddl_reload_schema_;
+    std::string      ddl_reload_table_;
+
+    // Estado dos formularios. `current` guarda a tabela COMO ESTA': no MySQL,
+    // MODIFY COLUMN exige a definicao inteira, e gerar o ALTER sem ela
+    // apagaria atributos.
+    struct ColumnForm {
+        bool        open = false;
+        std::string schema;
+        std::string table;
+        db::TableMeta current;
+        std::vector<std::string> existing;
+
+        char name[128]          = {};
+        char type[128]          = {};
+        char default_value[256] = {};
+        char comment[256]       = {};
+        bool nullable = true;
+
+        int  position = 0;      // 0 = fim, 1 = FIRST, 2 = AFTER
+        int  after_index = 0;
+    };
+    ColumnForm column_form_;
+
+    struct RenameForm {
+        bool        open = false;
+        std::string schema;
+        std::string table;
+        db::TableMeta current;
+        char        new_name[128] = {};
+    };
+    RenameForm rename_form_;
 
     // Perfil da conexao ativa, para a UI exibir nome, tipo e cor.
     db::ConnectionProfile active_profile_;

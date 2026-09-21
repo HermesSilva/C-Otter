@@ -98,6 +98,14 @@ public:
     // uma, e manda o usuario procurar o que nao existe.
     [[nodiscard]] bool has_sequences() const noexcept { return has_sequences_; }
     [[nodiscard]] bool has_user_types() const noexcept { return has_user_types_; }
+
+    // O que o driver suporta. Vazio enquanto nao ha' conexao.
+    //
+    // Guardado em vez de perguntado ao Holt a cada quadro: o Holt vive atras
+    // do mutex, e a UI consulta isto em varios pontos por quadro.
+    [[nodiscard]] const std::optional<db::Capabilities>& capabilities() const noexcept {
+        return capabilities_;
+    }
     [[nodiscard]] std::vector<db::SchemaMeta> schemas() const;
     [[nodiscard]] std::vector<db::ForeignKeyMeta> foreign_keys() const;
     [[nodiscard]] std::optional<db::ResultSet> take_result();
@@ -184,6 +192,8 @@ private:
     // criar um leitor de catalogo em cada um seria desperdicio.
     bool has_sequences_  = true;
     bool has_user_types_ = true;
+
+    std::optional<db::Capabilities> capabilities_;
 
     std::vector<db::SchemaMeta>     schemas_;
     std::vector<db::ForeignKeyMeta> foreign_keys_;

@@ -17,6 +17,7 @@ otter_add_library(otter_db
         export.cpp
         plan.cpp
         drivers/mysql.cpp
+        alter.cpp
         catalog_mysql.cpp
         catalog_reader.cpp
         registry.cpp

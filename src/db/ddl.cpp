@@ -149,6 +149,33 @@ std::string quote_if_needed(std::string_view identifier) {
     return out;
 }
 
+std::string quote_literal(std::string_view text) {
+    constexpr char kQuote     = '\'';
+    constexpr char kBackslash = '\\';
+
+    std::string out;
+    out.reserve(text.size() + 2);
+    out.push_back(kQuote);
+
+    // O MySQL trata a barra invertida como escape por padrao (NO_BACKSLASH_
+    // ESCAPES vem desligado); o padrao SQL, nao. Dobrar a barra no dialeto
+    // errado produziria um texto com barras a mais -- visivel, mas errado --,
+    // e NAO dobrar no MySQL abriria caminho para injecao: um comentario
+    // terminado em `\` engoliria a aspa de fechamento.
+    const bool escapes_backslash = g_dialect == QuoteStyle::backticks;
+
+    for (const char c : text) {
+        if (c == kQuote) {
+            out.push_back(kQuote);
+        } else if (c == kBackslash && escapes_backslash) {
+            out.push_back(kBackslash);
+        }
+        out.push_back(c);
+    }
+    out.push_back(kQuote);
+    return out;
+}
+
 std::string qualified_name(std::string_view schema, std::string_view table) {
     if (schema.empty()) return quote_if_needed(table);
     return quote_if_needed(schema) + "." + quote_if_needed(table);

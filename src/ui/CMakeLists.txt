@@ -11,6 +11,7 @@ otter_add_library(otter_ui
         icons.cpp
         main_shell.cpp
         connection_dialog.cpp
+        ddl_dialog.cpp
         sql_document.cpp
         session.cpp
         app_window_glfw.cpp

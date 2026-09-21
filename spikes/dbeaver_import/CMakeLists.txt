@@ -24,3 +24,9 @@ set_target_properties(spike_check_store PROPERTIES FOLDER "spikes")
 add_executable(spike_qq qq.cpp)
 target_link_libraries(spike_qq PRIVATE otter_flags otter::otter_base otter::otter_db)
 set_target_properties(spike_qq PROPERTIES FOLDER "spikes")
+
+# Aplica um ALTER gerado contra o MySQL real: o teste unitario compara
+# strings, este confere o EFEITO no servidor.
+add_executable(spike_alter_live alter_live.cpp)
+target_link_libraries(spike_alter_live PRIVATE otter_flags otter::otter_base otter::otter_db)
+set_target_properties(spike_alter_live PROPERTIES FOLDER "spikes")
