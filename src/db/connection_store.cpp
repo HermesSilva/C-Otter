@@ -204,6 +204,16 @@ StoredProfile profile_from_json(const std::string& id,
             ed["auto-insert-single"].as_bool(defaults.auto_insert_single);
         editor.complete_delay_ms = static_cast<int>(
             ed["complete-delay-ms"].as_number(defaults.complete_delay_ms));
+
+        editor.tab_size = static_cast<int>(
+            ed["tab-size"].as_number(defaults.tab_size));
+        editor.show_line_numbers =
+            ed["show-line-numbers"].as_bool(defaults.show_line_numbers);
+        editor.auto_indent = ed["auto-indent"].as_bool(defaults.auto_indent);
+        editor.show_matching_brackets =
+            ed["show-matching-brackets"].as_bool(defaults.show_matching_brackets);
+        editor.show_whitespace =
+            ed["show-whitespace"].as_bool(defaults.show_whitespace);
     }
 
     const json::Value& config = node["configuration"];
@@ -412,6 +422,22 @@ json::Value profile_to_json(const StoredProfile& stored) {
         if (editor.complete_delay_ms != defaults.complete_delay_ms) {
             ed["complete-delay-ms"] = json::Value(
                 static_cast<double>(editor.complete_delay_ms));
+        }
+        if (editor.tab_size != defaults.tab_size) {
+            ed["tab-size"] = json::Value(static_cast<double>(editor.tab_size));
+        }
+        if (editor.show_line_numbers != defaults.show_line_numbers) {
+            ed["show-line-numbers"] = json::Value(editor.show_line_numbers);
+        }
+        if (editor.auto_indent != defaults.auto_indent) {
+            ed["auto-indent"] = json::Value(editor.auto_indent);
+        }
+        if (editor.show_matching_brackets != defaults.show_matching_brackets) {
+            ed["show-matching-brackets"] =
+                json::Value(editor.show_matching_brackets);
+        }
+        if (editor.show_whitespace != defaults.show_whitespace) {
+            ed["show-whitespace"] = json::Value(editor.show_whitespace);
         }
 
         if (!ed.empty()) node["otter-editor"] = json::Value(std::move(ed));

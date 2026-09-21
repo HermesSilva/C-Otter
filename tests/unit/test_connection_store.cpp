@@ -457,6 +457,11 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     stored.profile.editor.complete_in_strings  = true;
     stored.profile.editor.auto_insert_single   = true;
     stored.profile.editor.complete_delay_ms    = 500;
+    stored.profile.editor.tab_size             = 8;
+    stored.profile.editor.show_line_numbers    = false;
+    stored.profile.editor.auto_indent          = false;
+    stored.profile.editor.show_matching_brackets = false;
+    stored.profile.editor.show_whitespace      = true;
 
     OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
 
@@ -474,6 +479,11 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     OTTER_CHECK(e.complete_in_strings);
     OTTER_CHECK(e.auto_insert_single);
     OTTER_CHECK_EQ(e.complete_delay_ms, 500);
+    OTTER_CHECK_EQ(e.tab_size, 8);
+    OTTER_CHECK(!e.show_line_numbers);
+    OTTER_CHECK(!e.auto_indent);
+    OTTER_CHECK(!e.show_matching_brackets);
+    OTTER_CHECK(e.show_whitespace);
 }
 
 OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
@@ -500,4 +510,7 @@ OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
     OTTER_CHECK_EQ(e.indent_width, defaults.indent_width);
     OTTER_CHECK_EQ(e.river_style, defaults.river_style);
     OTTER_CHECK_EQ(e.complete_delay_ms, defaults.complete_delay_ms);
+    OTTER_CHECK_EQ(e.tab_size, defaults.tab_size);
+    OTTER_CHECK_EQ(e.show_line_numbers, defaults.show_line_numbers);
+    OTTER_CHECK_EQ(e.auto_indent, defaults.auto_indent);
 }

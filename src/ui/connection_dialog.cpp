@@ -460,9 +460,7 @@ void ConnectionDialog::draw_page_body() {
         draw_page_placeholder("SQL editor defaults for this connection");
         break;
     case Page::sql_completion:    draw_page_sql_completion();   break;
-    case Page::sql_code_editor:
-        draw_page_placeholder("Code editor behaviour for this connection");
-        break;
+    case Page::sql_code_editor:   draw_page_sql_code_editor();  break;
     case Page::sql_formatting:    draw_page_sql_formatting();   break;
     case Page::sql_processing:
         draw_page_placeholder("Statement delimiters and execution options");
@@ -513,6 +511,50 @@ void ConnectionDialog::draw_page_sql_formatting() {
     help_marker(TR("One column per line when the list has more items than "
                    "this. Short lists fit on one line and read better that "
                    "way."));
+}
+
+// Editor de codigo, por conexao (main.sql.codeeditor).
+//
+// Espelha TextEditor::config, que ja' tinha estas opcoes com os valores
+// fixos em MainShell.
+void ConnectionDialog::draw_page_sql_code_editor() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Indentation"));
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputInt(TR("Tab size"), &editor.tab_size, 1, 2);
+    editor.tab_size = std::clamp(editor.tab_size, 1, 16);
+    help_marker(TR("How many columns a tab takes ON SCREEN. It does not "
+                   "change what is written to the file."));
+
+    ImGui::Checkbox(TR("Auto-indent"), &editor.auto_indent);
+    help_marker(TR("A new line starts at the same indentation as the "
+                   "previous one."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Display"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Line numbers"), &editor.show_line_numbers);
+    ImGui::Checkbox(TR("Matching brackets"), &editor.show_matching_brackets);
+    help_marker(TR("Highlights the pair of the bracket under the cursor. "
+                   "Turning it off also turns off block folding, which "
+                   "depends on it."));
+
+    // Desabilitada: a opcao chega ao TextEditor (confirmado com trace --
+    // SetShowWhitespacesEnabled(true) e' chamada a cada quadro), mas os
+    // pontos nao sao desenhados. O defeito esta' no widget de terceiro, e a
+    // caixa ligada seria um campo que finge funcionar (diretriz 6).
+    ImGui::BeginDisabled(true);
+    ImGui::Checkbox(TR("Show whitespace"), &editor.show_whitespace);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextColored(col4(colors().warn), "%s", TR("(not working yet)"));
+    help_marker(TR("Draws spaces and tabs. The option reaches the editor but "
+                   "nothing is drawn -- a defect in the text widget, not in "
+                   "the setting."));
 }
 
 // Completar codigo, por conexao (main.sql.completion).

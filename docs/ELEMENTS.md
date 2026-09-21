@@ -121,7 +121,9 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | **Editor de dados** | Editor binário, Formatos de dados, Grade | ⬜ **avisado na tela** |
 | **Editor SQL** → **Formatação** | Caixa das palavras-chave, indentação, estilo rio, quebra do SELECT | ✅ alimenta o Ctrl+Shift+F |
 | **Editor SQL** → **Completar código** | Sugerir ao digitar, atraso, em comentários/strings, inserir único | ✅ alimenta o popup |
-| **Editor SQL** → Editor de código, Processamento SQL | — | ⬜ **avisado na tela** |
+| **Editor SQL** → **Editor de código** | Tab, indentar sozinho, números de linha, parênteses | ✅ alimenta o TextEditor |
+| | Mostrar espaços | ❌ chega ao editor, nada é desenhado — **desabilitado na tela**, com o motivo |
+| **Editor SQL** → Processamento SQL | — | ⬜ **avisado na tela** |
 
 As abas de rede continuam existindo, com o mesmo conteúdo de antes:
 
@@ -428,6 +430,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 
 | 4 | Raft | As conexões abertas não são restauradas ao reiniciar — só a última volta preenchida no diálogo |
 | 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
+| 5 | Editor | **"Mostrar espaços" não desenha nada.** `SetShowWhitespacesEnabled(true)` é chamada a cada quadro (confirmado com trace), e `TextEditor.cpp:629` tem o código do desenho — mas os pontos não aparecem, nem depois de corrigir a cor. A caixa fica **desabilitada na tela**, com o motivo, em vez de fingir que funciona |
 
 ### Corrigidos
 
@@ -467,7 +470,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
-| Assistente de conexão | 43 | 1 | 9 | 0 | 53 |
+| Assistente de conexão | 44 | 1 | 9 | 1 | 55 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 55 | 3 | 3 | 0 | 61 |
@@ -475,9 +478,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **261** | **7** | **15** | **0** | **283** |
+| **Total** | **262** | **7** | **15** | **1** | **285** |
 
-**261 de 283 elementos existentes funcionam.**
+**262 de 285 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

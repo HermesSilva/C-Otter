@@ -122,6 +122,16 @@ struct EditorOptions {
     bool complete_in_strings     = false;
     bool auto_insert_single      = false;
     int  complete_delay_ms       = 200;
+
+    // --- Editor de codigo (main.sql.codeeditor) ---
+    //
+    // Espelham TextEditor::config. Os padroes sao os que o editor ja' usava
+    // com os valores fixos em MainShell.
+    int  tab_size                = 4;
+    bool show_line_numbers       = true;
+    bool auto_indent             = true;
+    bool show_matching_brackets  = true;
+    bool show_whitespace         = false;
 };
 
 struct ConnectionProfile {

@@ -112,7 +112,15 @@ void apply_editor_palette(TextEditor& editor) {
     set(Color::comment,         t.syntax_comment);
     set(Color::cursor,          t.data_light);
     set(Color::selection,       with_alpha(t.data, 0.31f));
-    set(Color::whitespace,      t.bg_light);
+    // Espaco e tabulacao: discretos, mas VISIVEIS.
+    //
+    // Era `bg_light`, que no tema claro e' branco puro -- os pontos eram
+    // desenhados sobre fundo branco e sumiam. "Mostrar espaços" parecia nao
+    // funcionar; funcionava, e a cor e' que era invisivel.
+    //
+    // `text_dim` com alfa da' a discricao pretendida sem depender do fundo:
+    // ele ja' e' escolhido por tema para contrastar com ele.
+    set(Color::whitespace,      with_alpha(t.text_dim, 0.55f));
     set(Color::lineNumber,      t.text_dim);
     set(Color::currentLineNumber, t.accent_light);
     set(Color::currentLineHighlight,       with_alpha(t.accent, 0.09f));
@@ -171,6 +179,40 @@ MainShell::MainShell()
     connection_dialog_.set_on_save([this](const db::ConnectionProfile& profile) {
         active_profile_ = profile;
         remember_profile(profile);
+
+        // A conexao ABERTA tambem recebe o perfil novo.
+        //
+        // Sem isto, editar uma conexao viva gravava em disco e nao mudava
+        // nada na tela: as preferencias do editor sao lidas de
+        // Connection::profile, que continuava com os valores antigos ate' a
+        // proxima execucao. O usuario ligava "mostrar espacos", clicava OK,
+        // e o editor seguia igual.
+        //
+        // Mesmo criterio de remember_profile: driver + host + porta + banco
+        // + usuario. O `id` nao serve -- uma conexao aberta pelo dialogo de
+        // "nova conexao" ainda nao tem id atribuido.
+        bool matched = false;
+        for (Connection& connection : connections_) {
+            if (connection.profile.driver_id == profile.driver_id &&
+                connection.profile.host == profile.host &&
+                connection.profile.port == profile.port &&
+                connection.profile.database == profile.database &&
+                connection.profile.user == profile.user) {
+                connection.profile = profile;
+                matched = true;
+            }
+        }
+
+        // Nenhuma conexao aberta corresponde -- e' o caso de editar um
+        // perfil salvo, ou de ajustar as preferencias ANTES de conectar.
+        //
+        // A Session vazia (a que existe antes da primeira conexao) recebe o
+        // perfil mesmo assim: e' dela que o editor visivel le' as opcoes, e
+        // sem isto ligar "mostrar espacos" nao mudava nada ate' conectar.
+        if (!matched && connections_.size() == 1 &&
+            connections_.front().session->state() == SessionState::disconnected) {
+            connections_.front().profile = profile;
+        }
     });
 
     // Conexoes salvas na execucao anterior (ADR 0012).
@@ -413,11 +455,22 @@ SqlDocument* MainShell::active_document() {
 // A cada quadro, e nao uma vez: a AutoCompleteConfig e' compartilhada por
 // todos os editores, e trocar de aba precisa trocar as opcoes junto -- senao
 // a aba do banco legado herdaria as do novo.
-void MainShell::apply_completion_options(const SqlDocument& document) {
+void MainShell::apply_completion_options(SqlDocument& document) {
     const Connection* owner = connection_by_id(document.connection_id());
     if (owner == nullptr) return;
 
     const db::EditorOptions& editor = owner->profile.editor;
+
+    // Opcoes do editor de texto, aplicadas ao TextEditor DESTE documento --
+    // cada aba tem o seu, ao contrario da AutoCompleteConfig, que e'
+    // compartilhada.
+    TextEditor& text = document.editor();
+    text.SetTabSize(static_cast<std::size_t>(editor.tab_size));
+    text.SetAutoIndentEnabled(editor.auto_indent);
+    text.SetShowLineNumbersEnabled(editor.show_line_numbers);
+    text.SetShowMatchingBrackets(editor.show_matching_brackets);
+    text.SetShowWhitespacesEnabled(editor.show_whitespace);
+
     autocomplete_config_->triggerOnTyping   = editor.complete_on_typing;
     autocomplete_config_->triggerInComments = editor.complete_in_comments;
     autocomplete_config_->triggerInStrings  = editor.complete_in_strings;

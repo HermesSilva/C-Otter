@@ -42,9 +42,10 @@ public:
     void suggest(TextEditor::AutoCompleteState& state);
 
 private:
-    // Aplica ao editor as preferencias de completar codigo da conexao do
-    // documento. A config e' compartilhada, entao vale a cada quadro.
-    void apply_completion_options(const SqlDocument& document);
+    // Aplica ao editor as preferencias da conexao do documento -- editor de
+    // codigo e completar. A AutoCompleteConfig e' compartilhada por todos os
+    // editores, entao vale a cada quadro.
+    void apply_completion_options(SqlDocument& document);
 
 public:
 

@@ -853,6 +853,30 @@ const char* const kPtBr[] = {
     "keystroke, but surprises when the single match is not what you meant.",
         "Com um candidato só, insere sem mostrar a lista. Economiza uma "
         "tecla, mas surpreende quando o único achado não era o pretendido.",
+
+    // --- Pagina Editor de código (main.sql.codeeditor) ---
+    "Indentation",                "Indentação",
+    "Tab size",                   "Tamanho da tabulação",
+    "How many columns a tab takes ON SCREEN. It does not change what is "
+    "written to the file.",
+        "Quantas colunas uma tabulação ocupa NA TELA. Não muda o que é "
+        "gravado no arquivo.",
+    "Auto-indent",                "Indentar sozinho",
+    "A new line starts at the same indentation as the previous one.",
+        "A linha nova começa na mesma indentação da anterior.",
+    "Display",                    "Exibição",
+    "Line numbers",               "Números de linha",
+    "Matching brackets",          "Parênteses correspondentes",
+    "Highlights the pair of the bracket under the cursor. Turning it off "
+    "also turns off block folding, which depends on it.",
+        "Realça o par do parêntese sob o cursor. Desligar também desliga a "
+        "dobra de blocos, que depende dele.",
+    "Show whitespace",            "Mostrar espaços",
+    "(not working yet)",          "(ainda não funciona)",
+    "Draws spaces and tabs. The option reaches the editor but nothing is "
+    "drawn -- a defect in the text widget, not in the setting.",
+        "Desenha espaços e tabulações. A opção chega ao editor mas nada é "
+        "desenhado — defeito no widget de texto, não na configuração.",
 };
 
 } // namespace
