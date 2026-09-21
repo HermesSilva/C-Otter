@@ -84,6 +84,7 @@ const char* const kPtBr[] = {
     "Set NULL",                   "Definir NULL",
     "Delete row",                 "Excluir linha",
     "Undo delete",                "Desfazer exclusão",
+    "Duplicate row",             "Duplicar linha",
     "New row",                    "Nova linha",
     "Remove row",                 "Remover linha",
     "(default)",                  "(padrão)",

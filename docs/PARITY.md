@@ -122,7 +122,7 @@ Distribuição dos 275 comandos por área:
 | `[null]` distinto de string vazia | ✅ | ✅ |
 | Ordenar clicando no cabeçalho | ✅ | ✅ no servidor (ADR 0011) |
 | Editar célula | ✅ | ✅ ADR 0014 |
-| Inserir/duplicar/excluir linha | ✅ | 🟡 excluir sim; inserir e duplicar não |
+| Inserir/duplicar/excluir linha | ✅ | ✅ |
 | Salvar alterações | ✅ | ✅ em transação |
 | Filtro por coluna | ✅ | ✅ no servidor |
 | Visão de registro único | ✅ | ⬜ |

@@ -3033,6 +3033,56 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         if (ImGui::MenuItem(TR("New row"))) {
             document.edits().add_row();
         }
+
+        // Duplicar: linha nova com os valores DESTA, exceto a chave primária.
+        //
+        // Copiar a PK junto produziria um INSERT que viola a unicidade -- e o
+        // erro viria do servidor, depois de o usuário já ter preenchido o
+        // resto. Deixar a chave em branco é o que torna a duplicação útil numa
+        // tabela com id auto-gerado, que é o caso comum.
+        const bool duplicated = ImGui::MenuItem(TR("Duplicate row"));
+
+        // A duplicação copia só o que está NA TELA. Uma coluna NOT NULL sem
+        // default que ficou fora do SELECT faz o INSERT ser recusado -- com
+        // uma mensagem do servidor que nomeia a coluna, mas só depois de
+        // clicar em salvar. Dizer antes economiza a viagem.
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s",
+                              TR("copies the visible columns, except the key; "
+                                 "a NOT NULL column left out of the query will "
+                                 "be refused"));
+        }
+
+        if (duplicated) {
+            const std::size_t index = document.edits().add_row();
+
+            const auto& keys = document.edit_target().key_columns;
+
+            for (std::size_t c = 0; c < rs.column_count(); ++c) {
+                // A chave fica vazia. A fonte é `key_columns` do alvo de
+                // edição -- índices no ResultSet --, e não o `primary_key` da
+                // coluna: o resultado pode vir de um SELECT que não trouxe
+                // essa informação.
+                if (std::find(keys.begin(), keys.end(), c) != keys.end()) {
+                    continue;
+                }
+
+                // O valor copiado é o do BUFFER quando há edição pendente:
+                // duplicar deve copiar o que está na tela, não o que está no
+                // banco.
+                const db::CellEdit* pending = document.edits().find(row, c);
+
+                if (pending != nullptr) {
+                    if (pending->is_null) document.edits().set_new_null(index, c);
+                    else document.edits().set_new_value(index, c, pending->value);
+                } else if (rs.is_null(row, c)) {
+                    document.edits().set_new_null(index, c);
+                } else {
+                    document.edits().set_new_value(index, c,
+                                                   std::string(rs.text(row, c)));
+                }
+            }
+        }
         ImGui::EndPopup();
     }
     ImGui::PopID();
