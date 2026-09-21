@@ -5,10 +5,12 @@
 // com dados sinteticos -- o objetivo e' fixar o layout e o tema.
 #pragma once
 
+// TextEditor::AutoCompleteState e' tipo aninhado: nao ha' como declara-lo
+// adiante, entao o header entra aqui.
+#include "TextEditor.h"
+
 #include <cstddef>
 #include <memory>
-
-class TextEditor;
 
 namespace otter::ui {
 
@@ -16,6 +18,10 @@ class MainShell {
 public:
     MainShell();
     ~MainShell();
+
+    // Publico porque o callback de autocomplete e' uma lambda sem captura que
+    // recupera este objeto via state.userData.
+    void suggest(TextEditor::AutoCompleteState& state);
 
     // Desenha um frame inteiro da aplicacao.
     void draw();
@@ -33,6 +39,7 @@ private:
     void draw_about_window();
 
     std::unique_ptr<TextEditor> editor_;
+    std::unique_ptr<TextEditor::AutoCompleteConfig> autocomplete_config_;
     std::size_t save_point_ = 0;   // indice de undo do ultimo save
 
     bool layout_initialized_ = false;

@@ -6,6 +6,8 @@
 
 #include "TextEditor.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -81,6 +83,31 @@ constexpr float kStatusBarHeight = 26.0f;
 
 ImU32 col(std::uint32_t c) { return static_cast<ImU32>(c); }
 
+std::string to_lower(std::string text) {
+    for (char& c : text) {
+        c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+    }
+    return text;
+}
+
+// Casamento por subsequencia: "cliid" casa "cliente_id".
+bool fuzzy_subsequence(std::string_view needle, std::string_view haystack) {
+    std::size_t i = 0;
+    for (char c : haystack) {
+        if (i < needle.size() && c == needle[i]) ++i;
+    }
+    return i == needle.size();
+}
+
+// Espacos ate' a coluna `width`. Como a fonte e' monoespacada, isto alinha o
+// tipo e a marca PK numa coluna propria dentro do popup, que so' aceita texto
+// puro (ver ADR 0004, secao de viabilidade).
+std::string pad_to(std::string_view text, std::size_t width) {
+    return text.size() >= width ? std::string(1, ' ')
+                                : std::string(width - text.size(), ' ');
+}
+
 // Tema da lontra aplicado ao editor: as cores vem da mesma paleta do logo que
 // o resto da UI, para que o painel de SQL nao pareca um corpo estranho.
 void apply_editor_palette(TextEditor& editor) {
@@ -120,7 +147,9 @@ void apply_editor_palette(TextEditor& editor) {
 
 } // namespace
 
-MainShell::MainShell() : editor_(std::make_unique<TextEditor>()) {
+MainShell::MainShell()
+    : editor_(std::make_unique<TextEditor>()),
+      autocomplete_config_(std::make_unique<TextEditor::AutoCompleteConfig>()) {
     editor_->SetLanguage(TextEditor::Language::Sql());
     editor_->SetText(std::string(kSampleSql));
     editor_->SetShowWhitespacesEnabled(false);
@@ -129,9 +158,96 @@ MainShell::MainShell() : editor_(std::make_unique<TextEditor>()) {
     editor_->SetTabSize(4);
 
     apply_editor_palette(*editor_);
+
+    // Completion (ADR 0004). O widget cuida de trigger, popup e insercao com
+    // undo; QUAIS sugestoes e em QUE ordem e' inteiramente nosso -- por isso as
+    // seis camadas do ADR cabem aqui.
+    autocomplete_config_->triggerOnTyping    = true;
+    autocomplete_config_->triggerInComments  = false;
+    autocomplete_config_->triggerInStrings   = false;
+    autocomplete_config_->suggestionWidth    = 44;
+    autocomplete_config_->noSuggestionsLabel = "sem sugestões";
+    autocomplete_config_->userData           = this;
+    autocomplete_config_->callback = [](TextEditor::AutoCompleteState& state) {
+        auto* shell = static_cast<MainShell*>(state.userData);
+        shell->suggest(state);
+    };
+
+    editor_->SetAutoCompleteConfig(autocomplete_config_.get());
 }
 
 MainShell::~MainShell() = default;
+
+// Gera sugestoes de completion (ADR 0004).
+//
+// Demonstra as camadas 1-3 e o ranking contextual sobre metadados sinteticos.
+// Nas fases 1-2 o otter_sql fornece o escopo sintatico real e o Pocket Rock os
+// metadados; a forma do codigo nao muda -- so' a fonte dos dados.
+void MainShell::suggest(TextEditor::AutoCompleteState& state) {
+    // Candidato com peso: o editor NAO reordena, a ordem e' nossa (ADR 0004 §4).
+    struct Candidate {
+        std::string text;
+        int         rank;   // menor = melhor
+    };
+    std::vector<Candidate> candidates;
+
+    const std::string term = to_lower(state.searchTerm);
+
+    // Aceita prefixo ou subsequencia: "cliid" casa "cliente_id".
+    auto matches = [&term](std::string_view name) {
+        if (term.empty()) return true;
+        const std::string lowered = to_lower(std::string(name));
+        if (lowered.starts_with(term)) return true;
+        return fuzzy_subsequence(term, lowered);
+    };
+
+    auto add = [&](std::string text, int rank) {
+        if (matches(text)) candidates.push_back({std::move(text), rank});
+    };
+
+    // Descobre quais tabelas a query menciona -- colunas delas valem mais.
+    const std::string sql = to_lower(editor_->GetText());
+    auto mentioned = [&sql](std::string_view table) {
+        return sql.find(table) != std::string::npos;
+    };
+
+    // Camada 3 -- metadados. Colunas primeiro: sao o que mais se digita.
+    for (const FakeTable& table : sample_tables()) {
+        const bool in_query = mentioned(table.name);
+
+        for (const FakeColumn& column : table.columns) {
+            // Rank 0: coluna de tabela ja' citada na query (o caso mais util).
+            // Rank 2: coluna de qualquer outra tabela do schema.
+            int rank = in_query ? 0 : 2;
+            if (column.pk) rank -= 1;         // chaves sobem
+            add(std::string(column.name) + pad_to(column.name, 22) +
+                    column.type + (column.pk ? "  PK" : ""),
+                rank);
+        }
+        add(std::string(table.name) + pad_to(table.name, 22) + "tabela",
+            in_query ? 1 : 3);
+    }
+
+    // Camada 1 -- keywords do dialeto, por ultimo: sao as mais previsiveis.
+    static const char* const kKeywords[] = {
+        "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING",
+        "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "ON",
+        "INSERT INTO", "UPDATE", "DELETE FROM", "VALUES", "SET",
+        "COUNT", "SUM", "AVG", "MIN", "MAX", "DISTINCT", "AS",
+        "LIMIT", "OFFSET", "CASE", "WHEN", "THEN", "ELSE", "END",
+    };
+    for (const char* keyword : kKeywords) add(keyword, 5);
+
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const Candidate& a, const Candidate& b) {
+                         if (a.rank != b.rank) return a.rank < b.rank;
+                         return a.text < b.text;
+                     });
+
+    state.suggestions.clear();
+    state.suggestions.reserve(candidates.size());
+    for (Candidate& c : candidates) state.suggestions.push_back(std::move(c.text));
+}
 
 void MainShell::draw() {
     // A barra de menu primeiro: ela reduz o WorkSize do viewport, e o dockspace

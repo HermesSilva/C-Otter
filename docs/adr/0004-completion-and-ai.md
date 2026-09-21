@@ -138,6 +138,96 @@ A economia do Scintilla (−400 h/h) é absorvida e ultrapassada pelo completion
 **Isto é uma escolha de produto, não um estouro:** completion soberbo é o que diferencia o
 C-Otter de um cliente SQL genérico, e custa ~600 h/h a mais que o plano original.
 
+## Viabilidade sobre o ImGuiColorTextEdit (verificada em 2026-09-21)
+
+Após o ADR 0007 trocar Scintilla por ImGuiColorTextEdit, a pergunta obrigatória é se o
+widget sustenta o completion prometido aqui. **Sustenta as camadas 1–5 por inteiro**, com
+uma limitação na apresentação.
+
+### O que a API entrega
+
+```cpp
+struct AutoCompleteState {
+    std::string searchTerm;                 // prefixo digitado
+    DocPos      searchTermStart, searchTermEnd;
+    bool        inIdentifier, inNumber, inComment, inString;
+    const Language* language;
+    void*       userData;                   // ponteiro para o nosso contexto
+    std::vector<std::string> suggestions;   // preenchido por nos, na nossa ordem
+    bool        suggestionsPromise;         // permite resposta assincrona
+};
+```
+
+| Requisito do ADR | Suportado | Como |
+|---|---|---|
+| Camadas 1–5 (keywords → histórico) | **Sim** | Callback próprio decide tudo |
+| **Ranking contextual próprio** | **Sim** | *"the app is responsible for sorting"* — o editor não reordena |
+| Fuzzy matching (`cliid` → `cliente_id`) | **Sim** | Nós filtramos; `searchTerm` é só o prefixo bruto |
+| Não sugerir dentro de comentário/string | **Sim** | `triggerInComments`/`triggerInStrings`, `false` por padrão |
+| Orçamento de latência < 16 ms | **Sim** | `triggerDelay` (200 ms) + callback no render |
+| **Camada 6 (IA), assíncrona** | **Sim** | `suggestionsPromise=true` + `SetAutoCompleteSuggestions()` de outra thread |
+| Undo/redo da inserção | **Sim** | Tratado pelo editor |
+| Diagnósticos inline (erro de sintaxe) | **Sim** | API de `squiggle` e marcadores |
+
+O ponto decisivo é que **o editor não impõe política**: ele cuida de trigger, popup,
+navegação por teclado e inserção com undo; *quais* sugestões e em *que ordem* é 100% nosso.
+É exatamente a divisão de responsabilidade que o completion em camadas exige.
+
+`suggestionsPromise` merece destaque: resolve o problema difícil da camada 6. A UI não
+congela esperando o LLM — o popup permanece aberto e as sugestões chegam depois, de um
+worker.
+
+### A limitação real
+
+**`suggestions` é `std::vector<std::string>` — texto puro.** O popup não suporta, de fábrica:
+
+- Ícone por tipo (tabela, coluna, função, keyword)
+- Cor por categoria
+- Painel de detalhe ao lado (comentário da coluna, assinatura da função)
+- Marcação visual de sugestão vinda de IA (exigida pela §5 deste ADR)
+
+> **Corrigido após o protótipo.** Eu havia listado também "destaque dos caracteres casados"
+> como ausente. **O widget já faz isso**: digitando `cat`, o popup mostra `cat`ches com o
+> prefixo casado realçado. Verificado na captura `docs/autocomplete.png`.
+
+Um completion de fato soberbo mostra *por que* cada item está ali. Só o nome não basta.
+
+### Mitigações, em ordem de custo
+
+1. **Formatação no texto** (0 h/h) — `"cliente_id          int4  PK"`. Funciona porque a
+   fonte é monoespaçada. Resolve o essencial, mas sem cor nem ícone.
+2. **Popup próprio** (~60 h/h) — `SetAutoCompleteConfig(nullptr)` e implementamos trigger e
+   popup por cima da API de cursor e posição. Liberdade total; perdemos a inserção com
+   undo pronta.
+3. **Patch no widget** (~40 h/h + manutenção) — estender `suggestions` para uma struct com
+   ícone e detalhe, e manter o fork. MIT permite; custa divergir do upstream.
+
+**Decisão:** começar por (1) na Fase 2, medir com uso real, e escalar para (2) se a
+apresentação se mostrar insuficiente. A fronteira `SqlEditor` do ADR 0003 mantém essa troca
+localizada.
+
+### Protótipo validado (2026-09-21)
+
+Implementado em `MainShell::suggest()` e verificado com a aplicação rodando:
+
+- **Camadas 1 e 3** ativas: keywords do dialeto e metadados (tabelas e colunas)
+- **Ranking contextual** funcionando: colunas de tabelas já citadas na query vêm primeiro
+  (rank 0), chaves primárias sobem, keywords ficam por último (rank 5)
+- **Fuzzy por subsequência**: `cliid` casa `cliente_id`
+- **Alinhamento monoespaçado**: `catches              tabela` — mitigação (1) em uso
+- **Destaque do prefixo casado** pelo próprio widget
+- 143,8 fps com o popup aberto
+
+Confirma que o ImGuiColorTextEdit sustenta o completion deste ADR. O que falta é a fonte de
+dados real — `otter_sql` para o escopo sintático (camada 2) e Pocket Rock para os metadados
+—, não a capacidade do editor.
+
+### Não usaremos o TrieAutoComplete
+
+O widget traz um autocomplete pronto (`extras/TrieAutoComplete`) que sugere keywords da
+linguagem mais identificadores do documento. É rápido e **serve para nada aqui**: não conhece
+schema, não conhece escopo, não infere JOIN. É a camada 1 apenas. Nosso callback o substitui.
+
 ## Sequenciamento
 
 Completion não é um módulo que se acopla no fim — ele determina a forma do parser.
