@@ -45,8 +45,18 @@ const char* const kPtBr[] = {
     "manual transaction",         "transação manual",
     "read only",                  "somente leitura",
 
+    // --- Abas de editor ---
+    "Script",                     "Script",
+    "New SQL tab",                "Nova aba SQL",
+    "Close tab",                  "Fechar aba",
+    "Close",                      "Fechar",
+    "Close others",               "Fechar as outras",
+    "Pin tab",                    "Fixar aba",
+    "Copy SQL",                   "Copiar SQL",
+
     // --- Editor ---
     "Execute  (Ctrl+Enter)",      "Executar  (Ctrl+Enter)",
+    " (%lld row(s) affected)",    " (%lld linha(s) afetada(s))",
     "no suggestions",             "sem sugestões",
     "table",                      "tabela",
     "view",                       "view",

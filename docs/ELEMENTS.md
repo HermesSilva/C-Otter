@@ -197,7 +197,24 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Botão desabilitado sem conexão | — | ✅ | |
 | Executar script inteiro | `Alt+X` | ⬜ | |
 | Cancelar query | — | 🟡 | `cancel_current_query()` implementado, **sem botão** |
-| Múltiplas abas de editor | — | ⬜ | |
+
+### Abas de editor
+
+| Elemento | Atalho | Estado | Observação |
+|----------|--------|--------|------------|
+| **Múltiplas abas** | — | ✅ | Cada uma com editor, resultado e estado próprios |
+| Nova aba | `Ctrl+T` | ✅ | Também pelo botão `+` e pelo menu Arquivo |
+| Fechar aba | `Ctrl+W` | ✅ | Também pelo `×` da aba |
+| Fechar outras | — | ✅ | Menu de contexto; respeita abas fixadas |
+| Fixar aba | — | ✅ | Fixadas vão para a esquerda e sobrevivem a "fechar outras" |
+| Copiar SQL da aba | — | ✅ | Menu de contexto |
+| Reordenar arrastando | — | ✅ | |
+| Lista suspensa de abas | — | ✅ | Botão `▼` quando não cabem todas |
+| Indicador de modificado | — | ✅ | `*` no título e `●` na barra |
+| **Resultado isolado por aba** | — | ✅ | Trocar de aba troca a grade |
+| **Roteamento do resultado** | — | ✅ | Volta para a aba que executou, mesmo trocando de aba durante a query |
+| Renomear aba | — | ⬜ | `set_title()` existe, sem UI |
+| Conexão por aba | — | ⬜ | Todas usam a conexão ativa |
 
 ### Autocomplete
 

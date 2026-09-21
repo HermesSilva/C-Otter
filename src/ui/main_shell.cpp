@@ -117,19 +117,9 @@ void draw_busy_indicator() {
 } // namespace
 
 MainShell::MainShell()
-    : editor_(std::make_unique<TextEditor>()),
-      autocomplete_config_(std::make_unique<TextEditor::AutoCompleteConfig>()) {
-    editor_->SetLanguage(TextEditor::Language::Sql());
-    editor_->SetText(std::string(kWelcomeSql));
-    editor_->SetShowWhitespacesEnabled(false);
-    editor_->SetShowMatchingBrackets(true);
-    editor_->SetCompletePairedGlyphs(true);
-    editor_->SetTabSize(4);
-
-    apply_editor_palette(*editor_);
-
-    // Completion (ADR 0004). O widget cuida de trigger, popup e insercao com
-    // undo; QUAIS sugestoes e em QUE ordem e' inteiramente nosso.
+    : autocomplete_config_(std::make_unique<TextEditor::AutoCompleteConfig>()) {
+    // Completion (ADR 0004). Uma configuracao compartilhada por todos os
+    // documentos: o callback descobre o editor ativo em suggest().
     autocomplete_config_->triggerOnTyping    = true;
     autocomplete_config_->triggerInComments  = false;
     autocomplete_config_->triggerInStrings   = false;
@@ -140,7 +130,8 @@ MainShell::MainShell()
         static_cast<MainShell*>(state.userData)->suggest(state);
     };
 
-    editor_->SetAutoCompleteConfig(autocomplete_config_.get());
+    // Primeiro documento, com o texto de boas-vindas.
+    new_document().editor().SetText(std::string(kWelcomeSql));
 
     // O assistente conecta e, ao concluir, tambem guarda o perfil ativo.
     connection_dialog_.set_on_connect([this](const db::ConnectionProfile& profile) {
@@ -170,6 +161,63 @@ MainShell::MainShell()
 
 MainShell::~MainShell() = default;
 
+SqlDocument& MainShell::new_document() {
+    documents_.push_back(std::make_unique<SqlDocument>(next_document_id_++));
+    SqlDocument& document = *documents_.back();
+
+    document.editor().SetAutoCompleteConfig(autocomplete_config_.get());
+    apply_editor_palette(document.editor());
+
+    active_document_ = documents_.size() - 1;
+    return document;
+}
+
+void MainShell::close_document(std::size_t index) {
+    if (index >= documents_.size()) return;
+
+    // Nunca ficamos sem nenhuma aba: fechar a última abre uma vazia.
+    documents_.erase(documents_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (documents_.empty()) {
+        new_document();
+        return;
+    }
+    if (active_document_ >= documents_.size()) {
+        active_document_ = documents_.size() - 1;
+    }
+}
+
+void MainShell::close_others(std::size_t keep_index) {
+    if (keep_index >= documents_.size()) return;
+
+    // Guarda o id ANTES de mover: depois do move, documents_[keep_index] e' um
+    // unique_ptr vazio e consulta-lo seria desreferenciar nulo.
+    const std::size_t keep_id = documents_[keep_index]->id();
+
+    std::vector<std::unique_ptr<SqlDocument>> kept;
+    for (std::size_t i = 0; i < documents_.size(); ++i) {
+        // Abas fixadas sobrevivem a "fechar outras" -- e' o que "fixar" quer
+        // dizer.
+        if (i == keep_index || documents_[i]->pinned()) {
+            kept.push_back(std::move(documents_[i]));
+        }
+    }
+    documents_ = std::move(kept);
+
+    active_document_ = 0;
+    for (std::size_t i = 0; i < documents_.size(); ++i) {
+        if (documents_[i]->id() == keep_id) {
+            active_document_ = i;
+            break;
+        }
+    }
+}
+
+SqlDocument* MainShell::active_document() {
+    if (documents_.empty()) return nullptr;
+    active_document_ = std::min(active_document_, documents_.size() - 1);
+    return documents_[active_document_].get();
+}
+
 // Gera sugestoes de completion (ADR 0004), sobre metadados reais e com o
 // escopo sintatico do otter_sql.
 void MainShell::suggest(TextEditor::AutoCompleteState& state) {
@@ -194,8 +242,13 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     // Camada 2 -- escopo sintatico. Descobre o que faz sentido AQUI: tabelas
     // depois de FROM, colunas depois de SELECT/WHERE, colunas de UMA tabela
     // depois de "alias.".
-    const std::string script = editor_->GetText();
-    const TextEditor::DocPos cursor = editor_->GetCurrentCursorPosition();
+    // O completion age sobre o documento ativo: cada aba tem seu editor.
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    const std::string script = document->editor().GetText();
+    const TextEditor::DocPos cursor =
+        document->editor().GetCurrentCursorPosition();
 
     // DocPos e' (linha, indice); o analisador trabalha com offset em bytes.
     std::size_t offset = 0;
@@ -305,20 +358,36 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
 void MainShell::execute_current_sql() {
     if (session_.state() != SessionState::connected || session_.busy()) return;
 
-    // Se ha' selecao, executa so' ela -- comportamento esperado de cliente SQL.
-    std::string sql = editor_->CurrentCursorHasSelection()
-                          ? editor_->GetSectionText(
-                                editor_->GetCurrentCursorSelection())
-                          : editor_->GetText();
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    std::string sql = document->sql_to_execute();
     if (sql.empty()) return;
+
+    // Guarda QUAL documento pediu: o resultado deve voltar para ele, mesmo que
+    // o usuario troque de aba enquanto a query roda.
+    executing_document_id_ = document->id();
+    document->set_executing(true);
+    document->set_status({});
 
     session_.execute_async(std::move(sql));
 }
 
 void MainShell::draw() {
-    // Colhe o resultado assim que o worker termina.
-    if (!session_.busy()) {
-        if (auto fresh = session_.take_result()) result_ = std::move(fresh);
+    // Colhe o resultado e entrega ao documento que o pediu -- nao ao que
+    // estiver ativo agora, porque o usuario pode ter trocado de aba.
+    if (!session_.busy() && executing_document_id_ != 0) {
+        for (auto& document : documents_) {
+            if (document->id() != executing_document_id_) continue;
+
+            if (auto fresh = session_.take_result()) {
+                document->set_result(std::move(*fresh));
+            }
+            document->set_status(session_.status_message());
+            document->set_executing(false);
+            break;
+        }
+        executing_document_id_ = 0;
     }
 
     // Atalhos globais. Registrados aqui, e nao so' rotulados no menu: um
@@ -328,6 +397,13 @@ void MainShell::draw() {
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
         connection_dialog_.open_new();
+    }
+    // Ctrl+T abre uma aba; Ctrl+W fecha a atual -- convencao de navegador.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_T)) {
+        new_document();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_W)) {
+        close_document(active_document_);
     }
 
     draw_menu_bar();
@@ -418,10 +494,15 @@ void MainShell::draw_menu_bar() {
                             session_.state() == SessionState::connected)) {
             connection_dialog_.open_edit(active_profile_);
         }
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("New SQL tab"), "Ctrl+T")) new_document();
+        if (ImGui::MenuItem(TR("Close tab"), "Ctrl+W",
+                            false, documents_.size() > 1)) {
+            close_document(active_document_);
+        }
         if (ImGui::MenuItem(TR("Disconnect"), nullptr, false,
                             session_.state() == SessionState::connected)) {
             session_.disconnect();
-            result_.reset();
         }
         ImGui::Separator();
         if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) wants_quit_ = true;
@@ -429,16 +510,23 @@ void MainShell::draw_menu_bar() {
     }
 
     if (ImGui::BeginMenu(TR("Edit"))) {
-        if (ImGui::MenuItem(TR("Undo"), "Ctrl+Z", false, editor_->CanUndo())) {
-            editor_->Undo();
+        SqlDocument* document = active_document();
+        const bool has_document = document != nullptr;
+
+        if (ImGui::MenuItem(TR("Undo"), "Ctrl+Z", false,
+                            has_document && document->editor().CanUndo())) {
+            document->editor().Undo();
         }
-        if (ImGui::MenuItem(TR("Redo"), "Ctrl+Y", false, editor_->CanRedo())) {
-            editor_->Redo();
+        if (ImGui::MenuItem(TR("Redo"), "Ctrl+Y", false,
+                            has_document && document->editor().CanRedo())) {
+            document->editor().Redo();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(TR("Select all"), "Ctrl+A")) editor_->SelectAll();
-        if (ImGui::MenuItem(TR("Find"), "Ctrl+F")) {
-            editor_->OpenFindReplaceWindow();
+        if (ImGui::MenuItem(TR("Select all"), "Ctrl+A", false, has_document)) {
+            document->editor().SelectAll();
+        }
+        if (ImGui::MenuItem(TR("Find"), "Ctrl+F", false, has_document)) {
+            document->editor().OpenFindReplaceWindow();
         }
         ImGui::EndMenu();
     }
@@ -520,7 +608,6 @@ void MainShell::draw_raft_panel() {
             }
             if (ImGui::MenuItem(TR("Disconnect"), nullptr, false, connected)) {
                 session_.disconnect();
-                result_.reset();
             }
             ImGui::Separator();
             if (ImGui::MenuItem(TR("Copy name"))) {
@@ -628,49 +715,127 @@ void MainShell::draw_navigator_panel() {
     ImGui::End();
 }
 
-void MainShell::draw_editor_panel() {
-    if (ImGui::Begin(TRW("SQL", "###SqlPanel"))) {
-        const bool can_run = session_.state() == SessionState::connected &&
-                             !session_.busy();
+void MainShell::draw_document_tabs() {
+    constexpr ImGuiTabBarFlags flags =
+        ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs |
+        ImGuiTabBarFlags_FittingPolicyScroll |
+        ImGuiTabBarFlags_TabListPopupButton;
 
-        ImGui::BeginDisabled(!can_run);
-        if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
-        ImGui::EndDisabled();
+    if (!ImGui::BeginTabBar("##doctabs", flags)) return;
 
-        ImGui::SameLine();
-        const TextEditor::DocPos cursor = editor_->GetCurrentCursorPosition();
-        const bool modified = editor_->GetUndoIndex() != save_point_;
+    // Botão "+" ao lado das abas, como em navegadores.
+    if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing |
+                                      ImGuiTabItemFlags_NoTooltip)) {
+        new_document();
+    }
 
-        ImGui::TextColored(col4(palette::text_dim),
-                           "  Ln %zu, Col %zu  |  %zu linhas%s",
-                           cursor.line + 1, cursor.index + 1,
-                           editor_->GetLineCount(),
-                           modified ? "  ●" : "");
+    std::optional<std::size_t> to_close;
+    std::optional<std::size_t> to_close_others;
 
-        if (session_.busy()) {
-            ImGui::SameLine();
-            draw_busy_indicator();
+    for (std::size_t i = 0; i < documents_.size(); ++i) {
+        SqlDocument& document = *documents_[i];
+        ImGui::PushID(static_cast<int>(document.id()));
+
+        // O sufixo ###id mantém a identidade da aba mesmo quando o título
+        // muda (ao salvar com outro nome, por exemplo).
+        const std::string label =
+            document.title() + (document.modified() ? " *" : "") +
+            "###doc" + std::to_string(document.id());
+
+        ImGuiTabItemFlags item_flags = ImGuiTabItemFlags_None;
+        if (document.pinned()) item_flags |= ImGuiTabItemFlags_Leading;
+        if (document.modified()) item_flags |= ImGuiTabItemFlags_UnsavedDocument;
+
+        bool open = true;
+        if (ImGui::BeginTabItem(label.c_str(), &open, item_flags)) {
+            active_document_ = i;
+            draw_document_body(document);
+            ImGui::EndTabItem();
         }
 
-        ImGui::Separator();
-        editor_->Render("##sql", ImGui::GetContentRegionAvail());
+        if (ImGui::BeginPopupContextItem("##tabmenu")) {
+            if (ImGui::MenuItem(TR("Close"), "Ctrl+W")) to_close = i;
+            if (ImGui::MenuItem(TR("Close others"))) to_close_others = i;
+            ImGui::Separator();
+
+            bool pinned = document.pinned();
+            if (ImGui::MenuItem(TR("Pin tab"), nullptr, &pinned)) {
+                document.set_pinned(pinned);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(TR("Copy SQL"))) {
+                ImGui::SetClipboardText(document.editor().GetText().c_str());
+            }
+            ImGui::EndPopup();
+        }
+
+        if (!open) to_close = i;
+        ImGui::PopID();
+    }
+
+    ImGui::EndTabBar();
+
+    // Aplicado fora do laço: remover do vetor durante a iteração invalidaria
+    // as referências em uso.
+    if (to_close_others) close_others(*to_close_others);
+    if (to_close)        close_document(*to_close);
+}
+
+void MainShell::draw_document_body(SqlDocument& document) {
+    const bool can_run = session_.state() == SessionState::connected &&
+                         !session_.busy();
+
+    ImGui::BeginDisabled(!can_run);
+    if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    const TextEditor::DocPos cursor =
+        document.editor().GetCurrentCursorPosition();
+
+    ImGui::TextColored(col4(palette::text_dim),
+                       TR("  Ln %zu, Col %zu  |  %zu lines%s"),
+                       cursor.line + 1, cursor.index + 1,
+                       document.editor().GetLineCount(),
+                       document.modified() ? "  ●" : "");
+
+    if (document.executing()) {
+        ImGui::SameLine();
+        draw_busy_indicator();
+    }
+
+    ImGui::Separator();
+    document.editor().Render("##sql", ImGui::GetContentRegionAvail());
+}
+
+void MainShell::draw_editor_panel() {
+    if (ImGui::Begin(TRW("SQL", "###SqlPanel"))) {
+        draw_document_tabs();
     }
     ImGui::End();
 }
 
 void MainShell::draw_grid_panel() {
     if (ImGui::Begin(TRW("Result", "###ResultPanel"))) {
-        if (!result_.has_value()) {
+        // O resultado pertence ao documento: trocar de aba troca a grade.
+        SqlDocument* document = active_document();
+
+        if (document == nullptr || !document->result().has_value()) {
             ImGui::TextColored(col4(palette::text_dim),
                                TR("run a query to see the result"));
+            // Um erro da última execução aparece mesmo sem resultado.
+            if (document != nullptr && !document->status().empty()) {
+                ImGui::TextColored(col4(palette::error), "%s",
+                                   document->status().c_str());
+            }
             ImGui::End();
             return;
         }
 
-        const db::ResultSet& rs = *result_;
+        const db::ResultSet& rs = *document->result();
 
         ImGui::TextColored(col4(palette::text_dim),
-                           "%zu linha(s) × %zu coluna(s)  |  %zu bytes",
+                           TR("%zu row(s) x %zu column(s)  |  %zu bytes"),
                            rs.row_count(), rs.column_count(), rs.bytes_used());
         ImGui::Separator();
 
@@ -678,7 +843,8 @@ void MainShell::draw_grid_panel() {
             ImGui::TextColored(col4(palette::ok), TR("command executed"));
             if (rs.affected_rows() >= 0) {
                 ImGui::SameLine();
-                ImGui::TextColored(col4(palette::text_dim), " (%lld linha(s) afetada(s))",
+                ImGui::TextColored(col4(palette::text_dim),
+                                   TR(" (%lld row(s) affected)"),
                                    static_cast<long long>(rs.affected_rows()));
             }
             ImGui::End();
@@ -881,4 +1047,5 @@ void MainShell::draw_about_window() {
 }
 
 } // namespace otter::ui
+
 

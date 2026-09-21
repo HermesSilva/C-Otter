@@ -10,6 +10,7 @@ otter_add_library(otter_ui
         theme.cpp
         main_shell.cpp
         connection_dialog.cpp
+        sql_document.cpp
         session.cpp
         app_window_glfw.cpp
     DEPS
@@ -19,3 +20,4 @@ otter_add_library(otter_ui
         imgui
         texteditor
 )
+

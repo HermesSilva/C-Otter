@@ -13,6 +13,7 @@
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
 #include "ui/session.hpp"
+#include "ui/sql_document.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -48,7 +49,22 @@ private:
 
     void execute_current_sql();
 
-    std::unique_ptr<TextEditor> editor_;
+    // --- Documentos (abas) ---------------------------------------------------
+    SqlDocument& new_document();
+    void close_document(std::size_t index);
+    void close_others(std::size_t keep_index);
+    [[nodiscard]] SqlDocument* active_document();
+    void draw_document_tabs();
+    void draw_document_body(SqlDocument& document);
+
+    std::vector<std::unique_ptr<SqlDocument>> documents_;
+    std::size_t active_document_ = 0;
+    std::size_t next_document_id_ = 1;
+
+    // O documento cujo worker esta' rodando; o resultado volta para ele, nao
+    // para o que estiver ativo quando terminar.
+    std::size_t executing_document_id_ = 0;
+
     std::unique_ptr<TextEditor::AutoCompleteConfig> autocomplete_config_;
     Session session_;
 
@@ -58,13 +74,6 @@ private:
     // Perfil da conexao ativa, para a UI exibir nome, tipo e cor.
     db::ConnectionProfile active_profile_;
 
-    // Resultado ativo na grade. Copiado da sessao quando o worker termina.
-    std::optional<db::ResultSet> result_;
-
-    // Indice de undo correspondente ao ultimo estado salvo. Comparar com
-    // GetUndoIndex() diz se ha' alteracoes pendentes -- e cobre o caso de
-    // desfazer de volta ao ponto salvo, em que o texto deixa de estar sujo.
-    std::size_t save_point_ = 0;
 
     bool layout_initialized_ = false;
     bool wants_quit_         = false;
