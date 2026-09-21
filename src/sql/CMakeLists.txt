@@ -5,6 +5,7 @@
 otter_add_library(otter_sql
     SOURCES
         dialect.cpp
+        format.cpp
         lexer.cpp
         paging.cpp
         script.cpp

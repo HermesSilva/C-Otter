@@ -110,6 +110,9 @@ private:
     // (ou DELIMITER, ou $$...$$), um apos o outro.
     void execute_script();
 
+    // Reindenta o SQL da aba ativa (Ctrl+Shift+F).
+    void format_current_sql();
+
     // --- Arquivo -------------------------------------------------------------
     void open_script_file();
     // `save_as` forca o dialogo mesmo quando o documento ja' tem caminho.

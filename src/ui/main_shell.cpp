@@ -3,6 +3,7 @@
 #include "base/i18n.hpp"
 #include "db/ddl.hpp"
 #include "db/export.hpp"
+#include "sql/format.hpp"
 #include "sql/paging.hpp"
 #include "ui/file_dialog.hpp"
 #include "ui/icons.hpp"
@@ -523,6 +524,23 @@ void MainShell::save_script_file(bool save_as) {
     document->set_status(std::string(TRF("saved to %s", path.c_str())));
 }
 
+void MainShell::format_current_sql() {
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    const std::string before = document->editor().GetText();
+    if (before.empty()) return;
+
+    const std::string after =
+        sql::format_sql(before, sql::postgres_dialect());
+
+    // Texto igual: nao mexe. SetText move o cursor para o inicio e cria um
+    // ponto de desfazer -- fazer isso quando nada mudou seria ruido.
+    if (after == before) return;
+
+    document->editor().SetText(after);
+}
+
 void MainShell::execute_script() {
     if (session().state() != SessionState::connected || session().busy()) return;
 
@@ -641,6 +659,9 @@ void MainShell::draw() {
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
         open_script_file();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F)) {
+        format_current_sql();
     }
     // Shift primeiro: Ctrl+Shift+S tambem satisfaz Ctrl+S, e testar na ordem
     // inversa faria "salvar como" nunca acontecer.
@@ -822,6 +843,11 @@ void MainShell::draw_menu_bar() {
         }
         if (ImGui::MenuItem(TR("Execute script"), "Alt+X", false, can_run)) {
             execute_script();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("Format SQL"), "Ctrl+Shift+F", false,
+                            active_document() != nullptr)) {
+            format_current_sql();
         }
         ImGui::Separator();
 

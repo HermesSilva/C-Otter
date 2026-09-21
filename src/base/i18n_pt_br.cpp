@@ -27,6 +27,7 @@ const char* const kPtBr[] = {
     "Find",                       "Localizar",
     "Execute",                    "Executar",
     "Execute script",             "Executar script",
+    "Format SQL",                 "Formatar SQL",
     "running statement %zu of %zu", "executando comando %zu de %zu",
     "statement %zu failed: %s",   "comando %zu falhou: %s",
     "%zu statement(s) executed",  "%zu comando(s) executado(s)",
