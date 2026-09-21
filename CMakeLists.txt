@@ -126,6 +126,7 @@ function(otter_add_library name)
 endfunction()
 
 add_subdirectory(third_party)
+add_subdirectory(lib)      # protocolos de rede (ADR 0009) -- nao depende de src/
 add_subdirectory(src)
 
 if(OTTER_BUILD_TESTS)
