@@ -10,6 +10,7 @@
 
 #include "db/holt.hpp"
 #include "db/connection_store.hpp"
+#include "db/export.hpp"
 #include "db/result_set.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
@@ -79,6 +80,9 @@ private:
 
     // Linha acima da grade: contagem, navegacao de paginas e avisos.
     void draw_grid_toolbar(SqlDocument& document, const db::ResultSet& rs);
+
+    // Janela de exportacao do resultado: formato, opcoes e previa.
+    void draw_export_window();
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();
@@ -167,6 +171,12 @@ private:
     std::vector<bool>              import_selected_;
     std::string                    import_status_;
     bool                           import_scanned_ = false;
+
+    // --- Exportacao ----------------------------------------------------------
+    bool               show_export_ = false;
+    db::ExportOptions  export_options_;
+    std::string        export_path_;
+    std::string        export_status_;
 };
 
 } // namespace otter::ui

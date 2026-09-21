@@ -293,7 +293,10 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Pivot | ⬜ | ADR 0005 |
 | Formatação condicional | ⬜ | |
 | Editores de valor (JSON, hex, data) | ⬜ | |
-| Exportar (CSV, JSON, SQL) | ⬜ | |
+| **Exportar** | ✅ | CSV, JSON, Markdown e `INSERT`, com prévia |
+| Proteção contra CSV injection | ✅ | **Ligada por padrão** — valor iniciado por `=`, `+`, `-` ou `@` vira fórmula na planilha |
+| Copiar resultado para a área de transferência | ✅ | O resultado inteiro, não só a prévia |
+| Aviso de que exporta só a página | ✅ | Evita abrir o arquivo e achar 200 de 2 milhões |
 | **Paginação** | ✅ | 200 linhas por página, com primeira/anterior/próxima (ADR 0011) |
 | Intervalo de linhas exibido | ✅ | `linhas 401-600 +` — o `+` indica que há mais |
 | SQL paginado auditável | ✅ | O inspetor mostra o `LIMIT`/`OFFSET` efetivamente executado |
@@ -463,6 +466,7 @@ estado que ela mostra foi alcançado de forma determinística.
 | `OTTER_EXPAND_TREE=1` | Abre as pastas da árvore e a primeira tabela |
 | `OTTER_SHOW_ICONS=1` | Abre a galeria de ícones direto |
 | `OTTER_THEME=light` | Tema inicial (`dark`, `light`, `amber`) |
+| `OTTER_SHOW_EXPORT=1` | Abre a exportação assim que o primeiro resultado chega |
 
 ```powershell
 # Árvore inteira, conectada, pronta para captura:
@@ -471,7 +475,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (170, todos verdes):
+Testes automatizados (186, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

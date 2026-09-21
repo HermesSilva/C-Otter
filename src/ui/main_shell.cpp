@@ -2,6 +2,7 @@
 
 #include "base/i18n.hpp"
 #include "db/ddl.hpp"
+#include "db/export.hpp"
 #include "sql/paging.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
@@ -205,6 +206,8 @@ MainShell::MainShell()
         show_icons_ = true;
         connection_dialog_.close();
     }
+
+
 
     // Tema inicial por ambiente, pelo mesmo motivo: conferir os tres temas
     // exige tres capturas, e trocar pelo menu a cada uma e' fragil.
@@ -483,6 +486,14 @@ void MainShell::draw() {
                 document->set_result(std::move(*fresh));
             }
 
+            // Conferir a janela de exportacao exige um resultado na tela e um
+            // clique num botao de 24 px, que a automacao erra. A variavel
+            // abre assim que o primeiro resultado chega -- ligar antes nao
+            // funcionaria, porque a janela se fecha sozinha sem resultado.
+            static const bool auto_export =
+                std::getenv("OTTER_SHOW_EXPORT") != nullptr;
+            if (auto_export) show_export_ = true;
+
             // A mensagem do worker conta as linhas que CHEGARAM, incluindo a
             // linha-sonda da paginacao. Refaz aqui, onde se sabe que ela
             // existe: a barra de status dizer "201 linhas" depois de mostrar
@@ -545,6 +556,7 @@ void MainShell::draw() {
     connection_dialog_.draw(feedback);
 
     if (show_about_) draw_about_window();
+    if (show_export_) draw_export_window();
     if (show_import_) draw_import_window();
     if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
@@ -1788,6 +1800,193 @@ void MainShell::draw_editor_panel() {
     ImGui::End();
 }
 
+void MainShell::draw_export_window() {
+    const Palette& p = colors();
+
+    SqlDocument* document = active_document();
+    if (document == nullptr || !document->result().has_value()) {
+        show_export_ = false;
+        return;
+    }
+    const db::ResultSet& rs = *document->result();
+
+    ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
+    if (ImGui::Begin(TRW("Export result", "###ExportResult"), &show_export_,
+                     ImGuiWindowFlags_NoDocking)) {
+
+        // O que sera' exportado: a PAGINA, nao o resultado inteiro. Dizer
+        // isso evita a surpresa de abrir o CSV e achar 200 linhas de dois
+        // milhoes (diretiva 6).
+        if (document->paged()) {
+            icon_inline(Icon::warning, p.warn);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.warn),
+                               TR("exports the current page only (%zu rows)"),
+                               rs.row_count());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(TR(
+                    "The grid holds one page at a time.\n"
+                    "To export everything, run the query with your own LIMIT "
+                    "or no LIMIT at all."));
+            }
+        } else {
+            ImGui::TextColored(col4(p.text_dim), TR("%zu row(s), %zu column(s)"),
+                               rs.row_count(), rs.column_count());
+        }
+
+        ImGui::Separator();
+
+        // --- Formato ---------------------------------------------------------
+        static constexpr db::ExportFormat kFormats[] = {
+            db::ExportFormat::csv, db::ExportFormat::json,
+            db::ExportFormat::markdown, db::ExportFormat::sql_insert,
+        };
+
+        for (const db::ExportFormat format : kFormats) {
+            if (format != kFormats[0]) ImGui::SameLine();
+            if (ImGui::RadioButton(std::string(db::to_string(format)).c_str(),
+                                   export_options_.format == format)) {
+                const db::ExportFormat previous = export_options_.format;
+                export_options_.format = format;
+
+                // Troca a extensao junto com o formato. Deixar ".csv" num
+                // arquivo de INSERTs faria o sistema abrir no programa errado
+                // -- e o usuario provavelmente nao notaria ate' la'.
+                const std::string old_ext(db::file_extension(previous));
+                if (export_path_.size() > old_ext.size() &&
+                    export_path_.ends_with(old_ext)) {
+                    export_path_.replace(export_path_.size() - old_ext.size(),
+                                         old_ext.size(),
+                                         db::file_extension(format));
+                }
+            }
+        }
+
+        ImGui::Separator();
+
+        // --- Opcoes do formato ativo -----------------------------------------
+        if (export_options_.format == db::ExportFormat::csv) {
+            ImGui::Checkbox(TR("Header row"), &export_options_.write_header);
+
+            static constexpr struct { char value; const char* label; }
+                kDelimiters[] = {
+                    {',', ","}, {';', ";"}, {'\t', "Tab"}, {'|', "|"},
+                };
+            ImGui::TextUnformatted(TR("Delimiter"));
+            for (const auto& [value, label] : kDelimiters) {
+                ImGui::SameLine();
+                if (ImGui::RadioButton(label,
+                                       export_options_.delimiter == value)) {
+                    export_options_.delimiter = value;
+                }
+            }
+
+            ImGui::Checkbox(TR("Neutralize spreadsheet formulas"),
+                            &export_options_.escape_formulas);
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(TR(
+                    "A value starting with =, +, - or @ becomes a formula when "
+                    "a spreadsheet opens the file, and formulas run.\n\n"
+                    "Prefixing it with an apostrophe neutralizes that without "
+                    "changing what the cell shows. Turn this off only if you "
+                    "are re-importing the data somewhere else."));
+            }
+        } else if (export_options_.format == db::ExportFormat::sql_insert) {
+            char buffer[256];
+            std::snprintf(buffer, sizeof buffer, "%s",
+                          export_options_.table_name.c_str());
+            ImGui::SetNextItemWidth(320);
+            if (ImGui::InputText(TR("Target table"), buffer, sizeof buffer)) {
+                export_options_.table_name = buffer;
+            }
+            ImGui::Checkbox(TR("One INSERT per row"),
+                            &export_options_.one_statement_per_row);
+        } else {
+            ImGui::TextColored(col4(p.text_dim), TR("no options"));
+        }
+
+        ImGui::Separator();
+
+        // --- Previa ----------------------------------------------------------
+        //
+        // Limitada a poucas linhas: gerar o arquivo inteiro a cada quadro para
+        // mostrar a previa custaria caro num resultado de 200 linhas com
+        // colunas largas.
+        constexpr std::size_t kPreviewRows = 12;
+        db::ResultSet preview = rs;
+        preview.hide_rows_beyond(kPreviewRows);
+
+        const std::string text = db::export_to_string(preview, export_options_);
+
+        ImGui::TextColored(col4(p.text_dim), TR("Preview"));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, col(p.bg_darkest));
+        if (ImGui::BeginChild("##preview", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2.4f),
+                              ImGuiChildFlags_Borders,
+                              ImGuiWindowFlags_HorizontalScrollbar)) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col(p.syntax_string));
+            ImGui::TextUnformatted(text.c_str());
+            ImGui::PopStyleColor();
+
+            if (rs.row_count() > kPreviewRows) {
+                ImGui::TextColored(col4(p.text_dim), TR("... and %zu more row(s)"),
+                                   rs.row_count() - kPreviewRows);
+            }
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+
+        ImGui::Separator();
+
+        // --- Destino ---------------------------------------------------------
+        if (export_path_.empty()) {
+            // Sugere um caminho: pedir para digitar do zero seria atrito sem
+            // motivo, e a area de trabalho e' onde a maioria procura depois.
+            const char* home = std::getenv("USERPROFILE");
+            if (home == nullptr) home = std::getenv("HOME");
+            export_path_ = std::string(home != nullptr ? home : ".") +
+                           "/otter-export" +
+                           std::string(db::file_extension(export_options_.format));
+        }
+
+        char path_buffer[512];
+        std::snprintf(path_buffer, sizeof path_buffer, "%s", export_path_.c_str());
+        ImGui::SetNextItemWidth(-160.0f);
+        if (ImGui::InputText(TR("File"), path_buffer, sizeof path_buffer)) {
+            export_path_ = path_buffer;
+        }
+
+        if (icon_text_button("##copyclip", Icon::copy, TR("Copy to clipboard"),
+                             TR("Copy the whole result, not just the preview"))) {
+            const std::string full = db::export_to_string(rs, export_options_);
+            ImGui::SetClipboardText(full.c_str());
+            export_status_ = std::string(TRF("%zu row(s) copied",
+                                             rs.row_count()));
+        }
+        ImGui::SameLine();
+        if (icon_text_button("##savefile", Icon::save, TR("Save to file"),
+                             TR("Write the result to the file above"),
+                             !export_path_.empty())) {
+            if (auto status = db::export_to_file(rs, export_options_,
+                                                 export_path_);
+                status) {
+                export_status_ = std::string(TRF("%zu row(s) written to %s",
+                                                 rs.row_count(),
+                                                 export_path_.c_str()));
+            } else {
+                export_status_ = status.error().to_string();
+            }
+        }
+
+        if (!export_status_.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.ok), "%s", export_status_.c_str());
+        }
+    }
+    ImGui::End();
+}
+
 void MainShell::draw_grid_toolbar(SqlDocument& document,
                                   const db::ResultSet& rs) {
     const Palette& p = colors();
@@ -1837,10 +2036,21 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
                    "See the executed SQL in the Queries tab."),
                 sql::kDefaultPageSize + 1);
         }
+
+        ImGui::SameLine();
+        if (icon_button("##export", Icon::save, TR("Export result..."))) {
+            show_export_ = true;
+            export_status_.clear();
+        }
         return;
     }
 
     // Sem paginacao: o resultado e' completo, e a contagem e' exata.
+    if (icon_button("##export", Icon::save, TR("Export result..."))) {
+        show_export_ = true;
+        export_status_.clear();
+    }
+    ImGui::SameLine();
     ImGui::TextColored(col4(p.text_dim),
                        TR("%zu row(s) x %zu column(s)  |  %zu bytes"),
                        rs.row_count(), rs.column_count(), rs.bytes_used());
