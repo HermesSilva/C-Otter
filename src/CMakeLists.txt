@@ -1,4 +1,5 @@
 add_subdirectory(base)
+add_subdirectory(sql)
 add_subdirectory(db)
 add_subdirectory(ui)
 add_subdirectory(app)
