@@ -24,3 +24,6 @@ CMakeUserPresets.json
 # Dependencias: vendoradas no repositorio (ADR 0002 -- build reprodutivel e
 # link estatico). Scintilla e Lexilla sao HPND; ver docs/LICENSES.md.
 # Os .lib gerados ficam em build/, ja' ignorado acima.
+
+# Layout das janelas do ImGui: estado local, nao do projeto.
+imgui.ini

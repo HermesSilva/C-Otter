@@ -396,16 +396,46 @@ Esta é a lista de maior retorno por esforço: o trabalho difícil já está fei
 
 ## Como verificar
 
+O build precisa do ambiente do MSVC carregado. `tools\build.ps1` faz isso:
+chamar `cmake --build` de um shell qualquer falha com
+`Cannot open include file: 'cstdint'`, porque `INCLUDE` e `LIB` só existem
+depois do `vcvars64.bat`.
+
+```powershell
+tools\build.ps1                    # alvo padrão
+tools\build.ps1 -Target otter_tests
+```
+
 ```powershell
 $env:PGPASSWORD="sua-senha"
 $env:PGDATABASE="seu-banco"
-build\win-debug\bin\c-otter.exe
+build\win-release\bin\c-otter.exe
 ```
 
-Testes automatizados (80, todos verdes):
+### Variáveis de inspeção
+
+Existem porque automatizar cliques no ImGui é pouco confiável — a entrada é
+processada por quadro e o `SendKeys` perde teclas. Uma captura só vale se o
+estado que ela mostra foi alcançado de forma determinística.
+
+| Variável | Efeito |
+|----------|--------|
+| `OTTER_AUTOCONNECT=1` | Conecta na inicialização com o perfil de `PGHOST`/`PGUSER`/… |
+| `OTTER_EXPAND_TREE=1` | Abre as pastas da árvore e a primeira tabela |
+| `OTTER_SHOW_ICONS=1` | Abre a galeria de ícones direto |
+| `OTTER_THEME=light` | Tema inicial (`dark`, `light`, `amber`) |
 
 ```powershell
-build\win-debug\bin\otter_tests.exe
+# Árvore inteira, conectada, pronta para captura:
+$env:OTTER_AUTOCONNECT="1"; $env:OTTER_EXPAND_TREE="1"
+build\win-release\bin\c-otter.exe
+tools\screenshot.ps1 -Out arvore.png
+```
+
+Testes automatizados (107, todos verdes):
+
+```powershell
+build\win-release\bin\otter_tests.exe
 ```
 
 ## Manutenção

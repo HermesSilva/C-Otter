@@ -263,6 +263,220 @@ void draw_filter(const Canvas& c) {
     c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
 }
 
+// --- Tipos de objeto do banco -------------------------------------------
+//
+// Cada desenho precisa ser reconhecivel a ~14 px, que e' o tamanho na arvore.
+// Isso limita o detalhe: tres tracos distintos valem mais que oito tracos
+// que viram borrao. Todos usam o mesmo peso de linha dos icones de barra.
+
+void draw_materialized_view(const Canvas& c) {
+    // View com dados gravados: o olho da view, e abaixo dele o disco que
+    // guarda o resultado materializado.
+    //
+    // A primeira versao empilhou os dois colados e o conjunto virou uma forma
+    // unica ilegivel. Aqui o olho e' largo e fino no topo, o disco e' uma
+    // elipse dupla embaixo, e ha' folga entre eles.
+    c.dl->PathLineTo(c.at(-0.36f, -0.20f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.16f, -0.44f), c.at(0.16f, -0.44f),
+                                 c.at(0.36f, -0.20f), 16);
+    c.dl->PathBezierCubicCurveTo(c.at(0.16f, 0.04f), c.at(-0.16f, 0.04f),
+                                 c.at(-0.36f, -0.20f), 16);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.circle_filled(0.0f, -0.20f, 0.09f);
+
+    // Disco: topo e base, ligados nas laterais.
+    c.ellipse(0.0f, 0.18f, 0.26f, 0.09f);
+    c.line(-0.26f, 0.18f, -0.26f, 0.32f);
+    c.line( 0.26f, 0.18f,  0.26f, 0.32f);
+    c.arc(0.0f, 0.32f, 0.26f, 0.0f, 180.0f);
+}
+
+void draw_index(const Canvas& c) {
+    // Paginas com marcador lateral: o indice que aponta para a linha.
+    c.rect(-0.34f, -0.32f, 0.20f, 0.32f, 0.06f);
+    c.line(-0.22f, -0.16f, 0.08f, -0.16f);
+    c.line(-0.22f,  0.00f, 0.08f,  0.00f);
+    c.line(-0.22f,  0.16f, -0.04f, 0.16f);
+    // Marcador saliente, a "aba" do indice.
+    c.dl->PathLineTo(c.at(0.20f, -0.24f));
+    c.dl->PathLineTo(c.at(0.38f, -0.24f));
+    c.dl->PathLineTo(c.at(0.38f,  0.14f));
+    c.dl->PathLineTo(c.at(0.29f,  0.04f));
+    c.dl->PathLineTo(c.at(0.20f,  0.14f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_constraint(const Canvas& c) {
+    // Escudo: a regra que protege a integridade dos dados.
+    c.dl->PathLineTo(c.at(0.0f, -0.36f));
+    c.dl->PathLineTo(c.at(0.30f, -0.22f));
+    c.dl->PathLineTo(c.at(0.30f,  0.06f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.28f, 0.24f), c.at(0.14f, 0.32f),
+                                 c.at(0.0f, 0.38f), 12);
+    c.dl->PathBezierCubicCurveTo(c.at(-0.14f, 0.32f), c.at(-0.28f, 0.24f),
+                                 c.at(-0.30f, 0.06f), 12);
+    c.dl->PathLineTo(c.at(-0.30f, -0.22f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_foreign_key(const Canvas& c) {
+    // Dois elos SEPARADOS e sobrepostos na diagonal. A primeira tentativa
+    // desenhou dois arcos unidos por retas horizontais: as bordas se fundiram
+    // num oval unico e o simbolo perdeu o sentido de "ligacao".
+    //
+    // Aqui cada elo e' um retangulo arredondado inteiro; a sobreposicao entre
+    // eles e' o que comunica o vinculo, e sobrevive ao tamanho da arvore.
+    c.dl->AddRect(c.at(-0.38f, -0.26f), c.at(0.06f, 0.02f), c.color,
+                  0.14f * c.size, ImDrawFlags_None, c.thickness);
+    c.dl->AddRect(c.at(-0.06f, -0.02f), c.at(0.38f, 0.26f), c.color,
+                  0.14f * c.size, ImDrawFlags_None, c.thickness);
+}
+
+void draw_references(const Canvas& c) {
+    // Alvo a direita, tres origens convergindo para ele: quem aponta para
+    // esta tabela. E' o inverso do foreign_key e precisa ler como tal.
+    //
+    // O alvo e' preenchido, as origens sao vazias -- a assimetria diz o
+    // sentido sem depender de pontas de seta, que somem no tamanho da arvore.
+    c.circle_filled(0.28f, 0.0f, 0.13f);
+
+    for (int i = 0; i < 3; ++i) {
+        const float y = -0.28f + static_cast<float>(i) * 0.28f;
+        c.circle(-0.30f, y, 0.075f);
+        // Para no raio do alvo, sem invadi-lo.
+        c.line(-0.22f, y * 0.88f, 0.14f, y * 0.24f);
+    }
+}
+
+void draw_sequence(const Canvas& c) {
+    // Degraus subindo: o valor que sempre avanca.
+    c.dl->PathLineTo(c.at(-0.36f,  0.30f));
+    c.dl->PathLineTo(c.at(-0.12f,  0.30f));
+    c.dl->PathLineTo(c.at(-0.12f,  0.06f));
+    c.dl->PathLineTo(c.at( 0.10f,  0.06f));
+    c.dl->PathLineTo(c.at( 0.10f, -0.18f));
+    c.dl->PathLineTo(c.at( 0.32f, -0.18f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    // Seta no topo, marcando o sentido.
+    c.triangle_filled(0.22f, -0.28f, 0.22f, -0.08f, 0.38f, -0.18f);
+}
+
+void draw_function(const Canvas& c) {
+    // Caixa com entrada e saida: recebe argumentos, devolve um valor. E' o
+    // que distingue a function da procedure, que so' executa.
+    //
+    // A primeira versao desenhou "(f)" em tracos: no tamanho da arvore o f
+    // some e sobram dois riscos curvos. Formas geometricas sobrevivem melhor
+    // a 14 px que letras.
+    c.rect(-0.14f, -0.22f, 0.14f, 0.22f, 0.10f);
+
+    // Duas entradas a esquerda.
+    c.line(-0.38f, -0.12f, -0.14f, -0.12f);
+    c.line(-0.38f,  0.12f, -0.14f,  0.12f);
+    c.circle_filled(-0.38f, -0.12f, 0.055f);
+    c.circle_filled(-0.38f,  0.12f, 0.055f);
+
+    // Uma saida a direita, com ponta de seta.
+    c.line(0.14f, 0.0f, 0.30f, 0.0f);
+    c.triangle_filled(0.28f, -0.09f, 0.28f, 0.09f, 0.40f, 0.0f);
+}
+
+void draw_procedure(const Canvas& c) {
+    // Bloco de execucao: retangulo com um play dentro. Distingue-se da
+    // function por nao ter retorno -- e' um comando, nao uma expressao.
+    c.rect(-0.34f, -0.28f, 0.34f, 0.28f, 0.10f);
+    c.line(-0.34f, -0.12f, 0.34f, -0.12f);
+    c.triangle_filled(-0.10f, -0.02f, -0.10f, 0.18f, 0.10f, 0.08f);
+}
+
+void draw_trigger(const Canvas& c) {
+    // Raio: dispara sozinho quando o evento acontece.
+    c.dl->PathLineTo(c.at( 0.10f, -0.38f));
+    c.dl->PathLineTo(c.at(-0.22f,  0.04f));
+    c.dl->PathLineTo(c.at(-0.02f,  0.04f));
+    c.dl->PathLineTo(c.at(-0.10f,  0.38f));
+    c.dl->PathLineTo(c.at( 0.22f, -0.04f));
+    c.dl->PathLineTo(c.at( 0.02f, -0.04f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_data_type(const Canvas& c) {
+    // Chaves { } com um nucleo: a forma que envolve o valor.
+    c.dl->PathLineTo(c.at(-0.14f, -0.32f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.26f, -0.30f), c.at(-0.24f, -0.10f),
+                                 c.at(-0.32f, 0.0f), 10);
+    c.dl->PathBezierCubicCurveTo(c.at(-0.24f, 0.10f), c.at(-0.26f, 0.30f),
+                                 c.at(-0.14f, 0.32f), 10);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    c.dl->PathLineTo(c.at(0.14f, -0.32f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.26f, -0.30f), c.at(0.24f, -0.10f),
+                                 c.at(0.32f, 0.0f), 10);
+    c.dl->PathBezierCubicCurveTo(c.at(0.24f, 0.10f), c.at(0.26f, 0.30f),
+                                 c.at(0.14f, 0.32f), 10);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // Tres barras dentro das chaves, sugerindo os campos do tipo. Um ponto
+    // sozinho, como na primeira versao, desaparecia no tamanho da arvore.
+    c.line(-0.07f, -0.13f, 0.07f, -0.13f);
+    c.line(-0.07f,  0.00f, 0.07f,  0.00f);
+    c.line(-0.07f,  0.13f, 0.07f,  0.13f);
+}
+
+void draw_extension(const Canvas& c) {
+    // Peca de quebra-cabeca: o modulo que encaixa no servidor.
+    c.dl->PathLineTo(c.at(-0.32f, -0.30f));
+    c.dl->PathLineTo(c.at(-0.06f, -0.30f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.06f, -0.46f), c.at(0.16f, -0.46f),
+                                 c.at(0.16f, -0.30f), 10);
+    c.dl->PathLineTo(c.at(0.32f, -0.30f));
+    c.dl->PathLineTo(c.at(0.32f, -0.04f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.48f, -0.04f), c.at(0.48f, 0.18f),
+                                 c.at(0.32f, 0.18f), 10);
+    c.dl->PathLineTo(c.at(0.32f, 0.32f));
+    c.dl->PathLineTo(c.at(-0.32f, 0.32f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_role(const Canvas& c) {
+    // Silhueta com chave ao lado: usuario e suas permissoes.
+    c.circle(-0.10f, -0.18f, 0.15f);
+    c.dl->PathArcTo(c.at(-0.10f, 0.34f), 0.26f * c.size,
+                    3.14159265f, 2.0f * 3.14159265f, 16);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    // A chave, menor, no canto.
+    c.circle(0.26f, 0.06f, 0.09f);
+    c.line(0.26f, 0.15f, 0.26f, 0.36f);
+    c.line(0.26f, 0.28f, 0.37f, 0.28f);
+}
+
+void draw_tablespace(const Canvas& c) {
+    // Gaveta/prateleira: o lugar fisico onde os arquivos ficam.
+    //
+    // A primeira versao usou tres elipses empilhadas, mas no tamanho da arvore
+    // ficava igual ao materialized_view, que tambem tem disco. Formas
+    // retangulares resolvem a colisao -- nenhum outro icone de objeto as usa
+    // nesta proporcao.
+    // Mais estreito que a tabela e com perspectiva no topo: e' um movel, nao
+    // uma grade. A tabela e' larga e tem divisao vertical; esta nao tem.
+    c.line(-0.26f, -0.30f, 0.26f, -0.30f);
+    c.rect(-0.30f, -0.22f, 0.30f, 0.32f, 0.06f);
+    c.line(-0.30f, 0.05f, 0.30f, 0.05f);
+    // Puxador redondo por gaveta -- assinatura que nenhum outro icone repete.
+    c.circle_filled(0.0f, -0.09f, 0.055f);
+    c.circle_filled(0.0f,  0.18f, 0.055f);
+}
+
+void draw_schema(const Canvas& c) {
+    // Grade ramificada: o agrupamento que contem os objetos.
+    c.rect(-0.34f, -0.34f, -0.06f, -0.06f, 0.06f);
+    c.rect( 0.06f, -0.34f,  0.34f, -0.06f, 0.06f);
+    c.rect(-0.34f,  0.06f, -0.06f,  0.34f, 0.06f);
+    c.rect( 0.06f,  0.06f,  0.34f,  0.34f, 0.06f);
+    c.line(-0.06f, -0.20f, 0.06f, -0.20f);
+    c.line(-0.20f, -0.06f, -0.20f, 0.06f);
+}
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,
@@ -286,7 +500,12 @@ float toolbar_button_size() {
 
 void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,
                float thickness) {
-    const Canvas c{ImGui::GetWindowDrawList(), center, size, color, thickness};
+    draw_icon_to(ImGui::GetWindowDrawList(), icon, center, size, color, thickness);
+}
+
+void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
+                  std::uint32_t color, float thickness) {
+    const Canvas c{dl, center, size, color, thickness};
 
     switch (icon) {
         case Icon::connect:       draw_connect(c);       break;
@@ -317,6 +536,21 @@ void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,
         case Icon::info:          draw_info(c);          break;
         case Icon::clock:         draw_clock(c);         break;
         case Icon::filter:        draw_filter(c);        break;
+
+        case Icon::materialized_view: draw_materialized_view(c); break;
+        case Icon::index:             draw_index(c);             break;
+        case Icon::constraint:        draw_constraint(c);        break;
+        case Icon::foreign_key:       draw_foreign_key(c);       break;
+        case Icon::references:        draw_references(c);        break;
+        case Icon::sequence:          draw_sequence(c);          break;
+        case Icon::function:          draw_function(c);          break;
+        case Icon::procedure:         draw_procedure(c);         break;
+        case Icon::trigger:           draw_trigger(c);           break;
+        case Icon::data_type:         draw_data_type(c);         break;
+        case Icon::extension:         draw_extension(c);         break;
+        case Icon::role:              draw_role(c);              break;
+        case Icon::tablespace:        draw_tablespace(c);        break;
+        case Icon::schema:            draw_schema(c);            break;
     }
 }
 

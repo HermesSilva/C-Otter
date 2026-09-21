@@ -27,6 +27,13 @@ const char* const kPtBr[] = {
     "Find",                       "Localizar",
     "Execute",                    "Executar",
     "ImGui demo",                 "Demo do ImGui",
+    "Icon gallery",               "Galeria de ícones",
+    "Scale",                      "Escala",
+    "tree size",                  "tamanho da árvore",
+    "Every object type needs its own drawing. Two icons that look alike "
+    "at tree size are a defect.",
+    "Cada tipo de objeto precisa do seu próprio desenho. Dois ícones "
+    "parecidos no tamanho da árvore são um defeito.",
     "About C-Otter",              "Sobre o C-Otter",
     "Language",                   "Idioma",
 

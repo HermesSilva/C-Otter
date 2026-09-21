@@ -59,6 +59,10 @@ private:
     void draw_status_bar();
     void draw_about_window();
 
+    // Galeria de todos os icones, para conferir de relance se dois tipos de
+    // objeto ficaram com desenhos parecidos demais (diretiva 5).
+    void draw_icon_gallery();
+
     void execute_current_sql();
 
     // --- Documentos (abas) ---------------------------------------------------
@@ -91,6 +95,7 @@ private:
     bool wants_quit_         = false;
     bool show_about_         = false;
     bool show_demo_          = false;
+    bool show_icons_         = false;
 };
 
 } // namespace otter::ui

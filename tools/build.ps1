@@ -1,57 +1,56 @@
-# C-Otter -- configura o ambiente MSVC e roda o build.
+# C-Otter -- build com o ambiente do MSVC carregado.
 #
-#   tools\build.ps1                 # configura + compila (win-debug)
-#   tools\build.ps1 -Preset win-release
-#   tools\build.ps1 -Test
+# Por que existe: chamar `cmake --build` de um shell qualquer falha com
+# "Cannot open include file: 'cstdint'" -- o cl.exe e' encontrado pelo PATH do
+# CMakeCache, mas as variaveis INCLUDE/LIB/LIBPATH so' existem depois do
+# vcvars64.bat. Este script importa essas variaveis para a sessao atual.
+#
+#   tools\build.ps1                 # alvo padrao, build\win-release
+#   tools\build.ps1 -Target tests
+#   tools\build.ps1 -BuildDir build\win-debug
+
 param(
-    [string]$Preset = "win-debug",
-    [switch]$Test,
-    [switch]$Clean
+    [string] $BuildDir = 'build\win-release',
+    [string] $Target   = ''
 )
 
-$ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$ErrorActionPreference = 'Stop'
 
-# --- Localiza o VS com toolchain C++ e importa as variaveis de ambiente -------
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $vswhere)) { throw "vswhere.exe nao encontrado" }
+function Import-VsEnvironment {
+    if ($env:VSCMD_ARG_TGT_ARCH -eq 'x64') { return }   # ja' carregado
 
-$vsPath = & $vswhere -latest -products * `
-    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-    -property installationPath
-if (-not $vsPath) { throw "Visual Studio com toolchain C++ nao encontrado" }
-
-$vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-if (-not (Test-Path $vcvars)) { throw "vcvars64.bat nao encontrado em $vsPath" }
-
-# vcvars64.bat so' exporta para cmd.exe; capturamos e replicamos no PowerShell.
-cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
-    if ($_ -match '^([^=]+)=(.*)$') {
-        Set-Item -Path "env:$($matches[1])" -Value $matches[2] -ErrorAction SilentlyContinue
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswhere)) {
+        throw "vswhere nao encontrado em $vswhere -- Visual Studio instalado?"
     }
-}
 
-Write-Host "MSVC: $(Split-Path -Leaf $vsPath) | preset: $Preset" -ForegroundColor Cyan
+    $root = & $vswhere -latest -property installationPath
+    if (-not $root) { throw 'Nenhuma instalacao do Visual Studio encontrada.' }
 
-$buildDir = Join-Path $root "build\$Preset"
-if ($Clean -and (Test-Path $buildDir)) {
-    Remove-Item -Recurse -Force $buildDir
-}
+    $vcvars = Join-Path $root 'VC\Auxiliary\Build\vcvars64.bat'
+    if (-not (Test-Path $vcvars)) { throw "vcvars64.bat nao encontrado em $vcvars" }
 
-Push-Location $root
-try {
-    cmake --preset $Preset
-    if ($LASTEXITCODE -ne 0) { throw "configure falhou" }
-
-    cmake --build --preset $Preset
-    if ($LASTEXITCODE -ne 0) { throw "build falhou" }
-
-    if ($Test) {
-        ctest --preset $Preset
-        if ($LASTEXITCODE -ne 0) { throw "testes falharam" }
+    # O .bat so' altera o ambiente do cmd.exe filho. `set` despeja o resultado,
+    # que reimportamos aqui -- e' o unico jeito de herdar INCLUDE e LIB.
+    & cmd.exe /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') {
+            Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] -EA SilentlyContinue
+        }
     }
-    Write-Host "OK" -ForegroundColor Green
+    Write-Host "MSVC: $root" -ForegroundColor DarkGray
 }
-finally {
-    Pop-Location
+
+Import-VsEnvironment
+
+$repo = Split-Path -Parent $PSScriptRoot
+$dir  = Join-Path $repo $BuildDir
+
+if (-not (Test-Path $dir)) {
+    throw "Diretorio de build ausente: $dir -- rodar cmake --preset primeiro."
 }
+
+$args = @('--build', $dir)
+if ($Target) { $args += @('--target', $Target) }
+
+& cmake @args
+exit $LASTEXITCODE

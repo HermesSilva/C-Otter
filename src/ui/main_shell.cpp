@@ -165,6 +165,30 @@ MainShell::MainShell()
     if (const char* port = std::getenv("PGPORT")) {
         profile.port = static_cast<std::uint16_t>(std::atoi(port));
     }
+
+    // Abre a galeria de icones direto na inicializacao. Existe porque a
+    // captura de tela para conferencia visual precisa de um caminho
+    // deterministico: automatizar o clique no menu erra o alvo com frequencia.
+    if (std::getenv("OTTER_SHOW_ICONS") != nullptr) {
+        show_icons_ = true;
+        connection_dialog_.close();
+    }
+
+    // Tema inicial por ambiente, pelo mesmo motivo: conferir os tres temas
+    // exige tres capturas, e trocar pelo menu a cada uma e' fragil.
+    if (const char* theme = std::getenv("OTTER_THEME")) {
+        set_theme(theme);
+    }
+
+    // Conecta direto, usando o perfil ja' montado a partir de PGHOST/PGUSER/...
+    // Serve para conferir a arvore de objetos numa captura: automatizar o
+    // clique em "Conectar" erra o alvo com frequencia, e uma tela conferida a'
+    // mao vale mais que um clique que talvez tenha acontecido.
+    if (std::getenv("OTTER_AUTOCONNECT") != nullptr) {
+        active_profile_ = profile;
+        session_.connect_async(profile.to_conn_config());
+        connection_dialog_.close();
+    }
 }
 
 MainShell::~MainShell() = default;
@@ -443,6 +467,7 @@ void MainShell::draw() {
     connection_dialog_.draw(feedback);
 
     if (show_about_) draw_about_window();
+    if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
 }
 
@@ -607,6 +632,7 @@ void MainShell::draw_menu_bar() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
+        ImGui::MenuItem(TR("Icon gallery"), nullptr, &show_icons_);
         ImGui::MenuItem(TR("ImGui demo"), nullptr, &show_demo_);
         ImGui::Separator();
         if (ImGui::MenuItem(TR("About C-Otter"))) show_about_ = true;
@@ -714,6 +740,9 @@ void MainShell::draw_navigator_panel() {
         for (const db::SchemaMeta& schema : schemas) {
             ImGui::PushID(schema.name.c_str());
 
+            icon_inline(Icon::schema, colors().accent_light);
+            ImGui::SameLine(0.0f, 4.0f);
+
             const bool schema_open =
                 ImGui::TreeNodeEx(schema.name.c_str(),
                                   ImGuiTreeNodeFlags_DefaultOpen);
@@ -737,6 +766,12 @@ bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count
     icon_inline(icon, colors().accent_light);
     ImGui::SameLine(0.0f, 4.0f);
 
+    // OTTER_EXPAND_TREE abre todas as pastas na captura de tela. Conferir os
+    // icones de constraint, indice, FK e trigger exige chegar ate' o quarto
+    // nivel da arvore, e clicar la' por automacao erra o alvo.
+    static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
+    if (expand_all) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+
     const bool open = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth);
 
     if (loaded) {
@@ -758,12 +793,20 @@ void MainShell::draw_tables_folder(const db::SchemaMeta& schema) {
         const bool is_view = table.kind == db::ObjKind::view ||
                              table.kind == db::ObjKind::materialized_view;
 
-        icon_inline(is_view ? Icon::view : Icon::table,
+        icon_inline(is_view ? (table.kind == db::ObjKind::materialized_view
+                                   ? Icon::materialized_view : Icon::view)
+                            : Icon::table,
                     is_view ? colors().data : colors().accent);
         ImGui::SameLine(0.0f, 4.0f);
 
         ImGui::PushStyleColor(ImGuiCol_Text,
                               col(is_view ? colors().data : colors().text));
+        // So' a primeira tabela: abrir as 32 encheria a arvore de ruido e
+        // dispararia 32 consultas de catalogo de uma vez.
+        static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
+        if (expand_all && &table == &schema.tables.front()) {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        }
         const bool open = ImGui::TreeNode(table.name.c_str());
         ImGui::PopStyleColor();
 
@@ -826,14 +869,14 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Constraints ---------------------------------------------------------
-    if (draw_folder_node(Icon::commit, TR("Constraints"),
+    if (draw_folder_node(Icon::constraint, TR("Constraints"),
                          table.constraints.size(), table.constraints_loaded)) {
         if (!table.constraints_loaded && !session_.busy()) {
             session_.load_constraints_async(schema.name, table.name);
         }
         for (const db::ConstraintMeta& constraint : table.constraints) {
             const bool is_pk = constraint.kind == db::ObjKind::primary_key;
-            icon_inline(is_pk ? Icon::key : Icon::commit,
+            icon_inline(is_pk ? Icon::key : Icon::constraint,
                         is_pk ? p.data_light : p.text_dim);
             ImGui::SameLine(0.0f, 4.0f);
 
@@ -851,7 +894,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Índices -------------------------------------------------------------
-    if (draw_folder_node(Icon::filter, TR("Indexes"), table.indexes.size(),
+    if (draw_folder_node(Icon::index, TR("Indexes"), table.indexes.size(),
                          table.indexes_loaded)) {
         if (!table.indexes_loaded && !session_.busy()) {
             session_.load_indexes_async(schema.name, table.name);
@@ -863,7 +906,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                         : index.primary ? p.data_light
                                                         : p.text;
 
-            icon_inline(Icon::filter, color);
+            icon_inline(Icon::index, color);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(color), "%s", index.name.c_str());
 
@@ -882,13 +925,13 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Chaves estrangeiras -------------------------------------------------
-    if (draw_folder_node(Icon::key, TR("Foreign keys"),
+    if (draw_folder_node(Icon::foreign_key, TR("Foreign keys"),
                          table.foreign_keys.size(), table.keys_loaded)) {
         if (!table.keys_loaded && !session_.busy()) {
             session_.load_keys_async(schema.name, table.name);
         }
         for (const db::ForeignKeyMeta& key : table.foreign_keys) {
-            icon_inline(Icon::chevron_right, p.accent_light);
+            icon_inline(Icon::foreign_key, p.accent_light);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(p.text), "%s", key.source_column.c_str());
             ImGui::SameLine();
@@ -908,13 +951,13 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     //
     // Quem aponta para esta tabela. Responder "o que depende disto?" é o que
     // mais falta num cliente SQL.
-    if (draw_folder_node(Icon::copy, TR("References"),
+    if (draw_folder_node(Icon::references, TR("References"),
                          table.references.size(), table.keys_loaded)) {
         if (!table.keys_loaded && !session_.busy()) {
             session_.load_keys_async(schema.name, table.name);
         }
         for (const db::ForeignKeyMeta& reference : table.references) {
-            icon_inline(Icon::chevron_right, p.warn);
+            icon_inline(Icon::references, p.warn);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(p.warn), "%s.%s",
                                reference.source_table.c_str(),
@@ -927,13 +970,13 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Triggers ------------------------------------------------------------
-    if (draw_folder_node(Icon::clock, TR("Triggers"), table.triggers.size(),
+    if (draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
                          table.triggers_loaded)) {
         if (!table.triggers_loaded && !session_.busy()) {
             session_.load_triggers_async(schema.name, table.name);
         }
         for (const db::TriggerMeta& trigger : table.triggers) {
-            icon_inline(Icon::clock, trigger.enabled ? p.text_dim : p.error);
+            icon_inline(Icon::trigger, trigger.enabled ? p.text_dim : p.error);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(trigger.enabled ? p.text : p.text_dim),
                                "%s", trigger.name.c_str());
@@ -951,7 +994,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
 }
 
 void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
-    if (!draw_folder_node(Icon::refresh, TR("Sequences"), schema.sequences.size(),
+    if (!draw_folder_node(Icon::sequence, TR("Sequences"), schema.sequences.size(),
                           schema.sequences_loaded)) {
         return;
     }
@@ -962,7 +1005,7 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
 
     const Palette& p = colors();
     for (const db::SequenceMeta& sequence : schema.sequences) {
-        icon_inline(Icon::refresh, p.text_dim);
+        icon_inline(Icon::sequence, p.text_dim);
         ImGui::SameLine(0.0f, 4.0f);
         ImGui::TextColored(col4(p.text), "%s", sequence.name.c_str());
         ImGui::SameLine();
@@ -981,7 +1024,7 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
 }
 
 void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
-    if (!draw_folder_node(Icon::settings, TR("Functions"), schema.routines.size(),
+    if (!draw_folder_node(Icon::function, TR("Functions"), schema.routines.size(),
                           schema.routines_loaded)) {
         return;
     }
@@ -994,7 +1037,8 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
     for (const db::RoutineMeta& routine : schema.routines) {
         const bool is_procedure = routine.kind == db::ObjKind::procedure;
 
-        icon_inline(Icon::settings, is_procedure ? p.data : p.text_dim);
+        icon_inline(is_procedure ? Icon::procedure : Icon::function,
+                    is_procedure ? p.data : p.text_dim);
         ImGui::SameLine(0.0f, 4.0f);
         ImGui::TextColored(col4(p.text), "%s", routine.name.c_str());
         ImGui::SameLine();
@@ -1495,6 +1539,86 @@ void MainShell::draw_about_window() {
         ImGui::TextColored(col4(colors().text_dim),
                            "Dear ImGui %s  |  protocolo PostgreSQL v3 nativo",
                            IMGUI_VERSION);
+    }
+    ImGui::End();
+}
+
+void MainShell::draw_icon_gallery() {
+    // Nomes em ingles literal, sem TR(): sao identificadores do enum Icon, nao
+    // texto de interface. Traduzi-los tornaria a galeria inutil para conferir
+    // qual desenho corresponde a qual constante do codigo.
+    struct Entry { Icon icon; const char* name; };
+    static const Entry kEntries[] = {
+        {Icon::connect, "connect"},       {Icon::disconnect, "disconnect"},
+        {Icon::play, "play"},             {Icon::stop, "stop"},
+        {Icon::commit, "commit"},         {Icon::rollback, "rollback"},
+        {Icon::database, "database"},     {Icon::schema, "schema"},
+        {Icon::table, "table"},           {Icon::view, "view"},
+        {Icon::materialized_view, "materialized_view"},
+        {Icon::column, "column"},         {Icon::key, "key"},
+        {Icon::constraint, "constraint"}, {Icon::index, "index"},
+        {Icon::foreign_key, "foreign_key"},
+        {Icon::references, "references"}, {Icon::sequence, "sequence"},
+        {Icon::function, "function"},     {Icon::procedure, "procedure"},
+        {Icon::trigger, "trigger"},       {Icon::data_type, "data_type"},
+        {Icon::extension, "extension"},   {Icon::role, "role"},
+        {Icon::tablespace, "tablespace"}, {Icon::folder, "folder"},
+        {Icon::refresh, "refresh"},       {Icon::search, "search"},
+        {Icon::settings, "settings"},     {Icon::plus, "plus"},
+        {Icon::close, "close"},           {Icon::pin, "pin"},
+        {Icon::save, "save"},             {Icon::open, "open"},
+        {Icon::copy, "copy"},             {Icon::chevron_right, "chevron_right"},
+        {Icon::chevron_down, "chevron_down"},
+        {Icon::warning, "warning"},       {Icon::error, "error"},
+        {Icon::info, "info"},             {Icon::clock, "clock"},
+        {Icon::filter, "filter"},
+    };
+
+    ImGui::SetNextWindowSize(ImVec2(1180, 900), ImGuiCond_Appearing);
+    if (ImGui::Begin(TRW("Icon gallery", "###IconGallery"), &show_icons_,
+                     ImGuiWindowFlags_NoDocking)) {
+        const Palette& p = colors();
+
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(col4(p.text_dim), TR(
+            "Every object type needs its own drawing. Two icons that look alike "
+            "at tree size are a defect."));
+        ImGui::PopTextWrapPos();
+        ImGui::Separator();
+
+        // Tres tamanhos: o da arvore (o mais critico), o da barra e um grande
+        // para inspecionar o traco.
+        static float scale = 1.0f;
+        ImGui::SetNextItemWidth(220.0f);
+        ImGui::SliderFloat(TR("Scale"), &scale, 0.6f, 4.0f, "%.1fx");
+        ImGui::Separator();
+
+        const float cell = 132.0f;
+        const int columns = (std::max)(
+            1, static_cast<int>(ImGui::GetContentRegionAvail().x / cell));
+
+        if (ImGui::BeginTable("##icons", columns)) {
+            for (const Entry& entry : kEntries) {
+                ImGui::TableNextColumn();
+
+                const ImVec2 origin = ImGui::GetCursorScreenPos();
+                const float box = ImGui::GetFontSize() * 2.2f * scale;
+                ImGui::Dummy(ImVec2(box, box));
+
+                draw_icon(entry.icon,
+                          ImVec2(origin.x + box * 0.5f, origin.y + box * 0.5f),
+                          box * 0.8f, p.accent_light, 1.6f);
+
+                ImGui::TextColored(col4(p.text), "%s", entry.name);
+
+                // Ao lado, o mesmo desenho no tamanho real da arvore: e' ai'
+                // que a confusao entre dois icones aparece.
+                icon_inline(entry.icon, p.text_dim);
+                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::TextColored(col4(p.text_dim), TR("tree size"));
+            }
+            ImGui::EndTable();
+        }
     }
     ImGui::End();
 }

@@ -6,7 +6,7 @@
 > float together in a raft. Basically, they were born for databases.
 > Here, every JOIN is an **OTTER JOIN**.
 
-Um gerenciador universal de bancos de dados escrito em C++20, inspirado na arquitetura do
+Um gerenciador universal de bancos de dados escrito em C++23, inspirado na arquitetura do
 [DBeaver](https://github.com/dbeaver/dbeaver) — mesmo rio, corrente mais rápida.
 
 ## O que é
@@ -20,11 +20,11 @@ imediato.
 
 | Eixo | Decisão |
 |------|---------|
-| Linguagem | C++20, zero dependências no núcleo |
-| UI | Dear ImGui (modo imediato, grid virtualizado próprio) |
-| Drivers | libpq, MariaDB/MySQL, SQLite, ODBC (MSSQL), OCI (Oracle) |
+| Linguagem | C++23, zero dependências no núcleo |
+| UI | Dear ImGui + GLFW/OpenGL 3.3, grid virtualizado próprio, ícones vetoriais |
+| Drivers | PostgreSQL wire v3 nativo (ADR 0009); MySQL, SQLite, MSSQL, Oracle a fazer |
 | Plataformas | Windows e Linux — CMake + MSVC/Clang |
-| Build | CMake 4.x, Ninja ou MSBuild |
+| Build | CMake 4.x + Ninja, link estático total (`/MT`) |
 
 ## Glossário da lontra
 

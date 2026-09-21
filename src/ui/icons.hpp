@@ -7,9 +7,11 @@
 // do tema automaticamente. Tambem evita mais um arquivo na distribuicao.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 struct ImVec2;
+struct ImDrawList;
 
 namespace otter::ui {
 
@@ -42,11 +44,41 @@ enum class Icon : std::uint8_t {
     info,
     clock,
     filter,
+
+    // Tipos de objeto do banco. Cada um tem desenho proprio: reaproveitar um
+    // simbolo generico para dois tipos diferentes torna a arvore ilegivel de
+    // relance (diretiva 5 do CLAUDE.md).
+    materialized_view,  // olho sobre disco: view com dados persistidos
+    index,              // paginas com marcador
+    constraint,         // escudo
+    foreign_key,        // elo de corrente
+    references,         // setas convergindo
+    sequence,           // degraus ascendentes
+    function,           // f(x)
+    procedure,          // bloco com engrenagem
+    trigger,            // raio
+    data_type,          // chaves {} com nucleo
+    extension,          // peca de quebra-cabeca
+    role,               // silhueta com chave
+    tablespace,         // discos empilhados
+    schema,             // grade ramificada
 };
+
+// Numero de icones; serve para iterar sobre todos (galeria, testes).
+inline constexpr std::size_t kIconCount =
+    static_cast<std::size_t>(Icon::schema) + 1;
 
 // Desenha o icone centrado em `center`, com `size` de lado.
 void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,
                float thickness = 1.6f);
+
+// Variante que desenha num DrawList explicito, em vez do da janela corrente.
+//
+// Existe para o teste: comparar os vertices gerados por cada icone e' o unico
+// jeito de provar que dois tipos de objeto nao compartilham desenho. Fora do
+// teste, prefira a sobrecarga acima.
+void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
+                  std::uint32_t color, float thickness = 1.6f);
 
 // Botao com icone e tooltip. `id` precisa ser unico no escopo do ImGui.
 //

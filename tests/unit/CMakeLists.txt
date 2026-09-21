@@ -3,6 +3,7 @@ add_executable(otter_tests
     test_arena.cpp
     test_error.cpp
     test_i18n.cpp
+    test_icons.cpp
     test_pgwire.cpp
     test_result_set.cpp
     test_sql.cpp

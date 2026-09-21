@@ -116,26 +116,49 @@ isso vale para colunas; passa a valer para todos.
 Cada tipo de objeto precisa de um ícone **sugestivo, elegante e futurista**, distinguível de
 relance. Reaproveitar um desenho genérico para dois tipos diferentes é dívida a pagar.
 
-Estado atual (`src/ui/icons.cpp`):
+**Dívida quitada em 2026-09-21.** Nenhum tipo de objeto compartilha desenho.
 
-| Nó | Ícone | Situação |
-|----|-------|----------|
-| Tabela | `table` | ✅ próprio |
-| View | `view` | ✅ próprio |
-| Coluna | `column` | ✅ próprio |
-| Chave primária | `key` | ✅ próprio |
-| Sequence | `refresh` | ⚠️ **compartilhado** com auto-commit |
-| Índice | `filter` | ⚠️ **compartilhado** com filtro |
-| Constraint | `commit` | ⚠️ **compartilhado** com commit |
-| Função/Procedure | `settings` | ⚠️ **compartilhado** com preferências |
-| References | `copy` | ⚠️ **compartilhado** com copiar |
-| Trigger | `clock` | ⚠️ **compartilhado** com histórico |
-| Materialized view | — | ⬜ ausente |
-| Tipo de dado | — | ⬜ ausente |
-| Extensão, role, tablespace | — | ⬜ ausente |
+| Nó | Ícone | Desenho |
+|----|-------|---------|
+| Schema | `schema` | ✅ grade ramificada |
+| Tabela | `table` | ✅ grade com cabeçalho |
+| View | `view` | ✅ olho |
+| Materialized view | `materialized_view` | ✅ olho sobre disco |
+| Coluna | `column` | ✅ célula vertical |
+| Chave primária | `key` | ✅ chave |
+| Constraint | `constraint` | ✅ escudo |
+| Índice | `index` | ✅ páginas com marcador |
+| Foreign key | `foreign_key` | ✅ dois elos sobrepostos |
+| References | `references` | ✅ três origens convergindo num alvo |
+| Sequence | `sequence` | ✅ degraus com seta |
+| Função | `function` | ✅ caixa com duas entradas e uma saída |
+| Procedure | `procedure` | ✅ bloco com play |
+| Trigger | `trigger` | ✅ raio |
+| Tipo de dado | `data_type` | ✅ chaves `{}` com três campos |
+| Extensão | `extension` | ✅ peça de quebra-cabeça |
+| Role | `role` | ✅ silhueta com chave |
+| Tablespace | `tablespace` | ✅ gaveta com puxadores |
 
-Desenhar os faltantes no mesmo traço fino dos existentes, na caixa normalizada
-−0.5..0.5 de `Canvas`.
+Verificado na aplicação rodando, nos três temas e no tamanho real da árvore
+(Ajuda → Galeria de ícones, ou `OTTER_SHOW_ICONS=1`).
+
+**O teste que impede a dívida de voltar:** `tests/unit/test_icons.cpp` desenha
+cada ícone num `ImDrawList` isolado e compara os vértices gerados. Dois ícones
+com a mesma geometria fazem o teste falhar **nomeando o par**.
+
+A primeira versão desse teste comparava só os ícones de objeto entre si, e
+passou com uma regressão injetada de propósito — porque a dívida real era de
+pares *ação↔objeto* (`commit`↔constraint, `filter`↔índice,
+`settings`↔função). A versão final compara os 42 ícones entre si.
+
+Quatro desenhos foram refeitos depois de olhar a captura, não o código:
+
+| Ícone | Problema na primeira versão |
+|-------|------------------------------|
+| `foreign_key` | Dois arcos unidos por retas fundiram-se num oval só |
+| `materialized_view` | Olho e disco colados viravam uma forma ambígua |
+| `function` | O `(f)` desaparecia no tamanho da árvore — letras não sobrevivem a 14 px |
+| `tablespace` | Elipses empilhadas ficavam iguais à materialized view |
 
 **Tooltip com detalhe.** Comentário do objeto, definição da constraint, expressão do
 índice — informação que não cabe no rótulo.
