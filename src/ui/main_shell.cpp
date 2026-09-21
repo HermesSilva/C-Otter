@@ -914,6 +914,7 @@ void MainShell::draw() {
                 // a coluna de índice N do resultado ANTERIOR -- colorindo a
                 // coisa errada sem erro nenhum.
                 document->color_rules().prepare(*document->result());
+                recompute_pivot(*document);
                 document->set_edit_target(
                     db::find_edit_target(*document->result(),
                                          session().schemas()));
@@ -2757,6 +2758,164 @@ void MainShell::recompute_groups(SqlDocument& document) {
         *document.result(), document.group_spec(), document.paged()));
 }
 
+void MainShell::recompute_pivot(SqlDocument& document) {
+    if (!document.result().has_value() || !document.pivot_active()) {
+        document.pivot_result() = {};
+        return;
+    }
+
+    // `paged()` diz se o ResultSet cobre o resultado inteiro -- e vira a marca
+    // `partial`, que acompanha os números até a tela. Pivotar 200 linhas de 2
+    // milhões e apresentar como o resultado seria a mesma mentira da
+    // agregação.
+    document.pivot_result() = db::pivot(*document.result(),
+                                        document.pivot_spec(),
+                                        document.paged());
+}
+
+// A tabela pivotada, no lugar da grade.
+void MainShell::draw_pivot_table(SqlDocument& document, const db::ResultSet& rs) {
+    const Palette& p = colors();
+    const db::PivotResult& pivot = document.pivot_result();
+    const db::PivotSpec& spec = document.pivot_spec();
+
+    // --- Cabeçalho da barra ---------------------------------------------------
+
+    icon_inline(Icon::pivot, p.accent_light);
+    ImGui::SameLine(0.0f, 6.0f);
+
+    const auto column_name = [&rs](std::size_t index) {
+        return index < rs.column_count() ? rs.column(index).info().name
+                                         : std::string{"?"};
+    };
+
+    ImGui::TextColored(col4(p.text_dim), TR("Pivot: %s by %s, %s of %s"),
+                       spec.rows.empty() ? "?" : column_name(spec.rows[0]).c_str(),
+                       column_name(spec.column).c_str(),
+                       TR(std::string(db::to_string(spec.function)).c_str()),
+                       column_name(spec.value).c_str());
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton(TR("Clear pivot"))) {
+        document.set_pivot_active(false);
+        document.pivot_result() = {};
+        return;
+    }
+
+    // O aviso de parcialidade. Sem ele, a célula que soma 200 de 2 milhões
+    // seria lida como a soma do resultado -- mentira (ADR 0005).
+    if (pivot.partial) {
+        ImGui::SameLine();
+        icon_inline(Icon::warning, p.warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.warn), TR("over this page only (%zu rows)"),
+                           pivot.rows_covered);
+
+        ImGui::SameLine();
+        const bool can_run = session().state() == SessionState::connected &&
+                             !session().busy();
+        if (ImGui::SmallButton(TR("Compute on the server")) && can_run) {
+            const std::string sql = db::build_pivot_query(
+                document.paged_sql(), rs, spec, pivot.headers);
+            if (!sql.empty()) open_sql_tab(sql, /*run=*/true);
+        }
+    }
+
+    // Truncamento nunca é silencioso: o usuário concluiria que os dados não
+    // existem.
+    if (pivot.truncated) {
+        icon_inline(Icon::warning, p.error);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.error),
+                           TR("showing %zu of %zu distinct values; group the "
+                              "data before pivoting"),
+                           pivot.headers.size(), pivot.distinct_values);
+    }
+
+    ImGui::Separator();
+
+    if (pivot.rows.empty()) {
+        ImGui::TextColored(col4(p.text_dim), TR("nothing to pivot"));
+        return;
+    }
+
+    // --- A tabela --------------------------------------------------------------
+
+    // +1 pela coluna de totais, e o teto do ImGui continua sendo 64.
+    const auto columns = static_cast<int>(
+        std::min<std::size_t>(spec.rows.size() + pivot.headers.size(), 64));
+
+    constexpr ImGuiTableFlags flags =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
+        ImGuiTableFlags_ScrollX | ImGuiTableFlags_SizingFixedFit;
+
+    if (!ImGui::BeginTable("##pivot", columns, flags)) return;
+
+    for (const std::size_t index : spec.rows) {
+        ImGui::TableSetupColumn(column_name(index).c_str());
+    }
+    for (const std::string& header : pivot.headers) {
+        ImGui::TableSetupColumn(header.c_str());
+    }
+    ImGui::TableSetupScrollFreeze(static_cast<int>(spec.rows.size()), 1);
+    ImGui::TableHeadersRow();
+
+    for (const db::PivotRow& row : pivot.rows) {
+        ImGui::TableNextRow();
+
+        for (std::size_t i = 0; i < spec.rows.size(); ++i) {
+            ImGui::TableSetColumnIndex(static_cast<int>(i));
+            ImGui::TextColored(col4(p.accent_light), "%s",
+                               i < row.keys.size() ? row.keys[i].c_str() : "");
+        }
+
+        for (std::size_t i = 0; i < pivot.headers.size(); ++i) {
+            const int index = static_cast<int>(spec.rows.size() + i);
+            if (index >= columns) break;
+
+            ImGui::TableSetColumnIndex(index);
+            if (i >= row.cells.size()) continue;
+
+            const db::AggregateValue& cell = row.cells[i];
+
+            // Célula ausente sai esmaecida: distinguir "não houve" de um
+            // valor é o ponto de não mostrar zero ali.
+            if (cell.text == "-") {
+                ImGui::TextColored(col4(p.text_dim), "-");
+            } else {
+                const float width = ImGui::CalcTextSize(cell.text.c_str()).x;
+                const float available = ImGui::GetContentRegionAvail().x;
+                if (available > width) {
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                                         available - width);
+                }
+                ImGui::TextUnformatted(cell.text.c_str());
+            }
+        }
+    }
+
+    // Linha de totais, no fim e destacada.
+    if (!pivot.totals.empty()) {
+        ImGui::TableNextRow();
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                               with_alpha(p.accent, 0.12f));
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextColored(col4(p.text_bright), TR("Total"));
+
+        for (std::size_t i = 0; i < pivot.totals.size(); ++i) {
+            const int index = static_cast<int>(spec.rows.size() + i);
+            if (index >= columns) break;
+
+            ImGui::TableSetColumnIndex(index);
+            ImGui::TextColored(col4(p.text_bright), "%s",
+                               pivot.totals[i].text.c_str());
+        }
+    }
+    ImGui::EndTable();
+}
+
 void MainShell::draw_group_bar(SqlDocument& document, const db::ResultSet& rs) {
     const Palette& p = colors();
     const db::GroupSpec& spec = document.group_spec();
@@ -3475,6 +3634,50 @@ void MainShell::draw_column_header_menu(SqlDocument& document,
         recompute_groups(document);
     }
 
+    // --- Pivot (ADR 0005) ----------------------------------------------------
+    //
+    // Pivotar precisa de TRÊS colunas: a que fica como linha, a que vira
+    // colunas, e a agregada. O menu pede a do meio -- esta -- e escolhe as
+    // outras: a primeira coluna vira linha, e a primeira numérica vira valor.
+    // Um assistente de três passos para a operação mais comum seria atrito.
+    if (document.pivot_active()) {
+        if (ImGui::MenuItem(TR("Clear pivot"))) {
+            document.set_pivot_active(false);
+            document.pivot_result() = {};
+        }
+    } else if (rs.column_count() >= 2) {
+        if (ImGui::MenuItem(TR("Pivot by this column"))) {
+            db::PivotSpec pivot_spec;
+
+            // A coluna de linha é a primeira que NÃO seja esta.
+            for (std::size_t i = 0; i < rs.column_count(); ++i) {
+                if (i != column) { pivot_spec.rows = {i}; break; }
+            }
+
+            // A de valor é a primeira numérica que não seja nenhuma das duas.
+            // Sem numérica, conta as linhas: é o pivot de frequência, que
+            // funciona em qualquer resultado.
+            pivot_spec.column   = column;
+            pivot_spec.function = db::Aggregate::count;
+            pivot_spec.value    = column;
+
+            for (std::size_t i = 0; i < rs.column_count(); ++i) {
+                if (i == column || i == pivot_spec.rows.front()) continue;
+                if (!db::is_right_aligned(rs.column(i).info().kind)) continue;
+
+                pivot_spec.value    = i;
+                pivot_spec.function = db::Aggregate::sum;
+                break;
+            }
+
+            document.pivot_spec() = pivot_spec;
+            document.set_pivot_active(true);
+            recompute_pivot(document);
+        }
+    }
+
+    ImGui::Separator();
+
     if (ImGui::BeginMenu(TR("Aggregate"))) {
         static constexpr db::Aggregate kFunctions[] = {
             db::Aggregate::count, db::Aggregate::count_non_null,
@@ -3845,6 +4048,14 @@ void MainShell::draw_grid_panel() {
             ImGui::TextColored(col4(p.text_dim), TR("read-only: %s"),
                                TR(std::string(db::to_string(
                                       document->edit_target().refusal)).c_str()));
+        }
+
+        // Pivot SUBSTITUI a grade: as duas juntas duplicariam a tela sem
+        // ajudar a ler nenhuma.
+        if (document->pivot_active()) {
+            draw_pivot_table(*document, rs);
+            ImGui::End();
+            return;
         }
 
         draw_group_bar(*document, rs);
@@ -4510,6 +4721,7 @@ void MainShell::draw_icon_gallery() {
         {Icon::play, "play"},             {Icon::stop, "stop"},
         {Icon::commit, "commit"},         {Icon::rollback, "rollback"},
         {Icon::database, "database"},     {Icon::schema, "schema"},
+        {Icon::pivot, "pivot"},
         {Icon::table, "table"},           {Icon::view, "view"},
         {Icon::materialized_view, "materialized_view"},
         {Icon::column, "column"},         {Icon::key, "key"},

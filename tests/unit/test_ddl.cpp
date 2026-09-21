@@ -345,3 +345,23 @@ OTTER_TEST(ddl_picks_the_dialect_from_the_driver_id) {
     set_sql_dialect_for("algo-novo");
     OTTER_CHECK(sql_dialect() == QuoteStyle::double_quotes);
 }
+
+OTTER_TEST(ddl_strips_the_trailing_semicolon_for_wrapping) {
+    // Quem ENVOLVE a consulta do usuario numa subconsulta -- paginacao,
+    // agregacao no servidor, pivot -- nao pode levar o ';' junto: ele fica no
+    // meio de "FROM ( ... ) AS x", e o servidor recusa apontando para o ')'.
+    OTTER_CHECK_EQ(strip_trailing_semicolon("SELECT 1;"), std::string_view{"SELECT 1"});
+    OTTER_CHECK_EQ(strip_trailing_semicolon("SELECT 1"),  std::string_view{"SELECT 1"});
+    OTTER_CHECK_EQ(strip_trailing_semicolon("SELECT 1 ;  \n"),
+                   std::string_view{"SELECT 1"});
+    OTTER_CHECK_EQ(strip_trailing_semicolon("SELECT 1\n\n"),
+                   std::string_view{"SELECT 1"});
+
+    // Um ';' NO MEIO da consulta nao e' final e nao se toca -- ele esta'
+    // dentro de uma string, ou e' um script de varios comandos.
+    OTTER_CHECK_EQ(strip_trailing_semicolon("SELECT ';' FROM t"),
+                   std::string_view{"SELECT ';' FROM t"});
+
+    OTTER_CHECK(strip_trailing_semicolon(";").empty());
+    OTTER_CHECK(strip_trailing_semicolon("").empty());
+}

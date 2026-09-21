@@ -86,6 +86,16 @@ struct GroupResult {
                                               std::size_t column,
                                               Aggregate function);
 
+// O mesmo, sobre um SUBCONJUNTO de linhas.
+//
+// Existe para o pivot e para os subtotais de grupo, onde as linhas de cada
+// celula ja' foram separadas: refazer a varredura da coluna inteira por
+// celula seria O(n * celulas).
+[[nodiscard]] AggregateValue aggregate_rows(const ResultSet& rs,
+                                            const std::vector<std::size_t>& rows,
+                                            std::size_t column,
+                                            Aggregate function);
+
 // Reescreve a consulta com GROUP BY, para agregar no SERVIDOR.
 //
 // E' a resposta honesta quando o resultado e' paginado: em vez de somar a

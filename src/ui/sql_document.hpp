@@ -10,6 +10,7 @@
 
 #include "db/aggregate.hpp"
 #include "db/coloring.hpp"
+#include "db/pivot.hpp"
 #include "db/edit.hpp"
 #include "db/result_set.hpp"
 #include "sql/paging.hpp"
@@ -112,6 +113,21 @@ public:
     [[nodiscard]] db::EditBuffer& edits() noexcept { return edits_; }
     [[nodiscard]] const db::EditBuffer& edits() const noexcept { return edits_; }
 
+    // Tabela dinamica (ADR 0005). Quando ativa, SUBSTITUI a grade: mostrar as
+    // duas ao mesmo tempo duplicaria a tela sem ajudar a ler nenhuma.
+    [[nodiscard]] bool pivot_active() const noexcept { return pivot_active_; }
+    void set_pivot_active(bool active) noexcept { pivot_active_ = active; }
+
+    [[nodiscard]] db::PivotSpec& pivot_spec() noexcept { return pivot_spec_; }
+    [[nodiscard]] const db::PivotSpec& pivot_spec() const noexcept {
+        return pivot_spec_;
+    }
+
+    [[nodiscard]] db::PivotResult& pivot_result() noexcept { return pivot_; }
+    [[nodiscard]] const db::PivotResult& pivot_result() const noexcept {
+        return pivot_;
+    }
+
     // Regras de cor condicional (ADR 0005).
     //
     // Por DOCUMENTO, e nao global: duas abas podem mostrar consultas
@@ -151,6 +167,10 @@ private:
     sql::ColumnFilter           filter_;
     db::EditBuffer              edits_;
     db::ColorRules              color_rules_;
+
+    db::PivotSpec               pivot_spec_;
+    db::PivotResult             pivot_;
+    bool                        pivot_active_ = false;
     db::EditTarget              edit_target_;
     db::GroupSpec               group_spec_;
     db::GroupResult             groups_;

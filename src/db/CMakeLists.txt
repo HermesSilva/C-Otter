@@ -19,6 +19,7 @@ otter_add_library(otter_db
         drivers/mysql.cpp
         alter.cpp
         coloring.cpp
+        pivot.cpp
         catalog_mysql.cpp
         catalog_reader.cpp
         registry.cpp

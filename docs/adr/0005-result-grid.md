@@ -5,7 +5,18 @@
 
 > **Implementado:** agregação local com as 7 funções, agrupamento por múltiplas colunas,
 > linha de totais, marca de resultado parcial e "calcular no servidor" (`db/aggregate.cpp`).
-> **Falta:** pivot, coluna calculada, sparkline, fetch progressivo.
+> **Falta:** coluna calculada, sparkline, fetch progressivo.
+>
+> **Pivot: feito** em 2026-09-21. `src/db/pivot.cpp`. Transpõe os valores de
+> uma coluna em colunas, agregando na interseção, com as duas armadilhas deste
+> ADR tratadas: cardinalidade alta trunca **dizendo** quantos valores ficaram
+> de fora, e pivotar a página carrega a marca `partial` com um botão
+> "Calcular no servidor" ao lado.
+>
+> O pivot no servidor não usa `PIVOT` -- que só existe no SQL Server e no
+> Oracle. Gera `GROUP BY` com um agregado condicional por valor
+> (`SUM(CASE WHEN mes = 'jan' THEN valor END)`), que é padrão SQL e funciona
+> nos dois SGBDs que o C-Otter fala.
 >
 > **Formatação condicional: feita** em 2026-09-21. `src/db/coloring.cpp`, com
 > 12 operadores, regra por célula ou por linha inteira, e o modo gradiente

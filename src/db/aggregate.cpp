@@ -226,6 +226,21 @@ AggregateValue aggregate_column(const ResultSet& rs, std::size_t column,
     return accumulator.value();
 }
 
+AggregateValue aggregate_rows(const ResultSet& rs,
+                              const std::vector<std::size_t>& rows,
+                              std::size_t column, Aggregate function) {
+    if (column >= rs.column_count() || function == Aggregate::none) return {};
+
+    Accumulator accumulator;
+    accumulator.function = function;
+
+    for (const std::size_t row : rows) {
+        if (row >= rs.row_count()) continue;
+        accumulator.add(rs.text(row, column), rs.is_null(row, column));
+    }
+    return accumulator.value();
+}
+
 GroupResult group_and_aggregate(const ResultSet& rs, const GroupSpec& spec,
                                 bool partial) {
     GroupResult result;
@@ -332,7 +347,8 @@ std::string build_group_query(std::string_view sql, const ResultSet& rs,
     // GROUP BY, ORDER BY ou LIMIT, e anexar produziria sintaxe invalida ou
     // agruparia o que ja' estava agrupado (mesmo raciocinio do filtro,
     // ADR 0011).
-    return "SELECT " + columns + "\n  FROM (\n" + std::string(sql) +
+    return "SELECT " + columns + "\n  FROM (\n" +
+           std::string(strip_trailing_semicolon(sql)) +
            "\n) AS otter_group\n GROUP BY " + grouping +
            "\n ORDER BY " + grouping;
 }

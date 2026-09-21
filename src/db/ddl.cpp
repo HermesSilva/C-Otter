@@ -176,6 +176,24 @@ std::string quote_literal(std::string_view text) {
     return out;
 }
 
+std::string_view strip_trailing_semicolon(std::string_view sql) {
+    const auto is_space = [](char c) {
+        return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+    };
+
+    std::size_t end = sql.size();
+
+    // Espacos, depois UM ';', depois espacos de novo. Mais de um ';' seria um
+    // script de varios comandos, que nao da' para envolver de jeito nenhum.
+    while (end > 0 && is_space(sql[end - 1])) --end;
+
+    if (end > 0 && sql[end - 1] == ';') {
+        --end;
+        while (end > 0 && is_space(sql[end - 1])) --end;
+    }
+    return sql.substr(0, end);
+}
+
 std::string qualified_name(std::string_view schema, std::string_view table) {
     if (schema.empty()) return quote_if_needed(table);
     return quote_if_needed(schema) + "." + quote_if_needed(table);

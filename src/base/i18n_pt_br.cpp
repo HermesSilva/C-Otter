@@ -163,6 +163,14 @@ const char* const kPtBr[] = {
 
     // --- Cor condicional (ADR 0005) ---
     "Color",                      "Cor",
+
+    // --- Pivot (ADR 0005) ---
+    "Pivot by this column",       "Pivotar por esta coluna",
+    "Clear pivot",                "Limpar pivot",
+    "nothing to pivot",           "nada a pivotar",
+    "Pivot: %s by %s, %s of %s",  "Pivot: %s por %s, %s de %s",
+    "showing %zu of %zu distinct values; group the data before pivoting",
+    "mostrando %zu de %zu valores distintos; agrupe os dados antes de pivotar",
     "Heat map",                   "Mapa de calor",
     "Mark negatives",             "Marcar negativos",
     "Mark zeros",                 "Marcar zeros",

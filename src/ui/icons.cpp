@@ -503,6 +503,27 @@ void draw_schema(const Canvas& c) {
     c.line(-0.20f, -0.06f, -0.20f, 0.06f);
 }
 
+void draw_pivot(const Canvas& c) {
+    // Uma COLUNA de celulas virando uma LINHA: a transposicao, que e' o que o
+    // pivot faz. A seta em curva no meio e' o que separa este icone do de
+    // tabela -- sem ela, dois retangulos com divisorias seriam a mesma coisa.
+    c.rect(-0.36f, -0.32f, -0.16f, 0.32f, 0.05f);   // coluna, em pe'
+    c.line(-0.36f, -0.11f, -0.16f, -0.11f);
+    c.line(-0.36f,  0.11f, -0.16f,  0.11f);
+
+    c.rect(-0.02f, 0.12f, 0.36f, 0.32f, 0.05f);     // linha, deitada
+    c.line(0.11f, 0.12f, 0.11f, 0.32f);
+    c.line(0.24f, 0.12f, 0.24f, 0.32f);
+
+    // Seta da coluna para a linha, passando por cima.
+    c.dl->PathLineTo(c.at(-0.05f, -0.22f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.20f, -0.22f), c.at(0.30f, -0.12f),
+                                 c.at(0.30f, 0.04f), 12);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(0.30f, 0.04f, 0.23f, -0.05f);
+    c.line(0.30f, 0.04f, 0.37f, -0.05f);
+}
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,
@@ -580,6 +601,7 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::role:              draw_role(c);              break;
         case Icon::tablespace:        draw_tablespace(c);        break;
         case Icon::schema:            draw_schema(c);            break;
+        case Icon::pivot:             draw_pivot(c);             break;
     }
 }
 

@@ -137,6 +137,10 @@ private:
     // quando o ResultSet e' uma pagina.
     void recompute_groups(SqlDocument& document);
 
+    // Tabela dinamica (ADR 0005). Quando ativa, substitui a grade.
+    void recompute_pivot(SqlDocument& document);
+    void draw_pivot_table(SqlDocument& document, const db::ResultSet& rs);
+
     // Painel de agrupamento acima da grade, e a linha de totais no rodape.
     void draw_group_bar(SqlDocument& document, const db::ResultSet& rs);
     void draw_group_panel(SqlDocument& document, const db::ResultSet& rs);

@@ -18,6 +18,7 @@ add_executable(otter_tests
     test_mywire.cpp
     test_paging.cpp
     test_pgwire.cpp
+    test_pivot.cpp
     test_plan.cpp
     test_result_set.cpp
     test_sql.cpp

@@ -54,6 +54,18 @@ void set_sql_dialect_for(std::string_view driver_id);
 // tabela vindo da UI viraria injecao.
 [[nodiscard]] std::string quote_literal(std::string_view text);
 
+// Remove o ';' final e os espacos depois dele.
+//
+// Existe porque varias funcoes ENVOLVEM a consulta do usuario numa
+// subconsulta -- paginacao (ADR 0011), agregacao no servidor, pivot. Um ';'
+// no meio de "FROM ( ... ) AS x" e' erro de sintaxe, e a mensagem do servidor
+// aponta para o ')' em vez do ';', o que manda procurar no lugar errado.
+//
+// Simples de proposito: nao remove comentario de linha final, porque quem
+// envolve poe o ')' numa LINHA NOVA -- e o comentario nao o engole. Quem
+// ANEXA (o LIMIT da paginacao) precisa do lexer, e usa sql::trim_trailing.
+[[nodiscard]] std::string_view strip_trailing_semicolon(std::string_view sql);
+
 // schema.tabela, com cada parte citada so' se precisar.
 [[nodiscard]] std::string qualified_name(std::string_view schema,
                                          std::string_view table);
