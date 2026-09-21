@@ -926,6 +926,7 @@ void MainShell::draw() {
                 // a coluna de índice N do resultado ANTERIOR -- colorindo a
                 // coisa errada sem erro nenhum.
                 document->color_rules().prepare(*document->result());
+                document->bar_rules().prepare(*document->result());
                 recompute_pivot(*document);
                 document->set_edit_target(
                     db::find_edit_target(*document->result(),
@@ -2995,6 +2996,38 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     const ImVec2 cell_origin = ImGui::GetCursorPos();
     const float  cell_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 
+    // Barra na celula (ADR 0005). Desenhada ANTES do texto, no DrawList, e
+    // nao como fundo da linha: TableSetBgColor pinta a celula INTEIRA, e uma
+    // barra precisa de comprimento proprio -- e' o comprimento que carrega a
+    // informacao.
+    //
+    // Nao aparece na linha marcada para exclusao nem na visao de registro: na
+    // primeira o vermelho ja' diz o que importa, e na segunda nao ha' coluna
+    // de valores para comparar -- uma barra sozinha nao tem contra o que ser
+    // proporcional.
+    if (!row_deleted && !document.record_mode() &&
+        !document.bar_rules().empty()) {
+        const db::CellBar bar = document.bar_rules().bar_for(rs, row, column);
+
+        if (bar.visible && bar.fraction > 0.0f) {
+            const ImVec2 screen = ImGui::GetCursorScreenPos();
+            const float  height = ImGui::GetTextLineHeight();
+
+            // Deixa uma margem no topo e na base: a barra encostada na borda
+            // se confunde com a linha da tabela.
+            constexpr float kInset = 2.0f;
+
+            const float x0 = screen.x + bar.origin * cell_width;
+            const float x1 = x0 + bar.fraction * cell_width;
+
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImVec2(x0, screen.y + kInset),
+                ImVec2(x1, screen.y + height - kInset),
+                with_alpha(bar.negative ? p.error : p.accent, 0.38f),
+                2.0f);
+        }
+    }
+
     if (row_deleted) {
         // Sem editor: nao faz sentido alterar o que sera' excluido.
         ImGui::TextColored(col4(p.text_dim), "%s",
@@ -4211,6 +4244,66 @@ void MainShell::save_pending_edits(SqlDocument& document) {
 //
 // A escolha é a mesma do DBeaver, que oferece "Set color by value" no menu da
 // célula e o editor completo em Virtual Model.
+// Menu de barra de uma coluna (ADR 0005).
+//
+// Tres ancoragens, e a escolha entre elas muda o que a coluna CONTA. Os
+// rotulos dizem para que serve cada uma, e nao como funciona: "do zero" e
+// "do menor valor" sao descricoes de implementacao, e quem esta' olhando uma
+// coluna de temperaturas quer saber qual escolher, nao como cada uma calcula.
+void MainShell::draw_bar_menu(SqlDocument& document, const db::ResultSet& rs,
+                              std::size_t column) {
+    const Palette& p = colors();
+    const db::ColumnInfo& info = rs.column(column).info();
+
+    // Barra em coluna de texto nao tem sentido: nao ha' o que ser
+    // proporcional. Desabilitar e dizer por que, em vez de aceitar e nao
+    // desenhar nada (diretiva 6).
+    const bool numeric = db::is_right_aligned(info.kind);
+
+    const auto add = [&](db::BarBaseline baseline) {
+        db::BarSpec spec;
+        spec.column   = info.name;
+        spec.baseline = baseline;
+
+        document.bar_rules().add(std::move(spec));
+        if (document.result()) {
+            document.bar_rules().prepare(*document.result());
+        }
+    };
+
+    ImGui::BeginDisabled(!numeric);
+
+    if (ImGui::MenuItem(TR("Bar from zero"))) {
+        add(db::BarBaseline::from_zero);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", TR("for quantities: revenue, count, total"));
+    }
+
+    if (ImGui::MenuItem(TR("Bar over the column range"))) {
+        add(db::BarBaseline::from_minimum);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "%s", TR("for narrow ranges far from zero, like 36.1..36.9, where "
+                     "anchoring at zero makes every bar look the same"));
+    }
+
+    if (ImGui::MenuItem(TR("Bar centered on zero"))) {
+        add(db::BarBaseline::centered_on_zero);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", TR("for variation and balance, where the sign "
+                                   "is the point"));
+    }
+
+    ImGui::EndDisabled();
+
+    if (!numeric) {
+        ImGui::TextColored(col4(p.text_dim), TR("(numeric columns only)"));
+    }
+}
+
 void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
                                 std::size_t column) {
     const Palette& p = colors();
@@ -4322,6 +4415,24 @@ void MainShell::draw_column_header_menu(SqlDocument& document,
     if (ImGui::BeginMenu(TR("Color"))) {
         draw_color_menu(document, rs, column);
         ImGui::EndMenu();
+    }
+
+    // Barra na celula. Menu proprio, e nao um item dentro de "Cor": sao
+    // respostas diferentes -- a cor diz "este valor esta' fora da faixa", a
+    // barra diz "este valor comparado aos outros".
+    if (ImGui::BeginMenu(TR("Bar"))) {
+        draw_bar_menu(document, rs, column);
+        ImGui::EndMenu();
+    }
+
+    if (document.bar_rules().affects_column(info.name)) {
+        if (ImGui::MenuItem(TR("Remove the bar of this column"))) {
+            db::BarRules& bars = document.bar_rules();
+            for (std::size_t i = bars.specs().size(); i-- > 0;) {
+                if (bars.specs()[i].column == info.name) bars.remove(i);
+            }
+            if (document.result()) bars.prepare(*document.result());
+        }
     }
 
     if (document.color_rules().affects_column(info.name)) {

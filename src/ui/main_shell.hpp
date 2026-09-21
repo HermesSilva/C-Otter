@@ -116,6 +116,8 @@ private:
                                  std::size_t column);
 
     // Menu de cor condicional de uma coluna: presets, nao formulario cru.
+    void draw_bar_menu(SqlDocument& document, const db::ResultSet& rs,
+                       std::size_t column);
     void draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
                          std::size_t column);
 

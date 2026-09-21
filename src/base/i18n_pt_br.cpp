@@ -568,6 +568,21 @@ const char* const kPtBr[] = {
     // repeti-los daria chave duplicada, que o teste do catalogo recusa.
     "Column",                     "Coluna",
     "no rows",                    "sem linhas",
+
+    // Barra na celula (ADR 0005). "Barra" e nao "sparkline": o termo ingles
+    // e' de quem le' Tufte, nao de quem usa um cliente de banco.
+    "Bar",                        "Barra",
+    "Bar from zero",              "Barra a partir do zero",
+    "Bar over the column range",  "Barra na faixa da coluna",
+    "Bar centered on zero",       "Barra centrada no zero",
+    "Remove the bar of this column", "Remover a barra desta coluna",
+    "for quantities: revenue, count, total",
+        "para quantidades: receita, contagem, total",
+    "for narrow ranges far from zero, like 36.1..36.9, where anchoring at zero makes every bar look the same",
+        "para faixas estreitas e longe do zero, como 36,1..36,9, onde ancorar "
+        "no zero deixa todas as barras iguais",
+    "for variation and balance, where the sign is the point",
+        "para variação e saldo, onde o sinal é o que importa",
     "SSH host",                   "Host SSH",
     "Authentication##ssh",        "Autenticação##ssh",
     "Public key",                 "Chave pública",

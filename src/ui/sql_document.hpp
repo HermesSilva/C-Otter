@@ -10,6 +10,7 @@
 
 #include "db/aggregate.hpp"
 #include "db/coloring.hpp"
+#include "db/sparkline.hpp"
 #include "db/pivot.hpp"
 #include "db/edit.hpp"
 #include "db/result_set.hpp"
@@ -142,6 +143,14 @@ public:
     // Por DOCUMENTO, e nao global: duas abas podem mostrar consultas
     // diferentes, e uma regra sobre "situacao" nao faz sentido numa aba que
     // nao tem essa coluna.
+    // Barras na celula (ADR 0005). Vivem ao lado das regras de cor porque
+    // sao a mesma ideia -- ler a coluna sem ler os numeros -- por dois meios
+    // diferentes, e o usuario costuma querer os dois na mesma coluna.
+    [[nodiscard]] db::BarRules& bar_rules() noexcept { return bar_rules_; }
+    [[nodiscard]] const db::BarRules& bar_rules() const noexcept {
+        return bar_rules_;
+    }
+
     [[nodiscard]] db::ColorRules& color_rules() noexcept { return color_rules_; }
     [[nodiscard]] const db::ColorRules& color_rules() const noexcept {
         return color_rules_;
@@ -175,6 +184,7 @@ private:
     sql::SortOrder              sort_;
     sql::ColumnFilter           filter_;
     db::EditBuffer              edits_;
+    db::BarRules                bar_rules_;
     db::ColorRules              color_rules_;
 
     db::PivotSpec               pivot_spec_;

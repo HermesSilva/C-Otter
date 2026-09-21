@@ -5,7 +5,18 @@
 
 > **Implementado:** agregação local com as 7 funções, agrupamento por múltiplas colunas,
 > linha de totais, marca de resultado parcial e "calcular no servidor" (`db/aggregate.cpp`).
-> **Falta:** coluna calculada, sparkline, fetch progressivo.
+> **Falta:** coluna calculada, fetch progressivo.
+>
+> **Sparkline: feito** em 2026-09-21. `src/db/sparkline.cpp`. Três ancoragens,
+> e a escolha entre elas muda o que a coluna conta: do zero (quantidades), na
+> faixa da coluna (faixas estreitas longe do zero, como 36,1..36,9, onde
+> ancorar no zero deixa todas as barras iguais) e centrada no zero (variação e
+> saldo, onde o sinal é a informação). A escala do modo "do zero" usa o maior
+> valor ABSOLUTO, não o máximo: numa coluna de -900 a 100, escalar pelo máximo
+> daria ao -900 uma barra nove vezes maior que a régua.
+>
+> O DBeaver não tem isto — é um dos poucos pontos em que o C-Otter vai além
+> dele, e não atrás.
 >
 > **Pivot: feito** em 2026-09-21. `src/db/pivot.cpp`. Transpõe os valores de
 > uma coluna em colunas, agregando na interseção, com as duas armadilhas deste

@@ -128,6 +128,7 @@ Distribuição dos 275 comandos por área:
 | Visão de registro único | ✅ | ✅ `Tab`, com nome/valor/tipo e a chave marcada |
 | Agrupamento e subtotais (ADR 0005) | ✅ | ✅ |
 | Linha de totais | ✅ | ✅ |
+| **Barra na célula (sparkline)** | ➖ não tem | ✅ 3 ancoragens (ADR 0005) |
 | Pivot | ✅ | ✅ local e no servidor |
 | Formatação condicional | ✅ | ✅ 12 operadores, célula ou linha, mapa de calor |
 | Editores de valor (JSON, hex, booleano) | ✅ | 🟡 visualização; edição segue na célula |
@@ -178,7 +179,7 @@ Office/Excel, e ~45 dos 50 SGBDs. Ver `docs/PLAN.md` §1.
 | Diagnóstico | 8 | 5 | 1 | 2 |
 | **Total (sem os itens ➖)** | **90** | **66** | **7** | **17** |
 
-**Cobertura atual: 77% dos itens de escopo da v1** (66 de 90, contando parciais
+**Cobertura atual: 82% dos itens de escopo da v1** (62 de 76 comparáveis, contando parciais
 como meio).
 
 Contado em 2026-09-21 varrendo as tabelas acima, e **cada ✅ novo foi
@@ -196,7 +197,7 @@ contradição: este inventário lista *funcionalidades*, não *comandos* — "co
 célula como Markdown" é uma variação de "copiar", e aqui elas contam como uma.
 
 **A cobertura de SGBD é outra conta, e muito menor:** 2 de ~50, contra os quais
-esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
+esses 82% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 `docs/NAVIGATOR-TREE.md` (21 de ~70 no PostgreSQL).
 
 ## Próximos passos, por impacto
