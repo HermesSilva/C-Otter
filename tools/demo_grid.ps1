@@ -84,7 +84,7 @@ $virtualKeys = @{
     '{LEFT}'  = 0x25; '{RIGHT}' = 0x27
     '{HOME}'  = 0x24; '{END}'   = 0x23
     '{PGUP}'  = 0x21; '{PGDN}'  = 0x22
-    '{ENTER}' = 0x0D; '{DELETE}'= 0x2E
+    '{ENTER}' = 0x0D; '{DELETE}'= 0x2E; '{ESC}' = 0x1B
 }
 
 function Send-VirtualKey([int]$Vk) {
@@ -110,4 +110,5 @@ if ($Keys) {
 }
 
 & "$root\tools\screenshot.ps1" -Out $Out
+
 

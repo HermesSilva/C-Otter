@@ -4906,6 +4906,28 @@ void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs)
         document.edits().copy_cell_from(rs, row + 1, row, col);
     }
 
+    // Esc reverte a celula -- o `cell.reset` do DBeaver.
+    //
+    // Nao ha' conflito com o Esc que cancela o EDITOR: esta funcao retorna
+    // cedo quando `editing_active_`, entao as duas leituras da tecla nunca
+    // acontecem no mesmo estado.
+    // RouteAlways, e nao RouteFocused: o editor de texto registra a rota do
+    // Esc (TextEditor.cpp:1369) e e' desenhado ANTES da grade, entao ganha a
+    // disputa mesmo sem foco. RouteAlways le' a tecla direto.
+    //
+    // Seguro aqui porque esta funcao ja' so' roda com a grade em foco e fora
+    // da edicao -- as duas condicoes que o RouteFocused garantiria.
+    if (ImGui::Shortcut(ImGuiKey_Escape, ImGuiInputFlags_RouteAlways)) {
+        if (document.edits().is_deleted(row)) {
+            // Numa linha marcada para exclusao, reverter a CELULA nao diria
+            // nada: a linha inteira e' que esta' pendente. Desfazer a marca e'
+            // o que o usuario quer dizer com Esc ali.
+            document.edits().unmark_deleted(row);
+        } else {
+            document.edits().revert(row, col);
+        }
+    }
+
     // Enter edita a celula sob a selecao -- o `row.edit.inline` do DBeaver.
     if (ImGui::Shortcut(ImGuiKey_Enter, ImGuiInputFlags_RouteFocused) &&
         !document.edits().is_deleted(row)) {

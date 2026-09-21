@@ -732,3 +732,55 @@ OTTER_TEST(edit_copy_from_row_ignores_out_of_range_and_self) {
 
     OTTER_CHECK(buffer.empty());
 }
+
+// --- Reverter (a tecla Esc da grade) ---------------------------------------
+
+OTTER_TEST(edit_revert_removes_only_that_cell) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"1", "Alfa"}, {"2", "Beta"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "Gama");
+    buffer.set(1, 1, "Delta");
+
+    buffer.revert(0, 1);
+
+    OTTER_CHECK(buffer.find(0, 1) == nullptr);
+    OTTER_CHECK(buffer.find(1, 1) != nullptr);   // a outra sobrevive
+}
+
+OTTER_TEST(edit_unmark_deleted_is_what_esc_means_on_a_deleted_row) {
+    // Na linha marcada para exclusao, reverter a CELULA nao diria nada -- a
+    // linha inteira e' que esta' pendente. Desfazer a marca e' o que o
+    // usuario quer dizer com Esc ali, e e' o que a grade faz.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"1", "Alfa"}});
+
+    EditBuffer buffer;
+    buffer.mark_deleted(0);
+    OTTER_CHECK(buffer.is_deleted(0));
+    OTTER_CHECK(buffer.has_changes());
+
+    buffer.unmark_deleted(0);
+    OTTER_CHECK(!buffer.is_deleted(0));
+    OTTER_CHECK(!buffer.has_changes());
+}
+
+OTTER_TEST(edit_revert_on_an_untouched_cell_does_nothing) {
+    // Esc numa celula intacta nao deve criar entrada nenhuma no buffer: a
+    // barra passaria a dizer "1 alteracao nao salva" sem nada ter mudado.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"1", "Alfa"}});
+
+    EditBuffer buffer;
+    buffer.revert(0, 1);
+
+    OTTER_CHECK(buffer.empty());
+    OTTER_CHECK(!buffer.has_changes());
+}

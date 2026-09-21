@@ -59,8 +59,8 @@ Três obstáculos apareceram, nenhum deles visível no build:
 | `resultset.row.copy.from.above` | `Ctrl+D` | ✅ verificado na tela |
 | `resultset.row.copy.from.below` | `Ctrl+Alt+D` | ✅ |
 | `resultset.row.delete` | `Alt+Delete` | ✅ implementado, **não verificado na tela** |
-| `resultset.cell.setDefault` | `Ctrl+Backspace` | ⬜ |
-| `resultset.cell.reset` | `Esc` | ⬜ existe no menu |
+| `resultset.cell.setDefault` | `Ctrl+Backspace` | ⬜ falta o DEFAULT da coluna — ver abaixo |
+| `resultset.cell.reset` | `Esc` | ✅ implementado, **não verificado na tela** |
 | `resultset.cell.save` | `Ctrl+Alt+Shift+Enter` | ⬜ |
 | `resultset.applyChanges` | `Ctrl+S` | ⬜ o `Ctrl+S` daqui salva o SCRIPT |
 | `resultset.rejectChanges` | `Ctrl+R` | ⬜ |
@@ -111,7 +111,7 @@ Três obstáculos apareceram, nenhum deles visível no build:
 
 ## Cobertura
 
-**6 de 47 comandos têm tecla**, mais a navegação por setas, Home/End e
+**7 de 47 comandos têm tecla**, mais a navegação por setas, Home/End e
 PageUp/PageDown, que o DBeaver trata como comportamento da grade e não como
 comando nomeado.
 
@@ -120,15 +120,32 @@ valor — continuam sem tecla.
 
 ## O que não foi verificado na tela
 
-`Alt+Delete` está implementado e **não foi verificado**: o `SendKeys` do
-PowerShell não entrega essa combinação à aplicação. `Ctrl+D` foi verificado e
-funciona (a barra passou a dizer "1 alteração(oes) em 1 linha(s), não salvas"),
-e `Alt+Delete` percorre exatamente o mesmo caminho — mas isso é inferência, não
-observação.
+Duas teclas estão implementadas e **não foram verificadas na tela**:
+`Alt+Delete` e `Esc`. Nenhuma das duas chega à aplicação pela automação — um
+trace com `IsKeyDown`, que não depende de rota nem de foco, não as registra.
 
-Descoberta relacionada, que custou várias tentativas: **`SendKeys` não entrega
-teclas de SETA a esta aplicação.** Letras chegam, setas não. `PostMessage` com
-`WM_KEYDOWN`/`WM_KEYUP` entrega. Está tratado em `tools/demo_grid.ps1`.
+O que FOI verificado, e de onde vem a confiança no resto: `Ctrl+D` copia (a
+barra passa a dizer "1 alteração(oes) em 1 linha(s), não salvas", e a célula
+muda de valor na captura), as setas movem exatamente uma célula, e `Tab`
+alterna para a visão de registro. As três percorrem o mesmo `handle_grid_keys`
+que `Alt+Delete` e `Esc` — mas isso é inferência, não observação.
+
+Descoberta de automação, que custou várias tentativas de "corrigir" código
+correto: **`SendKeys` não entrega teclas de SETA a esta aplicação.** Letras
+chegam, setas não; `PostMessage` com `WM_KEYDOWN`/`WM_KEYUP` entrega. Está
+tratado em `tools/demo_grid.ps1`. `Alt+Delete` e `Esc` não chegam nem por um
+nem por outro.
+
+## Por que `Ctrl+Backspace` não entrou
+
+`cell.setDefault` põe a célula no **DEFAULT da coluna**, e o `ResultSet` não
+carrega essa informação — ela está no catálogo (`ColumnMeta::default_value`),
+que a grade não consulta. Implementá-lo exige ligar o resultado ao catálogo da
+tabela de origem, o que é maior que uma tecla.
+
+Um `Ctrl+Backspace` que limpasse a célula em vez de aplicar o DEFAULT seria
+pior que não ter a tecla: numa coluna `NOT NULL DEFAULT 0`, limpar produz um
+INSERT recusado onde o DEFAULT produziria zero.
 
 ## Sobre conflitos
 
