@@ -46,6 +46,16 @@ public:
     // Pede o encerramento do loop.
     void request_close() noexcept { should_close_ = true; }
 
+    // O usuario clicou no "X" desde o quadro anterior?
+    //
+    // O clique NAO fecha sozinho: vira um pedido que o shell responde --
+    // confirmando a saida, ou perguntando o que fazer com o trabalho nao
+    // salvo. Quem consome deve chamar clear_close_request() ao tratar.
+    [[nodiscard]] bool close_requested() const noexcept {
+        return close_requested_;
+    }
+    void clear_close_request() noexcept { close_requested_ = false; }
+
     [[nodiscard]] void* native_handle() const noexcept;
 
 private:
@@ -54,6 +64,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     bool should_close_ = false;
+    bool close_requested_ = false;
 };
 
 } // namespace otter::ui

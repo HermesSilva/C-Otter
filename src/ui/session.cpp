@@ -585,6 +585,13 @@ std::size_t Session::uncommitted_changes() const {
     return holt_ ? holt_->uncommitted_changes() : 0;
 }
 
+// Schema corrente, do estado que a conexao ja' conhece -- sem ida ao
+// servidor, porque isto e' lido a cada quadro pela barra de status.
+std::string Session::current_schema() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return holt_ ? holt_->current_schema() : std::string{};
+}
+
 // Fator comum das tres operacoes de transacao: rodar no worker e refletir o
 // resultado na mensagem de estado.
 void Session::run_txn_async(std::function<Status(db::Holt&)> operation,

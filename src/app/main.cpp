@@ -29,6 +29,14 @@ int run() {
     otter::ui::MainShell shell;
 
     (*window)->run([&] {
+        // O "X" da janela entra pelo mesmo caminho do menu Sair: vira um
+        // pedido que o shell pode recusar para confirmar o trabalho nao
+        // salvo. Antes ele fechava direto, sem passar pelo shell.
+        if ((*window)->close_requested()) {
+            (*window)->clear_close_request();
+            shell.request_quit();
+        }
+
         shell.draw();
         if (shell.wants_quit()) (*window)->request_close();
     });

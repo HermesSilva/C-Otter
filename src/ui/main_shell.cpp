@@ -317,6 +317,88 @@ void MainShell::close_others(std::size_t keep_index) {
     }
 }
 
+std::size_t MainShell::unsaved_documents() const {
+    std::size_t count = 0;
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        if (document->modified()) ++count;
+    }
+    return count;
+}
+
+std::size_t MainShell::pending_cell_edits() const {
+    std::size_t count = 0;
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        count += document->edits().change_count();
+    }
+    return count;
+}
+
+// Sair sem perguntar descarta o que o usuario digitou e nao gravou. Nada
+// disso tem desfazer depois que o processo morre, entao a confirmacao so' e'
+// pulada quando NAO ha' o que perder -- perguntar sempre treina a clicar em
+// "sair" sem ler.
+void MainShell::request_quit() {
+    if (unsaved_documents() == 0 && pending_cell_edits() == 0) {
+        wants_quit_ = true;
+        return;
+    }
+    confirm_quit_ = true;
+}
+
+void MainShell::draw_quit_confirm() {
+    if (!confirm_quit_) return;
+
+    constexpr const char* kPopup = "###QuitConfirm";
+    ImGui::OpenPopup(kPopup);
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+
+    // O titulo passa por TRW: o ImGui identifica a janela pelo nome, e
+    // traduzi-lo sem id estavel a faria perder a posicao ao trocar de idioma.
+    if (ImGui::BeginPopupModal(TRW("Exit C-Otter", "###QuitConfirm"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(col4(colors().warn), "%s",
+                           TR("There is work that was not saved."));
+        ImGui::Spacing();
+
+        // Diz O QUE se perde, com numeros. "Alteracoes nao salvas" nao ajuda
+        // a decidir; "3 scripts e 37 celulas" ajuda.
+        if (const std::size_t scripts = unsaved_documents(); scripts > 0) {
+            ImGui::BulletText(TR("%zu script(s) with unsaved text"), scripts);
+        }
+        if (const std::size_t cells = pending_cell_edits(); cells > 0) {
+            ImGui::BulletText(TR("%zu cell edit(s) not written to the database"),
+                              cells);
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // "Cancelar" e' o padrao: Enter e Esc ficam na saida SEGURA. Sair e'
+        // o botao que exige mira.
+        if (ImGui::Button(TR("Cancel"), ImVec2(120, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            confirm_quit_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, col(colors().error));
+        if (ImGui::Button(TR("Exit and discard"), ImVec2(160, 0))) {
+            confirm_quit_ = false;
+            wants_quit_   = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::EndPopup();
+    }
+}
+
 SqlDocument* MainShell::active_document() {
     if (documents_.empty()) return nullptr;
     active_document_ = std::min(active_document_, documents_.size() - 1);
@@ -1144,6 +1226,9 @@ void MainShell::draw() {
     if (show_import_) draw_import_window();
     if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
+
+    // Por ultimo: e' modal, e precisa ficar por cima de tudo que veio antes.
+    draw_quit_confirm();
 }
 
 void MainShell::draw_dockspace() {
@@ -1243,7 +1328,7 @@ void MainShell::draw_menu_bar() {
             session().disconnect();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) wants_quit_ = true;
+        if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) request_quit();
         ImGui::EndMenu();
     }
 
@@ -5749,6 +5834,70 @@ void MainShell::draw_status_bar() {
                 }
                 ImGui::SameLine();
             }
+
+            // Estado da transacao, como o TransactionMonitorToolbar do
+            // DBeaver: "Auto" fora de transacao, "None" em transacao sem
+            // alteracoes, e a CONTAGEM quando ha' o que perder.
+            //
+            // A contagem e' o ponto: saber que ha' 37 alteracoes pendentes
+            // muda a decisao de fechar a janela. Um rotulo fixo "transacao
+            // aberta" nao diria quanto esta' em jogo.
+            const db::TxnState txn = session().txn_state();
+            const std::size_t pending = session().uncommitted_changes();
+
+            const char* txn_label =
+                session().auto_commit()        ? TR("Auto")
+                : txn == db::TxnState::failed  ? TR("Failed")
+                : pending > 0                  ? nullptr
+                                               : TR("None");
+
+            // Amarelo cresce com o que ha' a perder; vermelho quando a
+            // transacao abortou e so' ROLLBACK e' aceito.
+            const std::uint32_t txn_color =
+                txn == db::TxnState::failed ? colors().error
+                : pending > 0               ? colors().warn
+                                            : colors().text_dim;
+
+            if (txn_label != nullptr) {
+                ImGui::TextColored(col4(txn_color), "%s", txn_label);
+            } else {
+                // So' o numero, como no DBeaver: "37" chama mais atencao que
+                // "37 alteracoes" numa barra que se le' de relance.
+                ImGui::TextColored(col4(txn_color), "%zu", pending);
+            }
+
+            if (ImGui::IsItemHovered()) {
+                if (session().auto_commit()) {
+                    ImGui::SetTooltip("%s", TR("Auto-commit: each statement "
+                                               "commits on its own."));
+                } else if (txn == db::TxnState::failed) {
+                    ImGui::SetTooltip("%s", TR("Transaction aborted; only "
+                                               "rollback is accepted."));
+                } else {
+                    ImGui::SetTooltip(TR("%zu modifying statement(s) pending"),
+                                      pending);
+                }
+            }
+            ImGui::SameLine();
+
+            // Schema corrente. O DBeaver o mostra porque um SELECT sem
+            // qualificar depende dele -- e um search_path inesperado faz a
+            // consulta certa ler a tabela errada.
+            if (const std::string schema = session().current_schema();
+                !schema.empty()) {
+                ImGui::TextColored(col4(colors().text_dim), "| %s",
+                                   schema.c_str());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", TR("Current schema"));
+                }
+                ImGui::SameLine();
+            }
+
+            // Fecha o grupo do estado da conexao antes da mensagem: sem esta
+            // barra, "Auto" e "conectado | 3 schema(s)" ficavam colados e
+            // pareciam uma frase so'.
+            ImGui::TextColored(col4(colors().text_dim), "|");
+            ImGui::SameLine();
         }
         // Progresso do script no lugar da mensagem: num script de 40 comandos,
         // "executando..." parado seria indistinguivel de travado.

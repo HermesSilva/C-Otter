@@ -196,6 +196,11 @@ public:
     [[nodiscard]] db::TxnState txn_state() const;
     [[nodiscard]] std::size_t uncommitted_changes() const;
 
+    // Schema corrente. Vazio quando desconectado ou quando o driver nao
+    // rastreia -- a barra de status omite o campo nesse caso, em vez de
+    // mostrar um valor inventado.
+    [[nodiscard]] std::string current_schema() const;
+
     // Executadas no worker: emitem SQL de verdade.
     void set_auto_commit_async(bool enabled);
     void commit_async();

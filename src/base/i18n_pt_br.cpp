@@ -747,6 +747,31 @@ const char* const kPtBr[] = {
         "Define o search_path ao conectar.",
     "Isolation level is not available in this version.",
         "O nível de isolamento não existe nesta versão.",
+
+    // --- Estado da transacao na barra de status ---
+    //
+    // "Auto"/"None" sao os rotulos do TransactionMonitorToolbar do DBeaver.
+    // Mantidos curtos: a barra e' estreita e o numero e' o que importa.
+    "Auto",                       "Auto",
+    "None",                       "Nenhuma",
+    "Failed",                     "Falhou",
+    "Auto-commit: each statement commits on its own.",
+        "Auto-commit: cada comando confirma sozinho.",
+    "Transaction aborted; only rollback is accepted.",
+        "Transação abortada; só rollback é aceito.",
+    "%zu modifying statement(s) pending",
+        "%zu comando(s) de alteração pendente(s)",
+    "Current schema",             "Schema corrente",
+
+    // --- Confirmacao de saida ---
+    "Exit C-Otter",               "Sair do C-Otter",
+    "There is work that was not saved.",
+        "Há trabalho que não foi salvo.",
+    "%zu script(s) with unsaved text",
+        "%zu script(s) com texto não salvo",
+    "%zu cell edit(s) not written to the database",
+        "%zu alteração(oes) de célula não gravada(s) no banco",
+    "Exit and discard",           "Sair e descartar",
 };
 
 } // namespace

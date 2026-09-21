@@ -392,8 +392,10 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | Nome do banco | ✅ |
 | Versão do servidor | ✅ |
 | Mensagem de estado / erro | ✅ |
-| Estado da transação | ⬜ |
-| Schema corrente | ⬜ |
+| **Estado da transação** | ✅ `Auto` / `Nenhuma` / contagem, como o `TransactionMonitorToolbar` do DBeaver |
+| Contagem de alterações pendentes | ✅ o número, em amarelo — é o que decide se dá para fechar |
+| Aviso de transação abortada | ✅ em vermelho, com tooltip dizendo que só rollback é aceito |
+| **Schema corrente** | ✅ omitido quando o driver não o conhece, em vez de mostrar valor falso |
 
 ## 10. Transações
 
@@ -403,8 +405,8 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Commit / Rollback** | ✅ | `Ctrl+Shift+C` / `Ctrl+Shift+R`, com ícone próprio |
 | **Indicador de transação aberta** | ✅ | Na barra, com glow quando há transação |
 | **Gravação de edições em transação** | ✅ | Ou tudo, ou nada — mesmo em autocommit |
+| **Aviso ao fechar com alterações pendentes** | ✅ | Menu Sair, `Alt+F4` e o `X` da janela; diz quantos scripts e quantas células |
 | Savepoints na UI | ⬜ | O driver os implementa (`Holt::savepoint`); falta a tela |
-| Aviso ao fechar com alterações pendentes | ⬜ | A barra avisa, mas fechar não confirma |
 
 ---
 
@@ -461,11 +463,11 @@ ficam de fora do total.
 | Editor SQL | 52 | 3 | 5 | 0 | 60 |
 | Grade | 51 | 0 | 3 | 0 | 54 |
 | Inspetor de queries | 9 | 0 | 4 | 0 | 13 |
-| Barra de status | 4 | 0 | 2 | 0 | 6 |
-| Transações | 4 | 0 | 2 | 0 | 6 |
-| **Total** | **236** | **5** | **32** | **0** | **273** |
+| Barra de status | 8 | 0 | 0 | 0 | 8 |
+| Transações | 5 | 0 | 1 | 0 | 6 |
+| **Total** | **241** | **5** | **29** | **0** | **275** |
 
-**236 de 273 elementos existentes funcionam.**
+**241 de 275 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -537,7 +539,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (417, todos verdes):
+Testes automatizados (420, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

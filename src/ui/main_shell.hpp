@@ -45,6 +45,13 @@ public:
 
     [[nodiscard]] bool wants_quit() const noexcept { return wants_quit_; }
 
+    // Pedido de saida: pelo menu, pelo "X" da janela ou por Alt+F4.
+    //
+    // Nao encerra direto -- se ha' script nao salvo ou alteracao pendente na
+    // grade, abre a confirmacao. Sair e perder o trabalho sem perguntar e' o
+    // tipo de coisa que nao tem desfazer.
+    void request_quit();
+
 private:
     void draw_menu_bar();
     void draw_toolbar();
@@ -378,6 +385,18 @@ private:
     // janela unica "SQL". Zero antes do layout ser montado.
     unsigned int editor_dock_id_ = 0;
     bool wants_quit_         = false;
+
+    // Confirmacao de saida aberta. A saida so' acontece se o usuario
+    // escolher sair; qualquer outra coisa apenas fecha o dialogo.
+    bool confirm_quit_       = false;
+
+    // Desenha a confirmacao de saida, quando ha' trabalho a perder.
+    void draw_quit_confirm();
+
+    // Quantos scripts tem texto nao salvo, e quantas celulas foram editadas
+    // sem gravar. Sao as duas coisas que sair descartaria.
+    [[nodiscard]] std::size_t unsaved_documents() const;
+    [[nodiscard]] std::size_t pending_cell_edits() const;
     bool show_about_         = false;
     bool show_demo_          = false;
     bool show_icons_         = false;

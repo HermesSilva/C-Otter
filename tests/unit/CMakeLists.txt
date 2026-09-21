@@ -25,6 +25,7 @@ add_executable(otter_tests
     test_result_set.cpp
     test_sql.cpp
     test_theme.cpp
+    test_txn.cpp
     test_value_view.cpp
 )
 

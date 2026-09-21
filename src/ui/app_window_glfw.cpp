@@ -253,8 +253,19 @@ void* AppWindow::native_handle() const noexcept {
 void AppWindow::run(const FrameFn& draw_frame) {
     Impl& impl = *impl_;
 
-    while (!should_close_ && glfwWindowShouldClose(impl.window) == 0) {
+    while (!should_close_) {
         glfwPollEvents();
+
+        // O "X" da janela nao fecha sozinho: vira um PEDIDO, que o shell pode
+        // recusar para confirmar alteracoes nao salvas.
+        //
+        // Sem isto, fechar pelo X descartava o trabalho pendente sem
+        // perguntar -- e' o unico caminho de saida que nao passava por
+        // MainShell::draw().
+        if (glfwWindowShouldClose(impl.window) != 0) {
+            glfwSetWindowShouldClose(impl.window, GLFW_FALSE);
+            close_requested_ = true;
+        }
 
         // Janela minimizada: dorme em vez de queimar CPU/GPU redesenhando nada.
         if (glfwGetWindowAttrib(impl.window, GLFW_ICONIFIED) != 0) {
