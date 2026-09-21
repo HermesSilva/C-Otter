@@ -12,6 +12,7 @@
 #include "db/result_set.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
+#include "ui/icons.hpp"
 #include "ui/session.hpp"
 #include "ui/sql_document.hpp"
 
@@ -42,6 +43,16 @@ private:
     void draw_dockspace();
     void draw_raft_panel();
     void draw_navigator_panel();
+
+    // Arvore de objetos. Cada pasta consulta o catalogo apenas quando expandida
+    // (ver docs/NAVIGATOR-TREE.md).
+    bool draw_folder_node(Icon icon, const char* label,
+                          std::size_t count, bool loaded);
+    void draw_tables_folder(const db::SchemaMeta& schema);
+    void draw_table_children(const db::SchemaMeta& schema,
+                             const db::TableMeta& table);
+    void draw_sequences_folder(const db::SchemaMeta& schema);
+    void draw_routines_folder(const db::SchemaMeta& schema);
     void draw_editor_panel();
     void draw_grid_panel();
     void draw_query_log_panel();

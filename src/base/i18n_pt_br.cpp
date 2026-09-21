@@ -41,6 +41,17 @@ const char* const kPtBr[] = {
     "connect to browse the schema", "conecte-se para navegar o schema",
     "loading...",                 "carregando...",
     "Copy name",                  "Copiar nome",
+
+    // --- Arvore de objetos ---
+    "Tables",                     "Tabelas",
+    "Columns",                    "Colunas",
+    "Constraints",                "Constraints",
+    "Indexes",                    "Índices",
+    "Foreign keys",               "Chaves estrangeiras",
+    "References",                 "Referências",
+    "Triggers",                   "Triggers",
+    "Sequences",                  "Sequences",
+    "Functions",                  "Funções",
     "auto-commit",                "auto-commit",
     "manual transaction",         "transação manual",
     "read only",                  "somente leitura",

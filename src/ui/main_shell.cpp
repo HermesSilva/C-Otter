@@ -712,60 +712,303 @@ void MainShell::draw_navigator_panel() {
         const std::vector<db::SchemaMeta> schemas = session_.schemas();
 
         for (const db::SchemaMeta& schema : schemas) {
-            const std::string label =
-                schema.name + " (" + std::to_string(schema.tables.size()) + ")";
+            ImGui::PushID(schema.name.c_str());
 
-            if (!ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-                continue;
+            const bool schema_open =
+                ImGui::TreeNodeEx(schema.name.c_str(),
+                                  ImGuiTreeNodeFlags_DefaultOpen);
+
+            if (schema_open) {
+                draw_tables_folder(schema);
+                draw_sequences_folder(schema);
+                draw_routines_folder(schema);
+                ImGui::TreePop();
             }
-
-            for (const db::TableMeta& table : schema.tables) {
-                const bool is_view = table.kind == db::ObjKind::view ||
-                                     table.kind == db::ObjKind::materialized_view;
-
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                                      col(is_view ? colors().data : colors().text));
-                const bool open = ImGui::TreeNode(table.name.c_str());
-                ImGui::PopStyleColor();
-
-                // Tamanho e estimativa de linhas a direita, em tom apagado.
-                if (!table.size_pretty.empty()) {
-                    ImGui::SameLine();
-                    ImGui::TextColored(col4(colors().text_dim), "  %s",
-                                       table.size_pretty.c_str());
-                }
-
-                if (open) {
-                    // Lazy: so' consulta as colunas quando o no e' expandido.
-                    if (!table.columns_loaded && !session_.busy()) {
-                        session_.load_columns_async(schema.name, table.name);
-                    }
-
-                    if (table.columns.empty()) {
-                        ImGui::TextColored(col4(colors().text_dim), TR("  loading..."));
-                    }
-
-                    for (const db::ColumnMeta& column : table.columns) {
-                        ImGui::PushStyleColor(
-                            ImGuiCol_Text,
-                            col(column.primary_key ? colors().data_light
-                                                   : colors().text));
-                        ImGui::BulletText("%s", column.name.c_str());
-                        ImGui::PopStyleColor();
-
-                        ImGui::SameLine();
-                        ImGui::TextColored(col4(colors().text_dim), "%s%s%s",
-                                           column.type_name.c_str(),
-                                           column.primary_key ? "  PK" : "",
-                                           column.nullable ? "" : "  NOT NULL");
-                    }
-                    ImGui::TreePop();
-                }
-            }
-            ImGui::TreePop();
+            ImGui::PopID();
         }
     }
     ImGui::End();
+}
+
+// Pasta com contagem e um ícone. O número evita expandir só para descobrir que
+// está vazio -- é o padrão do DBeaver (docs/NAVIGATOR-TREE.md).
+bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count,
+                                 bool loaded) {
+    icon_inline(icon, colors().accent_light);
+    ImGui::SameLine(0.0f, 4.0f);
+
+    const bool open = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth);
+
+    if (loaded) {
+        ImGui::SameLine();
+        ImGui::TextColored(col4(colors().text_dim), "(%zu)", count);
+    }
+    return open;
+}
+
+void MainShell::draw_tables_folder(const db::SchemaMeta& schema) {
+    if (!draw_folder_node(Icon::table, TR("Tables"), schema.tables.size(),
+                          schema.tables_loaded)) {
+        return;
+    }
+
+    for (const db::TableMeta& table : schema.tables) {
+        ImGui::PushID(table.name.c_str());
+
+        const bool is_view = table.kind == db::ObjKind::view ||
+                             table.kind == db::ObjKind::materialized_view;
+
+        icon_inline(is_view ? Icon::view : Icon::table,
+                    is_view ? colors().data : colors().accent);
+        ImGui::SameLine(0.0f, 4.0f);
+
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              col(is_view ? colors().data : colors().text));
+        const bool open = ImGui::TreeNode(table.name.c_str());
+        ImGui::PopStyleColor();
+
+        if (!table.size_pretty.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(colors().text_dim), "  %s",
+                               table.size_pretty.c_str());
+        }
+
+        if (ImGui::IsItemHovered() && !table.comment.empty()) {
+            ImGui::SetTooltip("%s", table.comment.c_str());
+        }
+
+        if (open) {
+            draw_table_children(schema, table);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    ImGui::TreePop();
+}
+
+void MainShell::draw_table_children(const db::SchemaMeta& schema,
+                                    const db::TableMeta& table) {
+    const Palette& p = colors();
+
+    // --- Colunas -------------------------------------------------------------
+    if (draw_folder_node(Icon::column, TR("Columns"), table.columns.size(),
+                         table.columns_loaded)) {
+        if (!table.columns_loaded && !session_.busy()) {
+            session_.load_columns_async(schema.name, table.name);
+        }
+        if (table.columns.empty()) {
+            ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+        }
+
+        for (const db::ColumnMeta& column : table.columns) {
+            icon_inline(column.primary_key ? Icon::key : Icon::column,
+                        column.primary_key ? p.data_light : p.text_dim);
+            ImGui::SameLine(0.0f, 4.0f);
+
+            ImGui::TextColored(col4(column.primary_key ? p.data_light : p.text),
+                               "%s", column.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s%s%s",
+                               column.type_name.c_str(),
+                               column.primary_key ? "  PK" : "",
+                               column.nullable ? "" : "  NOT NULL");
+
+            if (ImGui::IsItemHovered()) {
+                std::string tip = column.type_name;
+                if (!column.default_value.empty()) {
+                    tip += "\nDEFAULT " + column.default_value;
+                }
+                if (!column.comment.empty()) tip += "\n\n" + column.comment;
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Constraints ---------------------------------------------------------
+    if (draw_folder_node(Icon::commit, TR("Constraints"),
+                         table.constraints.size(), table.constraints_loaded)) {
+        if (!table.constraints_loaded && !session_.busy()) {
+            session_.load_constraints_async(schema.name, table.name);
+        }
+        for (const db::ConstraintMeta& constraint : table.constraints) {
+            const bool is_pk = constraint.kind == db::ObjKind::primary_key;
+            icon_inline(is_pk ? Icon::key : Icon::commit,
+                        is_pk ? p.data_light : p.text_dim);
+            ImGui::SameLine(0.0f, 4.0f);
+
+            ImGui::TextColored(col4(is_pk ? p.data_light : p.text), "%s",
+                               constraint.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s",
+                               std::string(db::to_string(constraint.kind)).c_str());
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", constraint.definition.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Índices -------------------------------------------------------------
+    if (draw_folder_node(Icon::filter, TR("Indexes"), table.indexes.size(),
+                         table.indexes_loaded)) {
+        if (!table.indexes_loaded && !session_.busy()) {
+            session_.load_indexes_async(schema.name, table.name);
+        }
+        for (const db::IndexMeta& index : table.indexes) {
+            // Índice inválido (CREATE INDEX CONCURRENTLY que falhou) existe mas
+            // não é usado pelo planejador -- precisa ser visível.
+            const std::uint32_t color = !index.valid ? p.error
+                                        : index.primary ? p.data_light
+                                                        : p.text;
+
+            icon_inline(Icon::filter, color);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(color), "%s", index.name.c_str());
+
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s  %s%s%s",
+                               index.method.c_str(),
+                               index.size_pretty.c_str(),
+                               index.unique ? "  UNIQUE" : "",
+                               index.valid ? "" : "  INVALID");
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", index.definition.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Chaves estrangeiras -------------------------------------------------
+    if (draw_folder_node(Icon::key, TR("Foreign keys"),
+                         table.foreign_keys.size(), table.keys_loaded)) {
+        if (!table.keys_loaded && !session_.busy()) {
+            session_.load_keys_async(schema.name, table.name);
+        }
+        for (const db::ForeignKeyMeta& key : table.foreign_keys) {
+            icon_inline(Icon::chevron_right, p.accent_light);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.text), "%s", key.source_column.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.data), "→ %s.%s", key.target_table.c_str(),
+                               key.target_column.c_str());
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s\n\nON UPDATE %s\nON DELETE %s",
+                                  key.definition.c_str(),
+                                  key.on_update.c_str(), key.on_delete.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Referências ---------------------------------------------------------
+    //
+    // Quem aponta para esta tabela. Responder "o que depende disto?" é o que
+    // mais falta num cliente SQL.
+    if (draw_folder_node(Icon::copy, TR("References"),
+                         table.references.size(), table.keys_loaded)) {
+        if (!table.keys_loaded && !session_.busy()) {
+            session_.load_keys_async(schema.name, table.name);
+        }
+        for (const db::ForeignKeyMeta& reference : table.references) {
+            icon_inline(Icon::chevron_right, p.warn);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(p.warn), "%s.%s",
+                               reference.source_table.c_str(),
+                               reference.source_column.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "→ %s",
+                               reference.target_column.c_str());
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Triggers ------------------------------------------------------------
+    if (draw_folder_node(Icon::clock, TR("Triggers"), table.triggers.size(),
+                         table.triggers_loaded)) {
+        if (!table.triggers_loaded && !session_.busy()) {
+            session_.load_triggers_async(schema.name, table.name);
+        }
+        for (const db::TriggerMeta& trigger : table.triggers) {
+            icon_inline(Icon::clock, trigger.enabled ? p.text_dim : p.error);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(col4(trigger.enabled ? p.text : p.text_dim),
+                               "%s", trigger.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s %s%s",
+                               trigger.timing.c_str(), trigger.events.c_str(),
+                               trigger.enabled ? "" : "  [off]");
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", trigger.definition.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+}
+
+void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
+    if (!draw_folder_node(Icon::refresh, TR("Sequences"), schema.sequences.size(),
+                          schema.sequences_loaded)) {
+        return;
+    }
+
+    if (!schema.sequences_loaded && !session_.busy()) {
+        session_.load_sequences_async(schema.name);
+    }
+
+    const Palette& p = colors();
+    for (const db::SequenceMeta& sequence : schema.sequences) {
+        icon_inline(Icon::refresh, p.text_dim);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.text), "%s", sequence.name.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "= %lld",
+                           static_cast<long long>(sequence.last_value));
+
+        if (ImGui::IsItemHovered()) {
+            std::string tip = "start " + std::to_string(sequence.start_value) +
+                              ", increment " + std::to_string(sequence.increment);
+            if (!sequence.owned_by.empty()) tip += "\nowned by " + sequence.owned_by;
+            if (!sequence.comment.empty())  tip += "\n\n" + sequence.comment;
+            ImGui::SetTooltip("%s", tip.c_str());
+        }
+    }
+    ImGui::TreePop();
+}
+
+void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
+    if (!draw_folder_node(Icon::settings, TR("Functions"), schema.routines.size(),
+                          schema.routines_loaded)) {
+        return;
+    }
+
+    if (!schema.routines_loaded && !session_.busy()) {
+        session_.load_routines_async(schema.name);
+    }
+
+    const Palette& p = colors();
+    for (const db::RoutineMeta& routine : schema.routines) {
+        const bool is_procedure = routine.kind == db::ObjKind::procedure;
+
+        icon_inline(Icon::settings, is_procedure ? p.data : p.text_dim);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.text), "%s", routine.name.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.text_dim), "(%s)", routine.arguments.c_str());
+
+        if (ImGui::IsItemHovered()) {
+            std::string tip = routine.name + "(" + routine.arguments + ")";
+            if (!is_procedure) tip += "\n  returns " + routine.return_type;
+            tip += "\n  language " + routine.language;
+            if (!routine.comment.empty()) tip += "\n\n" + routine.comment;
+            ImGui::SetTooltip("%s", tip.c_str());
+        }
+    }
+    ImGui::TreePop();
 }
 
 void MainShell::draw_toolbar() {

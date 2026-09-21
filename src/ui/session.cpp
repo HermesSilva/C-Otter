@@ -129,15 +129,33 @@ void Session::execute_async(std::string sql) {
     });
 }
 
-void Session::load_columns_async(std::string schema, std::string table) {
+db::SchemaMeta* Session::find_schema(std::string_view schema) {
+    for (db::SchemaMeta& s : schemas_) {
+        if (s.name == schema) return &s;
+    }
+    return nullptr;
+}
+
+db::TableMeta* Session::find_table(std::string_view schema,
+                                   std::string_view table) {
+    db::SchemaMeta* s = find_schema(schema);
+    if (s == nullptr) return nullptr;
+
+    for (db::TableMeta& t : s->tables) {
+        if (t.name == table) return &t;
+    }
+    return nullptr;
+}
+
+void Session::run_catalog_async(
+    std::function<void(db::PostgresCatalog&)> loader) {
     if (busy_.load(std::memory_order_acquire)) return;
     if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
 
     join_worker();
     busy_.store(true, std::memory_order_release);
 
-    worker_ = std::thread([this, schema = std::move(schema),
-                           table = std::move(table)] {
+    worker_ = std::thread([this, loader = std::move(loader)] {
         db::Holt* holt = nullptr;
         {
             const std::lock_guard<std::mutex> lock(mutex_);
@@ -149,22 +167,103 @@ void Session::load_columns_async(std::string schema, std::string table) {
         }
 
         db::PostgresCatalog catalog(*holt);
+        loader(catalog);
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+void Session::load_columns_async(std::string schema, std::string table) {
+    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
         auto columns = catalog.load_columns(schema, table);
+        if (!columns) return;
 
         const std::lock_guard<std::mutex> lock(mutex_);
-        if (columns) {
-            for (db::SchemaMeta& s : schemas_) {
-                if (s.name != schema) continue;
-                for (db::TableMeta& t : s.tables) {
-                    if (t.name != table) continue;
-                    t.columns = std::move(*columns);
-                    t.columns_loaded = true;
-                    break;
-                }
-                break;
-            }
+        if (db::TableMeta* t = find_table(schema, table)) {
+            t->columns = std::move(*columns);
+            t->columns_loaded = true;
         }
-        busy_.store(false, std::memory_order_release);
+    });
+}
+
+void Session::load_constraints_async(std::string schema, std::string table) {
+    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+        auto constraints = catalog.load_constraints(schema, table);
+        if (!constraints) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::TableMeta* t = find_table(schema, table)) {
+            t->constraints = std::move(*constraints);
+            t->constraints_loaded = true;
+        }
+    });
+}
+
+void Session::load_indexes_async(std::string schema, std::string table) {
+    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+        auto indexes = catalog.load_indexes(schema, table);
+        if (!indexes) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::TableMeta* t = find_table(schema, table)) {
+            t->indexes = std::move(*indexes);
+            t->indexes_loaded = true;
+        }
+    });
+}
+
+void Session::load_keys_async(std::string schema, std::string table) {
+    // Chaves e referências vêm juntas: quem abre uma quase sempre quer a outra,
+    // e são duas consultas baratas sobre o mesmo catálogo.
+    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+        auto keys       = catalog.load_table_foreign_keys(schema, table);
+        auto references = catalog.load_references(schema, table);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        db::TableMeta* t = find_table(schema, table);
+        if (t == nullptr) return;
+
+        if (keys)       t->foreign_keys = std::move(*keys);
+        if (references) t->references   = std::move(*references);
+        t->keys_loaded = true;
+    });
+}
+
+void Session::load_triggers_async(std::string schema, std::string table) {
+    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+        auto triggers = catalog.load_triggers(schema, table);
+        if (!triggers) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::TableMeta* t = find_table(schema, table)) {
+            t->triggers = std::move(*triggers);
+            t->triggers_loaded = true;
+        }
+    });
+}
+
+void Session::load_sequences_async(std::string schema) {
+    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+        auto sequences = catalog.load_sequences(schema);
+        if (!sequences) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::SchemaMeta* s = find_schema(schema)) {
+            s->sequences = std::move(*sequences);
+            s->sequences_loaded = true;
+        }
+    });
+}
+
+void Session::load_routines_async(std::string schema) {
+    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+        auto routines = catalog.load_routines(schema);
+        if (!routines) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::SchemaMeta* s = find_schema(schema)) {
+            s->routines = std::move(*routines);
+            s->routines_loaded = true;
+        }
     });
 }
 

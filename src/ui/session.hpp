@@ -61,8 +61,16 @@ public:
     [[nodiscard]] std::optional<db::ResultSet> take_result();
     [[nodiscard]] std::vector<db::QueryLog> query_log() const;
 
-    // Carrega as colunas de uma tabela sob demanda (lazy).
+    // Carregamento tardio por pasta da arvore. Cada uma consulta o catalogo
+    // apenas quando o no e' expandido -- expandir "Colunas" nao deve custar
+    // uma leitura de indices.
     void load_columns_async(std::string schema, std::string table);
+    void load_constraints_async(std::string schema, std::string table);
+    void load_indexes_async(std::string schema, std::string table);
+    void load_keys_async(std::string schema, std::string table);
+    void load_triggers_async(std::string schema, std::string table);
+    void load_sequences_async(std::string schema);
+    void load_routines_async(std::string schema);
 
     // --- Transacoes ---------------------------------------------------------
     //
@@ -84,6 +92,15 @@ private:
     // resultado na mensagem de estado.
     void run_txn_async(std::function<Status(db::Holt&)> operation,
                        std::string success_message);
+
+    // Fator comum dos carregadores de catalogo: abre um worker que recebe o
+    // catalogo pronto e escreve no modelo sob lock.
+    void run_catalog_async(std::function<void(db::PostgresCatalog&)> loader);
+
+    // Localiza uma tabela no modelo. O chamador deve ja' segurar o mutex.
+    [[nodiscard]] db::TableMeta* find_table(std::string_view schema,
+                                            std::string_view table);
+    [[nodiscard]] db::SchemaMeta* find_schema(std::string_view schema);
 
     mutable std::mutex mutex_;
     std::unique_ptr<db::Holt> holt_;

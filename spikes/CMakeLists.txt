@@ -6,5 +6,7 @@
 # que vale para qualquer dependencia futura.
 #
 add_subdirectory(pgconnect)    # conexao real + metadados + ResultSet colunar
+add_subdirectory(catalog)      # constraints, indices, FKs, sequences, rotinas
 
 #   add_subdirectory(grid)     # 1M x 20 celulas a 144 fps
+
