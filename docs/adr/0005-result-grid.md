@@ -1,7 +1,11 @@
 # ADR 0005 — Grade de resultados
 
 **Data:** 2026-09-21
-**Status:** Proposto
+**Status:** Parcialmente implementado (2026-09-21)
+
+> **Implementado:** agregação local com as 7 funções, agrupamento por múltiplas colunas,
+> linha de totais, marca de resultado parcial e "calcular no servidor" (`db/aggregate.cpp`).
+> **Falta:** pivot, coluna calculada, sparkline, formatação condicional, fetch progressivo.
 
 ## Contexto
 

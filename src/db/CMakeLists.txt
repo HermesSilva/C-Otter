@@ -8,6 +8,7 @@ otter_add_library(otter_db
         types.cpp
         holt.cpp
         result_set.cpp
+        aggregate.cpp
         catalog.cpp
         connection_config.cpp
         connection_store.cpp

@@ -8,6 +8,7 @@
 
 #include "TextEditor.h"
 
+#include "db/aggregate.hpp"
 #include "db/edit.hpp"
 #include "db/result_set.hpp"
 #include "sql/paging.hpp"
@@ -95,6 +96,17 @@ public:
     }
     void set_filter(sql::ColumnFilter filter) { filter_ = std::move(filter); }
 
+    // --- Agrupamento e totais (ADR 0005) -------------------------------------
+    [[nodiscard]] db::GroupSpec& group_spec() noexcept { return group_spec_; }
+    [[nodiscard]] const db::GroupSpec& group_spec() const noexcept {
+        return group_spec_;
+    }
+
+    [[nodiscard]] const db::GroupResult& groups() const noexcept {
+        return groups_;
+    }
+    void set_groups(db::GroupResult groups) { groups_ = std::move(groups); }
+
     // --- Edicao (ADR 0014) ---------------------------------------------------
     [[nodiscard]] db::EditBuffer& edits() noexcept { return edits_; }
     [[nodiscard]] const db::EditBuffer& edits() const noexcept { return edits_; }
@@ -128,6 +140,8 @@ private:
     sql::ColumnFilter           filter_;
     db::EditBuffer              edits_;
     db::EditTarget              edit_target_;
+    db::GroupSpec               group_spec_;
+    db::GroupResult             groups_;
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

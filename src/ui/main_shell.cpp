@@ -1,6 +1,7 @@
 #include "ui/main_shell.hpp"
 
 #include "base/i18n.hpp"
+#include "db/aggregate.hpp"
 #include "db/ddl.hpp"
 #include "db/export.hpp"
 #include "sql/format.hpp"
@@ -857,6 +858,7 @@ void MainShell::draw() {
                 // De onde o resultado veio decide se da' para editar. E'
                 // calculado uma vez, aqui, e nao a cada quadro.
                 document->edits().clear();
+                recompute_groups(*document);
                 document->set_edit_target(
                     db::find_edit_target(*document->result(),
                                          session().schemas()));
@@ -2373,6 +2375,154 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     ImGui::PopID();
 }
 
+void MainShell::recompute_groups(SqlDocument& document) {
+    if (!document.result().has_value()) {
+        document.set_groups({});
+        return;
+    }
+
+    // `paged()` e' o que diz se o ResultSet cobre o resultado inteiro. Essa
+    // informacao vira a marca `partial` e acompanha os numeros ate' a tela.
+    document.set_groups(db::group_and_aggregate(
+        *document.result(), document.group_spec(), document.paged()));
+}
+
+void MainShell::draw_group_bar(SqlDocument& document, const db::ResultSet& rs) {
+    const Palette& p = colors();
+    const db::GroupSpec& spec = document.group_spec();
+
+    if (spec.group_by.empty() && spec.aggregates.empty()) return;
+
+    // Colunas de agrupamento, cada uma removivel.
+    if (!spec.group_by.empty()) {
+        ImGui::TextColored(col4(p.text_dim), TR("Grouped by"));
+
+        for (std::size_t i = 0; i < spec.group_by.size(); ++i) {
+            const std::size_t column = spec.group_by[i];
+            if (column >= rs.column_count()) continue;
+
+            ImGui::SameLine();
+            ImGui::PushID(static_cast<int>(i));
+
+            if (ImGui::SmallButton(
+                    (rs.column(column).info().name + " x").c_str())) {
+                document.group_spec().group_by.erase(
+                    document.group_spec().group_by.begin() +
+                    static_cast<std::ptrdiff_t>(i));
+                recompute_groups(document);
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
+    }
+
+    // O aviso de parcialidade. Sem ele, "soma 650" de uma pagina de 200
+    // linhas seria lido como a soma do resultado inteiro -- mentira.
+    if (document.groups().partial &&
+        (!spec.aggregates.empty() || !spec.group_by.empty())) {
+        ImGui::SameLine();
+        icon_inline(Icon::warning, p.warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.warn),
+                           TR("over this page only (%zu rows)"),
+                           document.groups().rows_covered);
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton(TR("Compute on the server"))) {
+            const std::string sql = db::build_group_query(
+                document.paged_sql(), rs, document.group_spec());
+            if (!sql.empty()) {
+                // Abre numa aba nova: o resultado agrupado tem outras colunas
+                // e substituir o atual perderia o que o usuario estava vendo.
+                open_sql_tab(sql, /*run=*/true);
+            }
+        }
+    }
+}
+
+void MainShell::draw_group_panel(SqlDocument& document,
+                                 const db::ResultSet& rs) {
+    const Palette& p = colors();
+    const db::GroupResult& groups = document.groups();
+
+    if (groups.groups.empty()) return;
+
+    const db::GroupSpec& spec = document.group_spec();
+    const int columns = static_cast<int>(spec.group_by.size() +
+                                         spec.aggregates.size());
+    if (columns == 0) return;
+
+    constexpr ImGuiTableFlags flags =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+
+    if (ImGui::BeginTable("##groups", columns, flags,
+                          ImVec2(0, ImGui::GetFontSize() * 12.0f))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+
+        for (const std::size_t column : spec.group_by) {
+            ImGui::TableSetupColumn(column < rs.column_count()
+                                        ? rs.column(column).info().name.c_str()
+                                        : "?");
+        }
+        for (const db::AggregateSpec& aggregate : spec.aggregates) {
+            const std::string label =
+                std::string(db::to_string(aggregate.function)) + "(" +
+                (aggregate.column < rs.column_count()
+                     ? rs.column(aggregate.column).info().name
+                     : "?") + ")";
+            ImGui::TableSetupColumn(label.c_str());
+        }
+        ImGui::TableHeadersRow();
+
+        for (const db::Group& group : groups.groups) {
+            ImGui::TableNextRow();
+
+            for (std::size_t i = 0; i < group.key_values.size(); ++i) {
+                ImGui::TableSetColumnIndex(static_cast<int>(i));
+                ImGui::TextUnformatted(group.key_values[i].c_str());
+            }
+            for (std::size_t i = 0; i < group.aggregates.size(); ++i) {
+                ImGui::TableSetColumnIndex(
+                    static_cast<int>(group.key_values.size() + i));
+
+                // Sem alinhamento a' direita aqui.
+                //
+                // Tentei SetCursorPosX com GetContentRegionAvail() e depois
+                // com GetColumnWidth(): nos dois casos os subtotais sumiam da
+                // tela. A grade principal usa o mesmo padrao e funciona, mas
+                // a diferenca de contexto (tabela aninhada, SizingStretchProp)
+                // muda o referencial do cursor.
+                //
+                // Numero desalinhado e' um defeito estetico; numero invisivel
+                // e' um defeito funcional. Fico com o primeiro ate' entender
+                // o referencial certo.
+                const db::AggregateValue& value = group.aggregates[i];
+                ImGui::TextUnformatted(value.text.c_str());
+            }
+        }
+
+        // Linha de totais, destacada: e' o resumo de tudo, nao mais um grupo.
+        if (!groups.totals.empty()) {
+            ImGui::TableNextRow();
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                                   with_alpha(p.accent, 0.25f));
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored(col4(p.text_bright), TR("Total"));
+
+            for (std::size_t i = 0; i < groups.totals.size(); ++i) {
+                ImGui::TableSetColumnIndex(
+                    static_cast<int>(spec.group_by.size() + i));
+                ImGui::TextColored(col4(p.text_bright), "%s",
+                                   groups.totals[i].text.c_str());
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
 void MainShell::save_pending_edits(SqlDocument& document) {
     if (!document.edits().has_changes()) return;
     if (!document.result().has_value()) return;
@@ -2481,6 +2631,68 @@ void MainShell::draw_column_header_menu(SqlDocument& document,
     if (ImGui::MenuItem(TR("Sort descending"), nullptr, false, can_run)) {
         document.set_sort(sql::SortOrder{info.name, true});
         execute_page(document, 0);
+    }
+
+    ImGui::Separator();
+
+    // --- Agrupamento e totais (ADR 0005) ------------------------------------
+    db::GroupSpec& spec = document.group_spec();
+
+    const bool grouped =
+        std::find(spec.group_by.begin(), spec.group_by.end(), column) !=
+        spec.group_by.end();
+
+    if (ImGui::MenuItem(grouped ? TR("Ungroup") : TR("Group by this column"))) {
+        if (grouped) {
+            spec.group_by.erase(std::remove(spec.group_by.begin(),
+                                            spec.group_by.end(), column),
+                                spec.group_by.end());
+        } else {
+            spec.group_by.push_back(column);
+        }
+        recompute_groups(document);
+    }
+
+    if (ImGui::BeginMenu(TR("Aggregate"))) {
+        static constexpr db::Aggregate kFunctions[] = {
+            db::Aggregate::count, db::Aggregate::count_non_null,
+            db::Aggregate::count_distinct, db::Aggregate::sum,
+            db::Aggregate::average, db::Aggregate::minimum,
+            db::Aggregate::maximum,
+        };
+
+        for (const db::Aggregate function : kFunctions) {
+            // Agregacao que nao se aplica ao tipo aparece desabilitada, nao
+            // escondida: o usuario ve' que existe e por que nao serve aqui.
+            const bool applies = db::aggregate_applies(function, info.kind);
+
+            const bool active = std::any_of(
+                spec.aggregates.begin(), spec.aggregates.end(),
+                [&](const db::AggregateSpec& a) {
+                    return a.column == column && a.function == function;
+                });
+
+            if (ImGui::MenuItem(TR(std::string(db::to_string(function)).c_str()),
+                                nullptr, active, applies)) {
+                if (active) {
+                    std::erase_if(spec.aggregates,
+                                  [&](const db::AggregateSpec& a) {
+                                      return a.column == column &&
+                                             a.function == function;
+                                  });
+                } else {
+                    spec.aggregates.push_back({column, function});
+                }
+                recompute_groups(document);
+            }
+        }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::MenuItem(TR("Clear grouping"), nullptr, false,
+                        !spec.group_by.empty() || !spec.aggregates.empty())) {
+        spec = {};
+        recompute_groups(document);
     }
 
     ImGui::Separator();
@@ -2812,6 +3024,9 @@ void MainShell::draw_grid_panel() {
                                TR(std::string(db::to_string(
                                       document->edit_target().refusal)).c_str()));
         }
+
+        draw_group_bar(*document, rs);
+        draw_group_panel(*document, rs);
 
         ImGui::Separator();
 

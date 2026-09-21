@@ -96,6 +96,16 @@ private:
 
     // Grava as alteracoes pendentes, em transacao.
     void save_pending_edits(SqlDocument& document);
+
+    // --- Agrupamento e totais (ADR 0005) -------------------------------------
+    //
+    // Recalcula sobre o que esta' em memoria. Marca o resultado como parcial
+    // quando o ResultSet e' uma pagina.
+    void recompute_groups(SqlDocument& document);
+
+    // Painel de agrupamento acima da grade, e a linha de totais no rodape.
+    void draw_group_bar(SqlDocument& document, const db::ResultSet& rs);
+    void draw_group_panel(SqlDocument& document, const db::ResultSet& rs);
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();

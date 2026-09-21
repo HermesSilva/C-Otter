@@ -300,8 +300,12 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Filtro por coluna** | ✅ | Botão direito no cabeçalho; expressão `WHERE` livre |
 | Coluna filtrada marcada | ✅ | Prefixo `*` em âmbar no cabeçalho |
 | Menu de contexto do cabeçalho | ✅ | Filtrar, ordenar, copiar nome |
-| Agrupamento e subtotais | ⬜ | ADR 0005 |
-| Linha de totais | ⬜ | ADR 0005 |
+| **Agrupamento e subtotais** | ✅ | Menu do cabeçalho; múltiplos níveis (ADR 0005) |
+| **Linha de totais** | ✅ | Destacada, no fim do painel de grupos |
+| 7 agregações | ✅ | contagem, não nula, distintos, soma, média, mín., máx. |
+| Agregação inaplicável desabilitada | ✅ | `SUM` numa coluna de texto aparece cinza |
+| **Aviso de resultado parcial** | ✅ | "apenas sobre esta página (N linhas)" + "Calcular no servidor" |
+
 | Pivot | ⬜ | ADR 0005 |
 | Formatação condicional | ⬜ | |
 | Editores de valor (JSON, hex, data) | ⬜ | |
@@ -488,7 +492,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (247, todos verdes):
+Testes automatizados (261, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe
