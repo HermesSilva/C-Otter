@@ -99,6 +99,14 @@ public:
     [[nodiscard]] bool has_more() const noexcept { return has_more_; }
     void set_has_more(bool more) noexcept { has_more_ = more; }
 
+    // Tamanho de pagina EFETIVAMENTE usado nesta consulta.
+    //
+    // Guardado aqui, e nao relido do perfil: a colheita do resultado precisa
+    // do mesmo valor para cortar a linha-sonda, e mudar a opcao durante a
+    // consulta daria o numero errado.
+    [[nodiscard]] std::size_t page_size() const noexcept { return page_size_; }
+    void set_page_size(std::size_t size) noexcept { page_size_ = size; }
+
     // Total de linhas do resultado inteiro, quando o usuario pediu a
     // contagem (o `resultset.count` do DBeaver).
     //
@@ -221,6 +229,7 @@ private:
     db::GroupSpec               group_spec_;
     db::GroupResult             groups_;
     std::optional<std::size_t>  total_rows_;
+    std::size_t                 page_size_ = 200;   // sql::kDefaultPageSize
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

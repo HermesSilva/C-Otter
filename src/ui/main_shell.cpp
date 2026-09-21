@@ -1065,7 +1065,14 @@ void MainShell::execute_script() {
     // passa a ser a do resultado inteiro do ultimo SELECT.
     document->reset_paging();
 
-    target.execute_script_async(std::move(statements));
+    // Parar ou seguir no primeiro erro, do perfil (pagina "Processamento
+    // SQL"). Era sempre parar, fixo na chamada.
+    const Connection* script_owner = connection_by_id(document->connection_id());
+    const bool stop_on_error =
+        script_owner == nullptr ||
+        script_owner->profile.editor.stop_script_on_error;
+
+    target.execute_script_async(std::move(statements), stop_on_error);
 }
 
 // Conta o resultado inteiro -- o `resultset.count` do DBeaver.
@@ -1116,9 +1123,21 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
         owner != nullptr ? sql::dialect_for(owner->profile.driver_id)
                          : active_dialect();
 
+    // O tamanho da pagina vem do perfil (pagina "Processamento SQL"). Era o
+    // kDefaultPageSize fixo -- 200 e' bom num banco local e caro num
+    // servidor distante, e a resposta certa depende da latencia.
+    const std::size_t page_size =
+        owner != nullptr ? static_cast<std::size_t>(owner->profile.editor.page_size)
+                         : sql::kDefaultPageSize;
+
     const sql::PagedQuery paged = sql::make_paged_query(
         document.paged_sql(), dialect, page,
-        sql::kDefaultPageSize, document.sort(), document.filter());
+        page_size, document.sort(), document.filter());
+
+    // Guardado no documento: a colheita do resultado precisa do MESMO valor
+    // para saber onde cortar a linha-sonda, e reler do perfil la' daria o
+    // numero errado se o usuario mudasse a opcao durante a consulta.
+    document.set_page_size(page_size);
 
     document.set_page(page);
     document.set_paged(paged.rewritten);
@@ -1265,9 +1284,14 @@ void MainShell::draw() {
                 // ha' mais resultado adiante -- e ela nao pode aparecer na
                 // grade, senao o usuario veria 201 linhas ao pedir 200.
                 if (document->paged()) {
-                    const bool more = fresh->row_count() > sql::kDefaultPageSize;
+                    // O tamanho usado NESTA consulta, nao o padrao: o
+                    // usuario pode ter mudado a opcao entre executar e
+                    // colher, e cortar no numero errado esconderia linhas
+                    // legitimas ou deixaria a sonda visivel.
+                    const std::size_t size = document->page_size();
+                    const bool more = fresh->row_count() > size;
                     document->set_has_more(more);
-                    if (more) fresh->hide_rows_beyond(sql::kDefaultPageSize);
+                    if (more) fresh->hide_rows_beyond(size);
                 }
                 document->set_result(std::move(*fresh));
 
@@ -5562,7 +5586,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
     if (document.paged()) {
         // Intervalo real de linhas, base 1 -- "linhas 201-400" diz onde o
         // usuario esta'; "200 linhas" sozinho nao diria.
-        const std::size_t first = document.page() * sql::kDefaultPageSize + 1;
+        const std::size_t first = document.page() * document.page_size() + 1;
         const std::size_t last  = first + rs.row_count() - 1;
 
         if (icon_button("##firstpage", Icon::first_page, TR("First page"),
@@ -5622,7 +5646,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
             ImGui::SetTooltip(
                 TR("The query was rewritten with LIMIT %zu.\n"
                    "See the executed SQL in the Queries tab."),
-                sql::kDefaultPageSize + 1);
+                document.page_size() + 1);
         }
 
         ImGui::SameLine();

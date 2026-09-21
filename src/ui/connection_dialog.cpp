@@ -462,9 +462,7 @@ void ConnectionDialog::draw_page_body() {
     case Page::sql_completion:    draw_page_sql_completion();   break;
     case Page::sql_code_editor:   draw_page_sql_code_editor();  break;
     case Page::sql_formatting:    draw_page_sql_formatting();   break;
-    case Page::sql_processing:
-        draw_page_placeholder("Statement delimiters and execution options");
-        break;
+    case Page::sql_processing:    draw_page_sql_processing();   break;
     }
 }
 
@@ -511,6 +509,41 @@ void ConnectionDialog::draw_page_sql_formatting() {
     help_marker(TR("One column per line when the list has more items than "
                    "this. Short lists fit on one line and read better that "
                    "way."));
+}
+
+// Processamento SQL, por conexao (main.sqlexecute).
+void ConnectionDialog::draw_page_sql_processing() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Result set"));
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(140);
+    ImGui::InputInt(TR("Rows per page"), &editor.page_size, 50, 100);
+    editor.page_size = std::clamp(editor.page_size, 10, 10000);
+    help_marker(TR("A query without LIMIT is rewritten to bring one page at "
+                   "a time (ADR 0011). Bigger fills the screen in one trip; "
+                   "smaller comes back faster on a distant server."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Scripts"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Stop on the first error"), &editor.stop_script_on_error);
+    help_marker(TR("Off, the script keeps going after a failed statement. "
+                   "In a migration that runs the remaining statements against "
+                   "a state the author did not expect."));
+
+    // O delimitador nao e' configuravel: o divisor de script ja' entende o
+    // ';' padrao, o $$...$$ do PostgreSQL e o DELIMITER do MySQL -- que e'
+    // o comando SQL com que se troca o delimitador, e funciona dentro do
+    // proprio script. Uma caixa aqui seria uma segunda forma de dizer a
+    // mesma coisa, e as duas poderiam discordar.
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("The statement delimiter follows the dialect: ';', "
+                          "$$...$$ on PostgreSQL, and the DELIMITER command "
+                          "on MySQL."));
 }
 
 // Editor de codigo, por conexao (main.sql.codeeditor).

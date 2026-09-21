@@ -462,6 +462,8 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     stored.profile.editor.auto_indent          = false;
     stored.profile.editor.show_matching_brackets = false;
     stored.profile.editor.show_whitespace      = true;
+    stored.profile.editor.page_size            = 1000;
+    stored.profile.editor.stop_script_on_error = false;
 
     OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
 
@@ -484,6 +486,8 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     OTTER_CHECK(!e.auto_indent);
     OTTER_CHECK(!e.show_matching_brackets);
     OTTER_CHECK(e.show_whitespace);
+    OTTER_CHECK_EQ(e.page_size, 1000);
+    OTTER_CHECK(!e.stop_script_on_error);
 }
 
 OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
@@ -513,6 +517,8 @@ OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
     OTTER_CHECK_EQ(e.tab_size, defaults.tab_size);
     OTTER_CHECK_EQ(e.show_line_numbers, defaults.show_line_numbers);
     OTTER_CHECK_EQ(e.auto_indent, defaults.auto_indent);
+    OTTER_CHECK_EQ(e.page_size, defaults.page_size);
+    OTTER_CHECK_EQ(e.stop_script_on_error, defaults.stop_script_on_error);
 }
 
 // --- Propriedades do driver chegam ao ConnConfig ----------------------------

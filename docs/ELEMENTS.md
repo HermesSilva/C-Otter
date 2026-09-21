@@ -123,7 +123,8 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | **Editor SQL** → **Completar código** | Sugerir ao digitar, atraso, em comentários/strings, inserir único | ✅ alimenta o popup |
 | **Editor SQL** → **Editor de código** | Tab, indentar sozinho, números de linha, parênteses | ✅ alimenta o TextEditor |
 | | Mostrar espaços | ❌ chega ao editor, nada é desenhado — **desabilitado na tela**, com o motivo |
-| **Editor SQL** → Processamento SQL | — | ⬜ **avisado na tela** |
+| **Editor SQL** → **Processamento SQL** | Linhas por página, parar no primeiro erro | ✅ alimenta a paginação e o `Alt+X` |
+| | Delimitador de comando | ➖ segue o dialeto (`;`, `$$...$$`, `DELIMITER`); uma caixa seria uma segunda forma de dizer o mesmo, e as duas poderiam discordar |
 
 As abas de rede continuam existindo, com o mesmo conteúdo de antes:
 
@@ -470,7 +471,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
-| Assistente de conexão | 45 | 1 | 8 | 1 | 55 |
+| Assistente de conexão | 46 | 1 | 7 | 1 | 55 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 55 | 3 | 3 | 0 | 61 |
@@ -478,9 +479,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **263** | **7** | **14** | **1** | **285** |
+| **Total** | **264** | **7** | **13** | **1** | **285** |
 
-**263 de 285 elementos existentes funcionam.**
+**264 de 285 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

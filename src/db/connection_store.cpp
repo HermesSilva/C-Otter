@@ -214,6 +214,10 @@ StoredProfile profile_from_json(const std::string& id,
             ed["show-matching-brackets"].as_bool(defaults.show_matching_brackets);
         editor.show_whitespace =
             ed["show-whitespace"].as_bool(defaults.show_whitespace);
+        editor.page_size = static_cast<int>(
+            ed["page-size"].as_number(defaults.page_size));
+        editor.stop_script_on_error =
+            ed["stop-script-on-error"].as_bool(defaults.stop_script_on_error);
     }
 
     const json::Value& config = node["configuration"];
@@ -438,6 +442,13 @@ json::Value profile_to_json(const StoredProfile& stored) {
         }
         if (editor.show_whitespace != defaults.show_whitespace) {
             ed["show-whitespace"] = json::Value(editor.show_whitespace);
+        }
+        if (editor.page_size != defaults.page_size) {
+            ed["page-size"] = json::Value(static_cast<double>(editor.page_size));
+        }
+        if (editor.stop_script_on_error != defaults.stop_script_on_error) {
+            ed["stop-script-on-error"] =
+                json::Value(editor.stop_script_on_error);
         }
 
         if (!ed.empty()) node["otter-editor"] = json::Value(std::move(ed));

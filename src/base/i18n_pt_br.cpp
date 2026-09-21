@@ -874,6 +874,28 @@ const char* const kPtBr[] = {
     "Show whitespace",            "Mostrar espaços",
     "(not working yet)",          "(ainda não funciona)",
 
+    // --- Pagina Processamento SQL (main.sqlexecute) ---
+    "Result set",                 "Resultado",
+    "Rows per page",              "Linhas por página",
+    "A query without LIMIT is rewritten to bring one page at a time "
+    "(ADR 0011). Bigger fills the screen in one trip; smaller comes back "
+    "faster on a distant server.",
+        "Uma consulta sem LIMIT é reescrita para trazer uma página por vez "
+        "(ADR 0011). Maior preenche a tela numa viagem; menor volta mais "
+        "rápido num servidor distante.",
+    "Scripts",                    "Scripts",
+    "Stop on the first error",    "Parar no primeiro erro",
+    "Off, the script keeps going after a failed statement. In a migration "
+    "that runs the remaining statements against a state the author did not "
+    "expect.",
+        "Desligado, o script segue depois de um comando que falhou. Numa "
+        "migração, isso executa os comandos restantes contra um estado que o "
+        "autor não previu.",
+    "The statement delimiter follows the dialect: ';', $$...$$ on "
+    "PostgreSQL, and the DELIMITER command on MySQL.",
+        "O delimitador de comando segue o dialeto: ';', $$...$$ no "
+        "PostgreSQL, e o comando DELIMITER no MySQL.",
+
     // --- Propriedades do driver ---
     "PostgreSQL: runtime parameters of the startup message (search_path, "
     "statement_timeout, TimeZone...).",

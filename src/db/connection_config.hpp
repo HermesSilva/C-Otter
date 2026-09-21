@@ -132,6 +132,21 @@ struct EditorOptions {
     bool auto_indent             = true;
     bool show_matching_brackets  = true;
     bool show_whitespace         = false;
+
+    // --- Processamento SQL (main.sqlexecute) ---
+    //
+    // Linhas por pagina. O mesmo `RESULT_SET_MAX_ROWS` do DBeaver: grande o
+    // bastante para preencher a tela, pequeno o bastante para voltar rapido.
+    //
+    // Por CONEXAO porque a resposta certa depende da latencia: 200 e' bom
+    // num banco local e caro num servidor do outro lado do Atlantico.
+    int  page_size               = 200;
+
+    // Parar o script no primeiro erro, ou seguir para o proximo comando.
+    //
+    // Parar e' o padrao: num script de migracao, seguir depois de um erro
+    // executa os comandos seguintes num estado que o autor nao previu.
+    bool stop_script_on_error    = true;
 };
 
 struct ConnectionProfile {
