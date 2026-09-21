@@ -238,6 +238,143 @@ int main() {
         check(column_named(after, "ativo") == nullptr, "coluna removida");
     }
 
+    // --- Indices, constraints e chaves estrangeiras --------------------------
+
+    std::printf("\ncriar e remover indice\n");
+    {
+        otter::db::NewIndex index;
+        index.name    = "ix_probe_nome";
+        index.columns = {"nome"};
+
+        if (!apply(otter::db::generate_create_index("otter_test", "alter_probe",
+                                                    index))) {
+            return 1;
+        }
+
+        auto rs = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='alter_probe'"
+            "   AND INDEX_NAME='ix_probe_nome'");
+        check(rs.has_value() && rs->row_count() == 1 && rs->text(0, 0) == "1",
+              "indice existe no servidor");
+
+        const otter::db::AlterScript drop = otter::db::generate_drop_index(
+            "otter_test", "alter_probe", "ix_probe_nome",
+            /*from_constraint=*/false);
+        check(drop.has_destructive(), "remocao marcada como destrutiva");
+        if (!apply(drop)) return 1;
+
+        auto gone = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='alter_probe'"
+            "   AND INDEX_NAME='ix_probe_nome'");
+        check(gone.has_value() && gone->text(0, 0) == "0", "indice removido");
+    }
+
+    std::printf("\nconstraint unica que RESTRINGE de verdade\n");
+    {
+        otter::db::NewConstraint constraint;
+        constraint.name    = "uq_probe_nome";
+        constraint.kind    = otter::db::ConstraintKind::unique;
+        constraint.columns = {"nome"};
+
+        if (!apply(otter::db::generate_add_constraint("otter_test", "alter_probe",
+                                                      constraint))) {
+            return 1;
+        }
+
+        auto rs = (*holt)->query(
+            "SELECT CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='alter_probe'"
+            "   AND CONSTRAINT_NAME='uq_probe_nome'");
+        check(rs.has_value() && rs->row_count() == 1 && rs->text(0, 0) == "UNIQUE",
+              "constraint unica criada");
+
+        // Criar a constraint nao basta: ela precisa RESTRINGIR. Um duplicado
+        // tem de falhar -- e' a diferenca entre a constraint existir e a
+        // constraint funcionar.
+        auto duplicate = (*holt)->execute(
+            "INSERT INTO otter_test.alter_probe (nome) VALUES ('a')");
+        check(!duplicate.has_value(), "constraint RESTRINGE duplicado");
+
+        const otter::db::AlterScript drop = otter::db::generate_drop_constraint(
+            "otter_test", "alter_probe", "uq_probe_nome",
+            otter::db::ObjKind::unique_key);
+        if (!apply(drop)) return 1;
+
+        auto after = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='alter_probe'"
+            "   AND CONSTRAINT_NAME='uq_probe_nome'");
+        check(after.has_value() && after->text(0, 0) == "0",
+              "constraint removida");
+    }
+
+    std::printf("\nchave estrangeira que RESTRINGE de verdade\n");
+    {
+        if (!run("CREATE TABLE otter_test.alter_child ("
+                 "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                 "  probe_id BIGINT NOT NULL,"
+                 "  KEY ix_probe (probe_id)"
+                 ") ENGINE=InnoDB")) {
+            return 1;
+        }
+
+        otter::db::NewForeignKey key;
+        key.name           = "fk_child_probe";
+        key.columns        = {"probe_id"};
+        key.target_table   = "alter_probe";
+        key.target_columns = {"id"};
+        key.on_delete      = "CASCADE";
+
+        if (!apply(otter::db::generate_add_foreign_key("otter_test",
+                                                       "alter_child", key))) {
+            return 1;
+        }
+
+        auto rs = (*holt)->query(
+            "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS "
+            " WHERE CONSTRAINT_SCHEMA='otter_test'"
+            "   AND CONSTRAINT_NAME='fk_child_probe'");
+        check(rs.has_value() && rs->row_count() == 1 && rs->text(0, 0) == "CASCADE",
+              "FK criada com ON DELETE CASCADE");
+
+        auto orphan = (*holt)->execute(
+            "INSERT INTO otter_test.alter_child (probe_id) VALUES (9999)");
+        check(!orphan.has_value(), "FK RESTRINGE linha orfa");
+
+        if (!apply(otter::db::generate_drop_foreign_key(
+                "otter_test", "alter_child", "fk_child_probe"))) {
+            return 1;
+        }
+
+        auto gone = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS "
+            " WHERE CONSTRAINT_SCHEMA='otter_test'"
+            "   AND CONSTRAINT_NAME='fk_child_probe'");
+        check(gone.has_value() && gone->text(0, 0) == "0", "FK removida");
+
+        (void)(*holt)->execute("DROP TABLE otter_test.alter_child");
+    }
+
+    std::printf("\nindice de constraint e' recusado ANTES do servidor\n");
+    {
+        // O MySQL ACEITARIA o DROP INDEX de uma chave primaria e removeria a
+        // chave junto, em silencio. A recusa e' NOSSA -- e por isso precisa
+        // ser testada contra o servidor, provando que a chave sobrevive.
+        const otter::db::AlterScript script = otter::db::generate_drop_index(
+            "otter_test", "alter_probe", "PRIMARY", /*from_constraint=*/true);
+
+        check(!script.ok(), "recusado antes de chegar ao servidor");
+        check(script.statements.empty(), "nada a executar");
+
+        auto rs = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='alter_probe'"
+            "   AND CONSTRAINT_TYPE='PRIMARY KEY'");
+        check(rs.has_value() && rs->text(0, 0) == "1", "chave primaria intacta");
+    }
+
     (void)(*holt)->execute("DROP TABLE otter_test.alter_probe");
 
     std::printf("\n%s\n", failures == 0 ? "tudo passou" : "HOUVE FALHAS");

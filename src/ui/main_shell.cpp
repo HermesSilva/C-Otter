@@ -1957,6 +1957,82 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         ImGui::EndDisabled();
 
         ImGui::Separator();
+
+        // Índices e constraints. As listas vêm do que já foi carregado: sem
+        // expandir a pasta não há o que remover, e o item diz isso em vez de
+        // aparecer vazio sem explicação.
+        ImGui::BeginDisabled(!relation.columns_loaded);
+        if (ImGui::MenuItem(TR("Add index..."))) {
+            open_add_index(schema.name, relation);
+        }
+        ImGui::EndDisabled();
+
+        if (ImGui::BeginMenu(TR("Drop index"))) {
+            if (!relation.indexes_loaded) {
+                ImGui::TextColored(col4(colors().text_dim),
+                                   TR("expand Indexes first"));
+            }
+            for (const db::IndexMeta& index : relation.indexes) {
+                // Índice de chave primária ou única não se remove sozinho: a
+                // operação correta é remover a CONSTRAINT. Mostrar esmaecido
+                // em vez de esconder diz que ele existe e por que não dá.
+                const bool from_constraint = index.primary || index.unique;
+
+                ImGui::BeginDisabled(from_constraint);
+                if (ImGui::MenuItem(index.name.c_str())) {
+                    confirm_ddl(TRF("Drop index %s", index.name.c_str()),
+                                db::generate_drop_index(schema.name, relation.name,
+                                                        index.name, false),
+                                schema.name, relation.name);
+                }
+                ImGui::EndDisabled();
+
+                if (from_constraint && ImGui::IsItemHovered(
+                        ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip("%s",
+                                      TR("belongs to a constraint; drop the "
+                                         "constraint instead"));
+                }
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu(TR("Drop constraint"))) {
+            if (!relation.constraints_loaded) {
+                ImGui::TextColored(col4(colors().text_dim),
+                                   TR("expand Constraints first"));
+            }
+            for (const db::ConstraintMeta& constraint : relation.constraints) {
+                if (ImGui::MenuItem(constraint.name.c_str())) {
+                    confirm_ddl(
+                        TRF("Drop constraint %s", constraint.name.c_str()),
+                        db::generate_drop_constraint(schema.name, relation.name,
+                                                     constraint.name,
+                                                     constraint.kind),
+                        schema.name, relation.name);
+                }
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu(TR("Drop foreign key"))) {
+            if (!relation.keys_loaded) {
+                ImGui::TextColored(col4(colors().text_dim),
+                                   TR("expand Foreign keys first"));
+            }
+            for (const db::ForeignKeyMeta& key : relation.foreign_keys) {
+                if (ImGui::MenuItem(key.name.c_str())) {
+                    confirm_ddl(TRF("Drop foreign key %s", key.name.c_str()),
+                                db::generate_drop_foreign_key(schema.name,
+                                                              relation.name,
+                                                              key.name),
+                                schema.name, relation.name);
+                }
+            }
+            ImGui::EndMenu();
+        }
+
+        ImGui::Separator();
         if (ImGui::MenuItem(TR("Rename table..."))) {
             open_rename_table(schema.name, relation);
         }
@@ -2814,6 +2890,23 @@ void MainShell::open_add_column(const std::string& schema,
     column_form_.current = table;
 }
 
+void MainShell::open_add_index(const std::string& schema,
+                               const db::TableMeta& table) {
+    index_form_ = IndexForm{};
+    index_form_.schema = schema;
+    index_form_.table  = table.name;
+    index_form_.open   = true;
+
+    // Nome sugerido no padrão do projeto: ix_<tabela>_. O usuário completa com
+    // as colunas, que é a parte que ele acabou de escolher.
+    std::snprintf(index_form_.name, sizeof index_form_.name, "ix_%s_",
+                  table.name.c_str());
+
+    for (const db::ColumnMeta& column : table.columns) {
+        index_form_.columns.push_back({column.name, false});
+    }
+}
+
 void MainShell::open_rename_table(const std::string& schema,
                                   const db::TableMeta& table) {
     rename_form_ = RenameForm{};
@@ -2930,6 +3023,86 @@ void MainShell::draw_ddl_forms() {
             if (!valid) {
                 ImGui::SameLine();
                 ImGui::TextColored(col4(p.text_dim), TR("(name and type)"));
+            }
+        }
+        ImGui::End();
+    }
+
+    // --- Índice novo -----------------------------------------------------------
+
+    if (index_form_.open) {
+        ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Appearing);
+        if (ImGui::Begin(TRW("Add index", "###AddIndex"), &index_form_.open,
+                         ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+
+            ImGui::TextColored(col4(p.text_dim), "%s.%s",
+                               index_form_.schema.c_str(),
+                               index_form_.table.c_str());
+            ImGui::Separator();
+
+            ImGui::SetNextItemWidth(260);
+            ImGui::InputText(TR("Name"), index_form_.name,
+                             sizeof index_form_.name);
+
+            ImGui::Checkbox(TR("Unique"), &index_form_.unique);
+
+            // CONCURRENTLY só existe no PostgreSQL, e não roda dentro de
+            // transação. Esconder no MySQL em vez de desabilitar.
+            if (db::sql_dialect() != db::QuoteStyle::backticks) {
+                ImGui::Checkbox(TR("Concurrently"), &index_form_.concurrently);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s",
+                                      TR("does not block writes, but cannot run "
+                                         "inside a transaction"));
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextColored(col4(p.text_dim), TR("Columns"));
+
+            // A ORDEM importa num índice composto: ela decide que consultas
+            // ele atende. A lista segue a ordem da tabela, e quem quiser outra
+            // ordem edita o SQL na janela de conferência.
+            std::size_t picked = 0;
+            for (auto& [name, selected] : index_form_.columns) {
+                ImGui::Checkbox(name.c_str(), &selected);
+                if (selected) ++picked;
+            }
+
+            ImGui::Separator();
+
+            const bool valid = index_form_.name[0] != 0 && picked > 0;
+
+            ImGui::BeginDisabled(!valid);
+            if (ImGui::Button(TR("Review SQL"), ImVec2(140, 0))) {
+                db::NewIndex index;
+                index.name         = index_form_.name;
+                index.unique       = index_form_.unique;
+                index.concurrently = index_form_.concurrently;
+
+                for (const auto& [name, selected] : index_form_.columns) {
+                    if (selected) index.columns.push_back(name);
+                }
+
+                confirm_ddl(TRF("Add index %s to %s", index_form_.name,
+                                index_form_.table.c_str()),
+                            db::generate_create_index(index_form_.schema,
+                                                      index_form_.table, index),
+                            index_form_.schema, index_form_.table);
+                index_form_.open = false;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (ImGui::Button(TR("Cancel"), ImVec2(120, 0))) {
+                index_form_.open = false;
+            }
+
+            if (!valid) {
+                ImGui::SameLine();
+                ImGui::TextColored(col4(p.text_dim),
+                                   TR("(name and one column)"));
             }
         }
         ImGui::End();

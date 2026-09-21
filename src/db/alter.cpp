@@ -375,4 +375,280 @@ AlterScript generate_drop(std::string_view schema, std::string_view name,
     return script;
 }
 
+// --- Indices e constraints -------------------------------------------------------
+
+namespace {
+
+// Lista de colunas delimitadas, entre parenteses.
+std::string column_list(const std::vector<std::string>& columns) {
+    std::string out = "(";
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        if (i > 0) out += ", ";
+        out += quote_if_needed(columns[i]);
+    }
+    out += ")";
+    return out;
+}
+
+} // namespace
+
+AlterScript generate_create_index(std::string_view schema, std::string_view table,
+                                  const NewIndex& index) {
+    AlterScript script;
+
+    if (index.name.empty() || index.columns.empty()) {
+        script.error = "an index needs a name and at least one column";
+        return script;
+    }
+
+    const std::string qualified = qualified_name(schema, table);
+    const std::string columns   = column_list(index.columns);
+
+    if (is_mysql()) {
+        // No MySQL o indice nasce DENTRO do ALTER TABLE, e o metodo vem depois
+        // das colunas -- ao contrario do PostgreSQL, onde vem antes.
+        std::string statement = "ALTER TABLE " + qualified + " ADD " +
+                                std::string(index.unique ? "UNIQUE " : "") +
+                                "INDEX " + quote_if_needed(index.name) + " " +
+                                columns;
+
+        if (!index.method.empty()) statement += " USING " + index.method;
+
+        if (index.concurrently) {
+            script.warnings.push_back(
+                "MySQL has no CONCURRENTLY; the index is built with the table "
+                "locked for writes");
+        }
+        script.statements.push_back(std::move(statement));
+        return script;
+    }
+
+    // PostgreSQL: comando proprio, com USING ANTES das colunas.
+    std::string statement = "CREATE ";
+    if (index.unique) statement += "UNIQUE ";
+    statement += "INDEX ";
+
+    if (index.concurrently) {
+        statement += "CONCURRENTLY ";
+
+        // CONCURRENTLY NAO roda dentro de transacao, e a UI envolve scripts de
+        // varios comandos em BEGIN/COMMIT. Avisar aqui evita o erro
+        // "CREATE INDEX CONCURRENTLY cannot run inside a transaction block",
+        // que nao diz o que fazer a respeito.
+        script.warnings.push_back(
+            "CONCURRENTLY cannot run inside a transaction, and leaves an "
+            "INVALID index behind when it fails");
+    }
+
+    statement += quote_if_needed(index.name) + " ON " + qualified;
+    if (!index.method.empty()) statement += " USING " + index.method;
+    statement += " " + columns;
+
+    script.statements.push_back(std::move(statement));
+    return script;
+}
+
+AlterScript generate_drop_index(std::string_view schema, std::string_view table,
+                                std::string_view index, bool from_constraint) {
+    AlterScript script;
+
+    if (index.empty()) {
+        script.error = "index name is required";
+        return script;
+    }
+
+    // Indice que existe por causa de uma constraint nao se remove sozinho.
+    //
+    // O PostgreSQL RECUSA com "cannot drop index ... because constraint
+    // requires it". O MySQL ACEITA -- e remove a constraint junto, em
+    // silencio. O segundo caso e' pior: o usuario perde a chave sem saber.
+    if (from_constraint) {
+        script.error =
+            "this index belongs to a constraint; drop the constraint instead";
+        return script;
+    }
+
+    if (is_mysql()) {
+        // No MySQL o indice pertence a' TABELA: nao ha' DROP INDEX solto que
+        // saiba onde procurar.
+        script.statements.push_back("ALTER TABLE " +
+                                    qualified_name(schema, table) +
+                                    " DROP INDEX " + quote_if_needed(index));
+    } else {
+        // No PostgreSQL o indice e' objeto do SCHEMA, nao da tabela.
+        script.statements.push_back("DROP INDEX " +
+                                    qualified_name(schema, index));
+    }
+    script.destructive.push_back(0);
+    return script;
+}
+
+AlterScript generate_add_constraint(std::string_view schema,
+                                    std::string_view table,
+                                    const NewConstraint& constraint) {
+    AlterScript script;
+
+    const std::string prefix = "ALTER TABLE " + qualified_name(schema, table);
+    std::string statement = prefix + " ADD ";
+
+    // Nome e' OPCIONAL: sem ele o SGBD gera um. Forcar o usuario a inventar um
+    // nome para uma PK seria atrito sem ganho.
+    if (!constraint.name.empty()) {
+        statement += "CONSTRAINT " + quote_if_needed(constraint.name) + " ";
+    }
+
+    switch (constraint.kind) {
+        case ConstraintKind::primary_key:
+        case ConstraintKind::unique:
+            if (constraint.columns.empty()) {
+                script.error = "this constraint needs at least one column";
+                return script;
+            }
+            statement += std::string(constraint.kind == ConstraintKind::primary_key
+                                         ? "PRIMARY KEY "
+                                         : "UNIQUE ") +
+                         column_list(constraint.columns);
+
+            if (constraint.kind == ConstraintKind::primary_key) {
+                script.warnings.push_back(
+                    "adding a PRIMARY KEY fails when the columns have NULLs or "
+                    "duplicate values");
+            }
+            break;
+
+        case ConstraintKind::check:
+            if (constraint.expression.empty()) {
+                script.error = "a CHECK constraint needs an expression";
+                return script;
+            }
+            statement += "CHECK (" + constraint.expression + ")";
+
+            // O MySQL so' PASSOU A APLICAR o CHECK no 8.0.16: antes ele
+            // aceitava a sintaxe e ignorava a restricao -- uma constraint que
+            // finge funcionar.
+            if (is_mysql()) {
+                script.warnings.push_back(
+                    "CHECK constraints are only enforced from MySQL 8.0.16 and "
+                    "MariaDB 10.2 on; older servers accept and ignore them");
+            }
+            break;
+    }
+
+    script.statements.push_back(std::move(statement));
+    return script;
+}
+
+AlterScript generate_drop_constraint(std::string_view schema,
+                                     std::string_view table,
+                                     std::string_view name, ObjKind kind) {
+    AlterScript script;
+
+    if (name.empty()) {
+        script.error = "constraint name is required";
+        return script;
+    }
+
+    const std::string prefix = "ALTER TABLE " + qualified_name(schema, table);
+
+    if (is_mysql()) {
+        // O MySQL tem sintaxe PROPRIA por tipo, e a chave primaria nem tem
+        // nome: e' sempre "PRIMARY". O DROP CONSTRAINT generico so' existe a
+        // partir do 8.0.19, e usa-lo quebraria em servidor mais antigo.
+        if (kind == ObjKind::primary_key) {
+            script.statements.push_back(prefix + " DROP PRIMARY KEY");
+        } else {
+            script.statements.push_back(prefix + " DROP KEY " +
+                                        quote_if_needed(name));
+        }
+    } else {
+        script.statements.push_back(prefix + " DROP CONSTRAINT " +
+                                    quote_if_needed(name));
+    }
+
+    script.destructive.push_back(0);
+
+    if (kind == ObjKind::primary_key) {
+        // Sem PK a grade deixa de editar (ADR 0014). Dizer antes evita a
+        // surpresa de descobrir depois, ao tentar alterar uma celula.
+        script.warnings.push_back(
+            "without a primary key the grid can no longer edit this table");
+    }
+    return script;
+}
+
+AlterScript generate_add_foreign_key(std::string_view schema,
+                                     std::string_view table,
+                                     const NewForeignKey& key) {
+    AlterScript script;
+
+    if (key.columns.empty() || key.target_table.empty() ||
+        key.target_columns.empty()) {
+        script.error = "a foreign key needs source columns, a target table and "
+                       "target columns";
+        return script;
+    }
+    if (key.columns.size() != key.target_columns.size()) {
+        // Um FK com 2 colunas de origem e 1 de destino e' sintaxe valida que o
+        // servidor recusa com mensagem obscura. Recusar aqui e' mais util.
+        script.error = "the number of source and target columns must match";
+        return script;
+    }
+
+    std::string statement = "ALTER TABLE " + qualified_name(schema, table) +
+                            " ADD ";
+    if (!key.name.empty()) {
+        statement += "CONSTRAINT " + quote_if_needed(key.name) + " ";
+    }
+
+    const std::string_view target_schema =
+        key.target_schema.empty() ? schema : std::string_view(key.target_schema);
+
+    statement += "FOREIGN KEY " + column_list(key.columns) + " REFERENCES " +
+                 qualified_name(target_schema, key.target_table) + " " +
+                 column_list(key.target_columns);
+
+    if (!key.on_delete.empty()) statement += " ON DELETE " + key.on_delete;
+    if (!key.on_update.empty()) statement += " ON UPDATE " + key.on_update;
+
+    if (key.on_delete == "CASCADE") {
+        script.warnings.push_back(
+            "ON DELETE CASCADE deletes the referencing rows automatically");
+    }
+
+    // A FK exige um indice nas colunas de ORIGEM: o MySQL cria um sozinho, o
+    // PostgreSQL NAO -- e sem ele todo DELETE na tabela de destino varre a de
+    // origem inteira. E' a causa mais comum de DELETE lento num banco com
+    // muitas FKs.
+    if (!is_mysql()) {
+        script.warnings.push_back(
+            "PostgreSQL does not index the referencing columns automatically; "
+            "without an index, deletes on the target table scan this one");
+    }
+
+    script.statements.push_back(std::move(statement));
+    return script;
+}
+
+AlterScript generate_drop_foreign_key(std::string_view schema,
+                                      std::string_view table,
+                                      std::string_view name) {
+    AlterScript script;
+
+    if (name.empty()) {
+        script.error = "foreign key name is required";
+        return script;
+    }
+
+    const std::string prefix = "ALTER TABLE " + qualified_name(schema, table);
+
+    // O MySQL tem comando proprio; no PostgreSQL a FK e' uma constraint como
+    // as outras.
+    script.statements.push_back(
+        prefix + (is_mysql() ? " DROP FOREIGN KEY " : " DROP CONSTRAINT ") +
+        quote_if_needed(name));
+
+    script.destructive.push_back(0);
+    return script;
+}
+
 } // namespace otter::db

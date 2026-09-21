@@ -15,9 +15,9 @@ operações: `create`, `modify`, `rename`, `delete`.
 |---|:---:|:---:|:---:|
 | Tabela | ✅ | ✅ | 🟡 renomear, comentário, remover |
 | Coluna | ✅ | ✅ | ✅ add, drop, rename, tipo, nulidade, default, comentário |
-| Índice | ✅ | ✅ | ⬜ |
-| Constraint (PK, UNIQUE, CHECK) | ✅ | ✅ | ⬜ |
-| Foreign key | ✅ | ✅ | ⬜ |
+| Índice | ✅ | ✅ | ✅ criar e remover |
+| Constraint (PK, UNIQUE, CHECK) | ✅ | ✅ | ✅ criar e remover |
+| Foreign key | ✅ | ✅ | ✅ criar e remover |
 | View | ✅ | ✅ | ⬜ |
 | Materialized view | ✅ | ➖ | ⬜ |
 | Sequence | ✅ | ✅ MariaDB | ⬜ |
@@ -117,14 +117,21 @@ Perderia dados. Parece óbvio, mas é um atalho tentador quando o SGBD não tem
 | Tabela: renomear, comentário, `DROP` | ✅ |
 | `CREATE TABLE` (gerador pronto, sem tela) | 🟡 |
 | Recarga da árvore depois do DDL | ✅ |
-| Índice, constraint, view, sequence, trigger | ⬜ |
+| **Índice: criar e remover** | ✅ |
+| **Constraint: PK, UNIQUE, CHECK** | ✅ |
+| **Chave estrangeira: criar e remover** | ✅ |
+| Índice de constraint é RECUSADO | ✅ o MySQL aceitaria e perderia a chave |
+| View, sequence, trigger, procedure | ⬜ |
 
 Verificado contra **MySQL 8.0.46 real** em 2026-09-21:
 
-- `spikes/alter_live` — 18 verificações, 0 falhas. Prova o que o teste
+- `spikes/alter_live` — 28 verificações, 0 falhas. Prova o que o teste
   unitário **não** prova: que a coluna continua auto-incrementando depois do
   `MODIFY`, que o comentário sobreviveu à mudança de nulidade, que o `DEFAULT`
-  sobreviveu ao rename, e que a coluna foi para a posição pedida.
+  sobreviveu ao rename, que a coluna foi para a posição pedida, e — o mais
+  importante — que a constraint criada **restringe de verdade**: o duplicado
+  falha, a linha órfã falha. Criar a constraint e ela não valer seria o campo
+  que finge funcionar.
 - Na tela: menu → formulário → conferência → execução → árvore recarregada,
   com a coluna nova aparecendo na posição certa. E o caminho destrutivo, com
   o `DROP COLUMN` em vermelho e o "Eu entendo" barrando o botão.
@@ -134,9 +141,26 @@ não tinha senha salva; o `pg_hba.conf` exige `scram-sha-256` e alterá-lo seria
 mexer na configuração do servidor do usuário. A geração está coberta por 20
 testes unitários, mas o **efeito** no servidor não foi observado.
 
+### A diferença que mais custa aqui
+
+O índice é o lugar onde os dois SGBDs mais divergem:
+
+| | PostgreSQL | MySQL |
+|---|---|---|
+| A quem pertence | ao **schema** | à **tabela** |
+| Criar | `CREATE INDEX ... ON t` | `ALTER TABLE t ADD INDEX` |
+| Posição do `USING` | **antes** das colunas | **depois** |
+| Remover | `DROP INDEX schema.ix` | `ALTER TABLE t DROP INDEX ix` |
+| `CONCURRENTLY` | sim, fora de transação | não existe |
+
+E a armadilha: remover o índice de uma chave primária ou única. O PostgreSQL
+**recusa**; o MySQL **aceita e remove a constraint junto, em silêncio**. Por
+isso a recusa é nossa, antes de chegar ao servidor — e é testada contra ele,
+provando que a chave sobrevive.
+
 ## 5. O que falta
 
-1. Índice e constraint: criar e remover — ⬜
-2. Tela de `CREATE TABLE` (o gerador já existe) — ⬜
-3. View, sequence, trigger, procedure — ⬜
-4. Schema/database — ⬜
+1. Tela de `CREATE TABLE` (o gerador já existe) — ⬜
+2. View, sequence, trigger, procedure — ⬜
+3. Schema/database — ⬜
+4. `ALTER` de índice: renomear, trocar método — ⬜

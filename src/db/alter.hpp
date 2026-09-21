@@ -120,4 +120,79 @@ struct AlterScript {
                                         ObjKind kind,
                                         bool cascade = false);
 
+// --- Índices e constraints -----------------------------------------------------
+
+struct NewIndex {
+    std::string name;
+    std::vector<std::string> columns;
+    bool        unique = false;
+
+    // btree, hash, gin, gist no PostgreSQL; BTREE, HASH, FULLTEXT no MySQL.
+    // Vazio usa o padrão do SGBD, que é btree nos dois.
+    std::string method;
+
+    // CREATE INDEX CONCURRENTLY: não bloqueia escrita, mas NÃO roda dentro de
+    // transação e pode deixar um índice inválido se falhar. Só PostgreSQL.
+    bool        concurrently = false;
+};
+
+[[nodiscard]] AlterScript generate_create_index(std::string_view schema,
+                                                std::string_view table,
+                                                const NewIndex& index);
+
+// Remove um índice.
+//
+// `from_constraint` é o índice que existe SÓ porque uma constraint o criou --
+// o de uma PRIMARY KEY ou UNIQUE. Removê-lo direto é recusado pelo PostgreSQL
+// e, pior, ACEITO pelo MySQL, que remove a constraint junto sem avisar. Nos
+// dois casos a operação correta é remover a CONSTRAINT, e é isso que a
+// mensagem diz.
+[[nodiscard]] AlterScript generate_drop_index(std::string_view schema,
+                                              std::string_view table,
+                                              std::string_view index,
+                                              bool from_constraint);
+
+enum class ConstraintKind : std::uint8_t {
+    primary_key,
+    unique,
+    check,
+};
+
+struct NewConstraint {
+    std::string    name;
+    ConstraintKind kind = ConstraintKind::unique;
+
+    std::vector<std::string> columns;   // para PK e UNIQUE
+    std::string              expression; // para CHECK
+};
+
+[[nodiscard]] AlterScript generate_add_constraint(std::string_view schema,
+                                                  std::string_view table,
+                                                  const NewConstraint& constraint);
+
+[[nodiscard]] AlterScript generate_drop_constraint(std::string_view schema,
+                                                   std::string_view table,
+                                                   std::string_view name,
+                                                   ObjKind kind);
+
+struct NewForeignKey {
+    std::string name;
+
+    std::vector<std::string> columns;
+    std::string              target_table;
+    std::string              target_schema;
+    std::vector<std::string> target_columns;
+
+    std::string on_delete;   // NO ACTION, CASCADE, SET NULL, RESTRICT
+    std::string on_update;
+};
+
+[[nodiscard]] AlterScript generate_add_foreign_key(std::string_view schema,
+                                                   std::string_view table,
+                                                   const NewForeignKey& key);
+
+[[nodiscard]] AlterScript generate_drop_foreign_key(std::string_view schema,
+                                                    std::string_view table,
+                                                    std::string_view name);
+
 } // namespace otter::db

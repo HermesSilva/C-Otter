@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace otter::ui {
@@ -122,6 +123,7 @@ private:
     // contexto: um menu se fecha ao primeiro clique fora dele, e um
     // formulario precisa sobreviver a varios.
     void open_add_column(const std::string& schema, const db::TableMeta& table);
+    void open_add_index(const std::string& schema, const db::TableMeta& table);
     void open_rename_table(const std::string& schema, const db::TableMeta& table);
     void draw_ddl_forms();
 
@@ -251,6 +253,21 @@ private:
         int  after_index = 0;
     };
     ColumnForm column_form_;
+
+    struct IndexForm {
+        bool        open = false;
+        std::string schema;
+        std::string table;
+
+        char name[128] = {};
+        bool unique = false;
+        bool concurrently = false;
+
+        // (nome, marcada). A ORDEM segue a da tabela: num indice composto ela
+        // decide que consultas ele atende, e embaralha-la daria outro indice.
+        std::vector<std::pair<std::string, bool>> columns;
+    };
+    IndexForm index_form_;
 
     struct RenameForm {
         bool        open = false;

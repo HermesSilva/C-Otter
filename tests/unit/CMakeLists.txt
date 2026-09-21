@@ -2,6 +2,7 @@ add_executable(otter_tests
     main.cpp
     test_aggregate.cpp
     test_alter.cpp
+    test_alter_index.cpp
     test_arena.cpp
     test_catalog.cpp
     test_connection_store.cpp
