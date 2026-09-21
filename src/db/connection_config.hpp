@@ -151,6 +151,30 @@ struct EditorOptions {
     // num banco local e caro num servidor do outro lado do Atlantico.
     int  page_size               = 200;
 
+    // --- Transferencia de dados (main.datatransfer) ---
+    //
+    // Padroes da janela de exportacao para ESTA conexao. Ela sempre pergunta
+    // antes de gravar; isto so' decide com que valores a janela abre.
+    // Valores de db::ExportFormat: 0=CSV, 1=JSON, 2=Markdown, 3=SQL INSERT.
+    int  export_format        = 0;
+    bool export_write_header  = true;
+
+    // Texto para NULL no arquivo. Vazio e' o certo para reimportar -- e
+    // diferente do null_text da GRADE, que existe para ser visivel.
+    std::string export_null_text;
+
+    // --- Editor de dados / Grade (main.resultset.grid) ---
+    //
+    // Como NULL aparece na grade. Vazio nao e' opcao: string vazia e NULL
+    // sao valores diferentes no banco, e exibi-los igual e' o erro classico
+    // de cliente SQL -- por isso o padrao e' "[null]", visivelmente
+    // diferente de qualquer texto.
+    std::string null_text = "[null]";
+
+    // Alinhar numeros a' direita, como em planilha: a virgula decimal fica
+    // na mesma coluna e da' para comparar ordens de grandeza de relance.
+    bool align_numbers_right = true;
+
     // Parar o script no primeiro erro, ou seguir para o proximo comando.
     //
     // Parar e' o padrao: num script de migracao, seguir depois de um erro

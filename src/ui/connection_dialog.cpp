@@ -438,18 +438,10 @@ void ConnectionDialog::draw_page_body() {
 
     // Abaixo, o que o DBeaver oferece e o C-Otter ainda nao. Cada uma diz o
     // que falta, em vez de mostrar uma pagina vazia que parece defeito.
-    case Page::errors_timeouts:
-        draw_page_placeholder("Error handling and query timeouts");
-        break;
-    case Page::data_transfer:
-        draw_page_placeholder("Import and export defaults for this connection");
-        break;
-    case Page::data_editor:
-        draw_page_placeholder("Data editor defaults for this connection");
-        break;
-    case Page::data_editor_grid:
-        draw_page_placeholder("Grid appearance for this connection");
-        break;
+    case Page::errors_timeouts:   draw_page_errors_timeouts();  break;
+    case Page::data_transfer:     draw_page_data_transfer();    break;
+    case Page::data_editor:       draw_page_data_editor();      break;
+    case Page::data_editor_grid:  draw_page_data_editor();      break;
     case Page::binary_editor:
         draw_page_placeholder("Binary and BLOB display format");
         break;
@@ -1078,22 +1070,117 @@ void ConnectionDialog::draw_page_initialization() {
         profile_.bootstrap_queries = buffer.data();
     }
 
+}
+
+// Transferencia de dados (main.datatransfer).
+//
+// Padroes da janela de exportacao. Ela sempre pergunta antes de gravar;
+// isto so' decide com que valores abre -- por isso nao ha' risco de
+// exportar sem querer no formato errado.
+void ConnectionDialog::draw_page_data_transfer() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Export defaults"));
+    ImGui::Separator();
+
+    const char* kFormats[] = {"CSV", "JSON", "Markdown", "SQL INSERT"};
+    ImGui::SetNextItemWidth(200);
+    ImGui::Combo(TR("Format"), &editor.export_format, kFormats,
+                 IM_ARRAYSIZE(kFormats));
+
+    ImGui::Checkbox(TR("Write the header row"), &editor.export_write_header);
+    help_marker(TR("Column names in the first line. Only applies to CSV -- "
+                   "JSON and SQL carry the names in every record."));
+
+    ImGui::SetNextItemWidth(200);
+    input_string_hint(TR("Null as"), TR("(empty)"), editor.export_null_text, 32);
+    help_marker(TR("Empty is the right choice for re-importing: a reader "
+                   "treats an empty field as NULL, while \"[null]\" would "
+                   "come back as the literal text."));
+
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Connection"));
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("Import is not available in this version. The "
+                          "export window still asks for the path and the "
+                          "options before writing."));
+}
+
+// Editor de dados / Grade (main.resultset.grid).
+void ConnectionDialog::draw_page_data_editor() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Null value"));
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(200);
+    input_string(TR("Shown as"), editor.null_text, 32);
+    help_marker(TR("How NULL appears in the grid. Leaving it empty is not "
+                   "allowed: an empty string and NULL are different values "
+                   "in the database, and showing them alike is the classic "
+                   "mistake of a SQL client."));
+
+    // Vazio volta ao padrao em vez de aceitar: um NULL indistinguivel de
+    // string vazia e' justamente o que o campo existe para evitar.
+    if (editor.null_text.empty()) editor.null_text = "[null]";
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Alignment"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Numbers to the right"), &editor.align_numbers_right);
+    help_marker(TR("As in a spreadsheet: the decimal point lines up and "
+                   "orders of magnitude can be compared at a glance."));
+}
+
+// Erros e tempos limite (main.errorHandle).
+//
+// Timeout, keep-alive e fechar ociosas MORAVAM em "Inicialização". No
+// DBeaver eles estao aqui -- e' a pagina que o nome anuncia, e quem procura
+// "por que a conexao caiu" procura em "Erros e tempos limite", nao em
+// "Inicialização" (diretriz 12).
+void ConnectionDialog::draw_page_errors_timeouts() {
+    ImGui::TextColored(col4(colors().data), TR("Timeouts"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
-    input_seconds(TR("Timeout (s)"), profile_.connect_timeout);
+    input_seconds(TR("Connect timeout (s)"), profile_.connect_timeout);
+    help_marker(TR("How long to wait for the server to accept the "
+                   "connection. Does not limit how long a query may run."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Keep the connection alive"));
+    ImGui::Separator();
 
     ImGui::Checkbox(TR("Keep-alive"), &profile_.keep_alive);
+    help_marker(TR("Sends a ping while idle, so a firewall or a proxy does "
+                   "not drop the connection for being quiet."));
+
     if (profile_.keep_alive) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
         input_seconds(TR("Interval (s)"), profile_.keep_alive_interval);
     }
 
-    ImGui::Checkbox(TR("Close idle connections"), &profile_.close_idle_connections);
+    ImGui::Checkbox(TR("Close idle connections"),
+                    &profile_.close_idle_connections);
+    help_marker(TR("The opposite of keep-alive: releases the connection "
+                   "after a while without use. Useful against a server with "
+                   "few slots."));
 
+    // Keep-alive e fechar ociosas se contradizem: um mantem viva, o outro
+    // fecha. Dizer na tela e' melhor que deixar o usuario descobrir que a
+    // conexao cai mesmo com keep-alive ligado.
+    if (profile_.keep_alive && profile_.close_idle_connections) {
+        ImGui::Spacing();
+        icon_inline(Icon::warning, colors().warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(col4(colors().warn), "%s",
+                           TR("The two options contradict each other: one "
+                              "keeps the connection open, the other closes "
+                              "it. Closing wins."));
+        ImGui::PopTextWrapPos();
+    }
 }
 
 void ConnectionDialog::draw_page_general() {

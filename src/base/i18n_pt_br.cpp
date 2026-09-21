@@ -745,6 +745,62 @@ const char* const kPtBr[] = {
         "Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.",
     "Sets search_path when connecting.",
         "Define o search_path ao conectar.",
+    // --- Pagina Transferência de dados (main.datatransfer) ---
+    "Export defaults",            "Padrões de exportação",
+    "Format",                     "Formato",
+    "Write the header row",       "Gravar a linha de cabeçalho",
+    "Column names in the first line. Only applies to CSV -- JSON and SQL "
+    "carry the names in every record.",
+        "Nomes das colunas na primeira linha. Vale só para CSV — JSON e SQL "
+        "carregam os nomes em cada registro.",
+    "Null as",                    "Nulo como",
+    "(empty)",                    "(vazio)",
+    "Empty is the right choice for re-importing: a reader treats an empty "
+    "field as NULL, while \"[null]\" would come back as the literal text.",
+        "Vazio é o certo para reimportar: um leitor trata campo vazio como "
+        "NULL, enquanto \"[null]\" voltaria como o texto literal.",
+    "Import is not available in this version. The export window still asks "
+    "for the path and the options before writing.",
+        "A importação não existe nesta versão. A janela de exportação "
+        "continua perguntando o caminho e as opções antes de gravar.",
+
+    // --- Pagina Editor de dados / Grade (main.resultset.grid) ---
+    "Null value",                 "Valor nulo",
+    "Shown as",                   "Exibido como",
+    "How NULL appears in the grid. Leaving it empty is not allowed: an empty "
+    "string and NULL are different values in the database, and showing them "
+    "alike is the classic mistake of a SQL client.",
+        "Como o NULL aparece na grade. Vazio não é aceito: string vazia e "
+        "NULL são valores diferentes no banco, e exibi-los igual é o erro "
+        "clássico de cliente SQL.",
+    "Alignment",                  "Alinhamento",
+    "Numbers to the right",       "Números à direita",
+    "As in a spreadsheet: the decimal point lines up and orders of magnitude "
+    "can be compared at a glance.",
+        "Como numa planilha: a vírgula decimal fica alinhada e dá para "
+        "comparar ordens de grandeza de relance.",
+
+    // --- Pagina Erros e tempos limite (main.errorHandle) ---
+    "Timeouts",                   "Tempos limite",
+    "Connect timeout (s)",        "Tempo limite de conexão (s)",
+    "How long to wait for the server to accept the connection. Does not "
+    "limit how long a query may run.",
+        "Quanto esperar o servidor aceitar a conexão. Não limita quanto tempo "
+        "uma consulta pode levar.",
+    "Keep the connection alive",  "Manter a conexão viva",
+    "Sends a ping while idle, so a firewall or a proxy does not drop the "
+    "connection for being quiet.",
+        "Envia um ping enquanto ociosa, para um firewall ou proxy não "
+        "derrubar a conexão por estar quieta.",
+    "The opposite of keep-alive: releases the connection after a while "
+    "without use. Useful against a server with few slots.",
+        "O contrário do keep-alive: libera a conexão depois de um tempo sem "
+        "uso. Útil contra um servidor com poucas vagas.",
+    "The two options contradict each other: one keeps the connection open, "
+    "the other closes it. Closing wins.",
+        "As duas opções se contradizem: uma mantém a conexão aberta, a outra "
+        "a fecha. Fechar vence.",
+
     "Isolation",                  "Isolamento",
     "Level",                      "Nível",
     "(server default)",           "(padrão do servidor)",

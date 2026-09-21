@@ -218,6 +218,19 @@ StoredProfile profile_from_json(const std::string& id,
             ed["show-whitespace"].as_bool(defaults.show_whitespace);
         editor.page_size = static_cast<int>(
             ed["page-size"].as_number(defaults.page_size));
+        editor.export_format = static_cast<int>(
+            ed["export-format"].as_number(defaults.export_format));
+        editor.export_write_header =
+            ed["export-write-header"].as_bool(defaults.export_write_header);
+        editor.export_null_text =
+            std::string(ed["export-null-text"].as_string());
+
+        if (const json::Value& nt = ed["null-text"];
+            nt.kind() == json::Kind::string) {
+            editor.null_text = std::string(nt.as_string());
+        }
+        editor.align_numbers_right =
+            ed["align-numbers-right"].as_bool(defaults.align_numbers_right);
         editor.word_wrap = ed["word-wrap"].as_bool(defaults.word_wrap);
         editor.code_folding = ed["code-folding"].as_bool(defaults.code_folding);
         editor.stop_script_on_error =
@@ -457,6 +470,24 @@ json::Value profile_to_json(const StoredProfile& stored) {
         }
         if (editor.page_size != defaults.page_size) {
             ed["page-size"] = json::Value(static_cast<double>(editor.page_size));
+        }
+        if (editor.export_format != defaults.export_format) {
+            ed["export-format"] =
+                json::Value(static_cast<double>(editor.export_format));
+        }
+        if (editor.export_write_header != defaults.export_write_header) {
+            ed["export-write-header"] =
+                json::Value(editor.export_write_header);
+        }
+        if (!editor.export_null_text.empty()) {
+            ed["export-null-text"] = json::Value(editor.export_null_text);
+        }
+        if (editor.null_text != defaults.null_text) {
+            ed["null-text"] = json::Value(editor.null_text);
+        }
+        if (editor.align_numbers_right != defaults.align_numbers_right) {
+            ed["align-numbers-right"] =
+                json::Value(editor.align_numbers_right);
         }
         if (editor.word_wrap != defaults.word_wrap) {
             ed["word-wrap"] = json::Value(editor.word_wrap);

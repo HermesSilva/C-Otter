@@ -47,6 +47,11 @@ private:
     // editores, entao vale a cada quadro.
     void apply_completion_options(SqlDocument& document);
 
+    // Preferencias da conexao do documento, ou os padroes quando ela nao
+    // existe mais. Referencia, nao copia: e' lida por celula da grade.
+    [[nodiscard]] const db::EditorOptions& editor_options_for(
+        const SqlDocument& document) const;
+
 public:
 
     void draw();
@@ -505,6 +510,12 @@ private:
     std::size_t        pending_edit_target_ = 0;
     char               edit_buffer_[1024] = "";
     db::ExportOptions  export_options_;
+
+    // Os padroes da conexao ja' foram aplicados a esta abertura da janela?
+    //
+    // Reaplica-los a cada quadro desfaria o que o usuario escolhesse dentro
+    // dela. Reposto quando a janela fecha.
+    bool               export_defaults_applied_ = false;
     std::string        export_path_;
     std::string        export_status_;
 };

@@ -464,6 +464,13 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     stored.profile.editor.show_whitespace      = true;
     stored.profile.editor.page_size            = 1000;
     stored.profile.editor.stop_script_on_error = false;
+    stored.profile.editor.null_text            = "NULO";
+    stored.profile.editor.align_numbers_right  = false;
+    stored.profile.editor.word_wrap            = true;
+    stored.profile.editor.code_folding         = false;
+    stored.profile.editor.export_format        = 3;
+    stored.profile.editor.export_write_header  = false;
+    stored.profile.editor.export_null_text     = "NULL";
 
     OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
 
@@ -488,6 +495,13 @@ OTTER_TEST(store_round_trips_the_editor_options) {
     OTTER_CHECK(e.show_whitespace);
     OTTER_CHECK_EQ(e.page_size, 1000);
     OTTER_CHECK(!e.stop_script_on_error);
+    OTTER_CHECK_EQ(e.null_text, std::string{"NULO"});
+    OTTER_CHECK(!e.align_numbers_right);
+    OTTER_CHECK(e.word_wrap);
+    OTTER_CHECK(!e.code_folding);
+    OTTER_CHECK_EQ(e.export_format, 3);
+    OTTER_CHECK(!e.export_write_header);
+    OTTER_CHECK_EQ(e.export_null_text, std::string{"NULL"});
 }
 
 OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
@@ -519,6 +533,9 @@ OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
     OTTER_CHECK_EQ(e.auto_indent, defaults.auto_indent);
     OTTER_CHECK_EQ(e.page_size, defaults.page_size);
     OTTER_CHECK_EQ(e.stop_script_on_error, defaults.stop_script_on_error);
+    OTTER_CHECK_EQ(e.null_text, defaults.null_text);
+    OTTER_CHECK_EQ(e.align_numbers_right, defaults.align_numbers_right);
+    OTTER_CHECK_EQ(e.export_format, defaults.export_format);
 }
 
 // --- Propriedades do driver chegam ao ConnConfig ----------------------------

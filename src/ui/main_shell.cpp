@@ -455,6 +455,19 @@ SqlDocument* MainShell::active_document() {
 // A cada quadro, e nao uma vez: a AutoCompleteConfig e' compartilhada por
 // todos os editores, e trocar de aba precisa trocar as opcoes junto -- senao
 // a aba do banco legado herdaria as do novo.
+// Preferencias do editor da conexao do documento.
+//
+// Devolve uma referencia a um PADRAO estatico quando a conexao nao existe --
+// devolver por valor faria uma copia por celula da grade, e por ponteiro
+// obrigaria cada ponto de uso a testar nulo.
+const db::EditorOptions& MainShell::editor_options_for(
+    const SqlDocument& document) const {
+    static const db::EditorOptions kDefaults;
+
+    const Connection* owner = connection_by_id(document.connection_id());
+    return owner != nullptr ? owner->profile.editor : kDefaults;
+}
+
 void MainShell::apply_completion_options(SqlDocument& document) {
     const Connection* owner = connection_by_id(document.connection_id());
     if (owner == nullptr) return;
@@ -1498,7 +1511,10 @@ void MainShell::draw() {
 
     if (show_about_) draw_about_window();
     if (show_plan_) draw_plan_window();
+    // Fechada (pelo X ou por concluir): repoe a marca, para a proxima
+    // abertura voltar a pegar os padroes da conexao.
     if (show_export_) draw_export_window();
+    else              export_defaults_applied_ = false;
     if (show_import_) draw_import_window();
     if (show_icons_) draw_icon_gallery();
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
@@ -3863,12 +3879,17 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         }
     }
 
+    // Como NULL aparece, e se numeros vao para a direita: opcoes da pagina
+    // "Editor de dados" do dialogo. Eram fixas no codigo.
+    const db::EditorOptions& grid_options = editor_options_for(document);
+    const char* null_label = grid_options.null_text.c_str();
+
     if (row_deleted) {
         // Sem editor: nao faz sentido alterar o que sera' excluido.
         ImGui::TextColored(col4(p.text_dim), "%s",
-                           is_null ? "[null]" : std::string(value).c_str());
+                           is_null ? null_label : std::string(value).c_str());
     } else if (is_null) {
-        ImGui::TextColored(col4(p.text_dim), "[null]");
+        ImGui::TextColored(col4(p.text_dim), "%s", null_label);
     } else {
         const db::DataKind kind = rs.column(column).info().kind;
 
@@ -3876,7 +3897,8 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         // formam uma coluna e a virgula precisa casar. Na visao de registro
         // cada valor esta' sozinho, e empurra-lo para a direita o afasta do
         // proprio rotulo -- `limite` ficava a meia tela de "5000.00".
-        if (db::is_right_aligned(kind) && !document.record_mode()) {
+        if (db::is_right_aligned(kind) && !document.record_mode() &&
+            grid_options.align_numbers_right) {
             const float width = ImGui::CalcTextSize(
                 value.data(), value.data() + value.size()).x;
             const float available = ImGui::GetContentRegionAvail().x;
@@ -5438,9 +5460,28 @@ void MainShell::draw_export_window() {
     SqlDocument* document = active_document();
     if (document == nullptr || !document->result().has_value()) {
         show_export_ = false;
+        export_defaults_applied_ = false;
         return;
     }
     const db::ResultSet& rs = *document->result();
+
+    // Padroes da conexao (pagina "Transferência de dados"), aplicados na
+    // PRIMEIRA vez que a janela abre.
+    //
+    // So' na abertura: reaplicar a cada quadro desfaria o que o usuario
+    // acabou de escolher aqui dentro. Os padroes decidem como a janela abre,
+    // nao o que ela faz.
+    if (!export_defaults_applied_) {
+        export_defaults_applied_ = true;
+
+        const db::EditorOptions& options = editor_options_for(*document);
+        if (options.export_format >= 0 && options.export_format <= 3) {
+            export_options_.format =
+                static_cast<db::ExportFormat>(options.export_format);
+        }
+        export_options_.write_header = options.export_write_header;
+        export_options_.null_text    = options.export_null_text;
+    }
 
     ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
     if (ImGui::Begin(TRW("Export result", "###ExportResult"), &show_export_,
