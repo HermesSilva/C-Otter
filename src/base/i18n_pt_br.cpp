@@ -109,6 +109,7 @@ const char* const kPtBr[] = {
     "no result to edit",          "sem resultado para editar",
     "loading the table keys...",  "lendo as chaves da tabela...",
     "Apply filter",               "Aplicar filtro",
+    "Filter objects...",          "Filtrar objetos...",
     "Group by this column",       "Agrupar por esta coluna",
     "Ungroup",                    "Desagrupar",
     "Aggregate",                  "Agregar",

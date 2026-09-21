@@ -47,6 +47,9 @@ private:
     void draw_raft_panel();
     void draw_navigator_panel();
 
+    // O nome passa no filtro do Navigator? Filtro vazio aceita tudo.
+    [[nodiscard]] bool matches_filter(std::string_view name) const;
+
     // Arvore de objetos. Cada pasta consulta o catalogo apenas quando expandida
     // (ver docs/NAVIGATOR-TREE.md).
     bool draw_folder_node(Icon icon, const char* label,
@@ -227,6 +230,7 @@ private:
     std::size_t        editing_column_ = 0;
     bool               editing_active_ = false;
     bool               saving_edits_ = false;
+    char               navigator_filter_[128] = "";
 
     // Documento esperando as constraints para saber se da' para editar.
     std::size_t        pending_edit_target_ = 0;

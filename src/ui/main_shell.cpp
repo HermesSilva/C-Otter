@@ -919,6 +919,16 @@ void MainShell::draw() {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E)) {
         explain_current_sql(/*analyze=*/false);
     }
+    // F5 reexecuta a consulta da aba ativa, como no DBeaver. Sem documento
+    // com consulta, nao faz nada -- em vez de um erro sobre nada.
+    if (ImGui::IsKeyPressed(ImGuiKey_F5, /*repeat=*/false)) {
+        if (SqlDocument* document = active_document();
+            document != nullptr && !document->paged_sql().empty()) {
+            execute_page(*document, document->page());
+        } else {
+            execute_current_sql();
+        }
+    }
     // Shift primeiro: Ctrl+Shift+S tambem satisfaz Ctrl+S, e testar na ordem
     // inversa faria "salvar como" nunca acontecer.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
@@ -1301,6 +1311,21 @@ void MainShell::draw_raft_panel() {
     ImGui::End();
 }
 
+bool MainShell::matches_filter(std::string_view name) const {
+    if (navigator_filter_[0] == 0) return true;
+
+    // Sem diferenciar maiusculas: quem digita "cliente" espera achar
+    // "TIDxCliente".
+    const std::string_view needle(navigator_filter_);
+    const auto it = std::search(
+        name.begin(), name.end(), needle.begin(), needle.end(),
+        [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) ==
+                   std::tolower(static_cast<unsigned char>(b));
+        });
+    return it != name.end();
+}
+
 void MainShell::draw_navigator_panel() {
     if (ImGui::Begin(TRW("Navigator", "###NavigatorPanel"))) {
         if (session().state() != SessionState::connected) {
@@ -1309,6 +1334,13 @@ void MainShell::draw_navigator_panel() {
             ImGui::End();
             return;
         }
+
+        // Filtro por nome. Num banco com 32 tabelas rolar resolve; com 300,
+        // nao -- e o ERP_TID do usuario tem varios schemas.
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##navfilter", TR("Filter objects..."),
+                                 navigator_filter_, sizeof navigator_filter_);
+        ImGui::Separator();
 
         const std::vector<db::SchemaMeta> schemas = session().schemas();
 
@@ -1373,7 +1405,9 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
     // tres vezes o mesmo pg_class seria desperdicio.
     std::size_t count = 0;
     for (const db::TableMeta& relation : schema.tables) {
-        if (relation.kind == kind) ++count;
+        // Conta so' o que passa no filtro: "Tabelas (32)" com 3 visiveis
+        // seria contradicao na mesma linha.
+        if (relation.kind == kind && matches_filter(relation.name)) ++count;
     }
 
     // Pasta vazia fica escondida, como no DBeaver: um schema sem views nao
@@ -1388,6 +1422,7 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
     bool first = true;
     for (const db::TableMeta& relation : schema.tables) {
         if (relation.kind != kind) continue;
+        if (!matches_filter(relation.name)) continue;
 
         ImGui::PushID(relation.name.c_str());
 
@@ -1404,6 +1439,27 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
 
         const bool open = ImGui::TreeNode(relation.name.c_str());
         ImGui::PopStyleColor();
+
+        // Duplo clique abre os dados -- e' o gesto que todo cliente de banco
+        // tem, e sem ele o usuario precisa do menu de contexto para a acao
+        // mais frequente.
+        //
+        // O TreeNode ja' consome o duplo clique para expandir; IsItemToggled
+        // distingue os dois casos.
+        if (ImGui::IsItemHovered() &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+            !ImGui::IsItemToggledOpen()) {
+
+            // Sem as colunas o SELECT sai com '*' e um comentario pedindo
+            // para expandir -- o usuario pediu os dados, nao um recado. Se
+            // ainda nao chegaram, pede e usa '*' nesta vez: mostrar os dados
+            // agora vale mais que uma lista de colunas um quadro depois.
+            if (!relation.columns_loaded && !session().busy()) {
+                session().load_columns_async(schema.name, relation.name);
+            }
+            open_sql_tab(db::generate_select(schema.name, relation),
+                         /*run=*/true);
+        }
 
         // Logo apos o TreeNode: BeginPopupContextItem usa o ultimo item, e
         // qualquer TextColored entre os dois roubaria o alvo do menu.

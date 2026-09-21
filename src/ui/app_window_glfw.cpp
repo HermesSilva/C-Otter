@@ -4,7 +4,12 @@
 // Win32+D3D11: uma UI 2D nao ganha nada com D3D, e manter dois backends de
 // render custaria ~120 h/h sem beneficio mensuravel.
 #include "ui/app_window.hpp"
+
+#include "db/connection_store.hpp"
 #include "ui/theme.hpp"
+
+#include <filesystem>
+#include <string>
 
 // windows.h antes de GLFW: ambos definem APIENTRY, e incluir na ordem inversa
 // produz C4005 (macro redefinition), que o nosso /WX transforma em erro.
@@ -157,7 +162,20 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = nullptr;   // layout persistido por nos, nao pelo imgui.ini
+    // Layout das janelas ao lado das conexoes salvas, nao no diretorio de
+    // trabalho. O padrao do ImGui grava "imgui.ini" onde o programa foi
+    // iniciado -- um arquivo que aparece no repositorio, na area de trabalho
+    // ou onde quer que o usuario esteja.
+    //
+    // O caminho fica estatico: o ImGui guarda o ponteiro, nao a string.
+    static std::string ini_path = [] {
+        const std::filesystem::path directory =
+            std::filesystem::path(db::otter_store_location().directory);
+        std::error_code ec;
+        std::filesystem::create_directories(directory, ec);
+        return (directory / "layout.ini").string();
+    }();
+    io.IniFilename = ini_path.c_str();
 
     apply_theme(ImGui::GetStyle());
     if (impl.scale != 1.0f) ImGui::GetStyle().ScaleAllSizes(impl.scale);

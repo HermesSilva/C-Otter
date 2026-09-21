@@ -30,15 +30,15 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Redimensionar / maximizar / minimizar | ✅ | Minimizada, dorme em vez de renderizar |
 | Posicionamento inicial centralizado | ✅ | Respeita a área de trabalho do monitor |
 | Escala por DPI | ✅ | `glfwGetMonitorContentScale` |
-| Tema escuro da lontra | ✅ | Paleta extraída de `Midia/Logo.png` |
-| Tema claro | ⬜ | |
+| **Três temas** | ✅ | Escuro (paleta de `Midia/Logo.png`), Claro e Âmbar |
+| Troca de tema em tempo real | ✅ | Ajuda → Tema; contraste WCAG testado |
 | **Internacionalização** | ✅ | Inglês padrão + pt-BR embutido |
 | Detecção do idioma do sistema | ✅ | Com fallback por idioma base (`pt-PT` → `pt-BR`) |
 | Troca de idioma em tempo real | ✅ | Help → Language, sem reiniciar |
 | Idiomas por arquivo `.lang` | ✅ | Sem recompilar; ver `lang/README.md` |
 | Relatório de textos sem tradução | ✅ | `missing_translations()` / `export_template()` |
 | Docking de painéis (arrastar abas) | ✅ | |
-| Layout persistido entre execuções | ⬜ | Volta ao padrão a cada início |
+| **Layout persistido** | ✅ | `%APPDATA%\C-Otter\layout.ini`, não no diretório de trabalho |
 | Ícone da janela | ⬜ | Usa o ícone padrão do sistema |
 | Splash screen | ⬜ | `Midia/Splash.png` existe, não é usado |
 | Múltiplas janelas | ⬜ | |
@@ -177,7 +177,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Ícone próprio por tipo | ✅ | 18 tipos, nenhum compartilhado |
 | **Corpo da função** | ✅ | `pg_get_functiondef`, com Copiar / Abrir no editor |
 | **Tipos de dados** | ✅ | enum com valores ordenados, composto com campos, domain com CHECK |
-| Campo de filtro/busca | ⬜ | |
+| **Campo de filtro** | ✅ | Sem diferenciar maiúsculas; as contagens acompanham |
 | **Menu de contexto** | ✅ | Ver dados, contar linhas, gerar SQL, copiar nome, atualizar |
 | Ver dados | ✅ | `SELECT` das colunas, executado |
 | Gerar SELECT / INSERT / UPDATE / DELETE | ✅ | `WHERE` pela PK; **aviso** quando não há PK |
@@ -185,9 +185,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | INSERT/UPDATE/DELETE em view | ✅ | Desabilitados — exigiriam `INSTEAD OF` |
 | Atualizar nó (F5) | ✅ | Descarta o cache e relê o catálogo |
 | Criar / alterar / excluir objeto | ⬜ | Exige DDL de escrita |
-| Duplo clique abre dados | ⬜ | |
+| **Duplo clique abre dados** | ✅ | Distingue de expandir o nó |
 | Arrastar tabela para o editor | ⬜ | |
-| Atualizar (F5) | ⬜ | |
+| **Atualizar (F5)** | ✅ | Reexecuta a consulta da aba, na mesma página |
 
 ## 6. Editor SQL
 
