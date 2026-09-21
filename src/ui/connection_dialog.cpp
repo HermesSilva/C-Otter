@@ -294,13 +294,30 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     }
 
     ImGui::BeginDisabled(feedback.busy);
-    if (ImGui::Button(TR("Test connection"), ImVec2(130, 0)) && on_connect_) {
-        on_connect_(profile_);
+
+    // "Testar" conecta e DEIXA o dialogo aberto: o ponto e' ver o resultado
+    // no rodape e continuar ajustando os campos.
+    if (ImGui::Button(TR("Test connection"), ImVec2(130, 0)) && on_test_) {
+        on_test_(profile_);
     }
     ImGui::SameLine();
+
     if (ImGui::Button(editing_ ? TR("Save") : TR("Finish"), ImVec2(100, 0))) {
-        if (on_save_) on_save_(profile_);
-        if (on_connect_) on_connect_(profile_);
+        // Apenas UM dos dois: on_save_ e on_connect_ gravam o perfil em
+        // disco, e chamar os dois abriria a conexao duas vezes alem de
+        // gravar duas.
+        //
+        // Editando, "Salvar" so' guarda -- reconectar a cada ajuste de
+        // descricao seria intrusivo. Criando, "Concluir" conecta, que e' o
+        // que o usuario acabou de pedir.
+        if (editing_) {
+            if (on_save_) on_save_(profile_);
+        } else {
+            if (on_connect_) on_connect_(profile_);
+        }
+        // Fecha: o dialogo cumpriu seu papel. Antes era preciso clicar em
+        // Cancelar depois de concluir, o que sugere que algo deu errado.
+        visible_ = false;
     }
     ImGui::EndDisabled();
 

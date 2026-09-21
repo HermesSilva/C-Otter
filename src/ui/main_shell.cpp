@@ -143,10 +143,16 @@ MainShell::MainShell()
     new_document().editor().SetText(std::string(kWelcomeSql));
 
     // O assistente conecta e, ao concluir, tambem guarda o perfil ativo.
+    // "Testar" reutiliza a conexao ativa: criar uma permanente a cada clique
+    // encheria o Raft de entradas que o usuario nao pediu.
+    connection_dialog_.set_on_test([this](const db::ConnectionProfile& profile) {
+        session().connect_async(profile.to_conn_config());
+    });
+
     connection_dialog_.set_on_connect([this](const db::ConnectionProfile& profile) {
         active_profile_ = profile;
         remember_profile(profile);
-        session_.connect_async(profile.to_conn_config());
+        open_connection(profile);
     });
     connection_dialog_.set_on_save([this](const db::ConnectionProfile& profile) {
         active_profile_ = profile;
@@ -214,7 +220,7 @@ MainShell::MainShell()
         // Mesmo caminho da conexao normal, incluindo o registro em disco: um
         // atalho que pula etapas deixa de exercitar o que ele deveria testar.
         remember_profile(profile);
-        session_.connect_async(profile.to_conn_config());
+        open_connection(profile);
         connection_dialog_.close();
     }
 }
@@ -355,7 +361,7 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     }
 
     // Camada 3 -- metadados reais do servidor.
-    for (const db::SchemaMeta& schema : session_.schemas()) {
+    for (const db::SchemaMeta& schema : session().schemas()) {
         for (const db::TableMeta& table : schema.tables) {
             const bool referenced = in_scope(table.name);
 
@@ -416,7 +422,7 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
 }
 
 void MainShell::execute_current_sql() {
-    if (session_.state() != SessionState::connected || session_.busy()) return;
+    if (session().state() != SessionState::connected || session().busy()) return;
 
     SqlDocument* document = active_document();
     if (document == nullptr) return;
@@ -431,7 +437,7 @@ void MainShell::execute_current_sql() {
 }
 
 void MainShell::execute_page(SqlDocument& document, std::size_t page) {
-    if (session_.state() != SessionState::connected || session_.busy()) return;
+    if (session().state() != SessionState::connected || session().busy()) return;
     if (document.paged_sql().empty()) return;
 
     // A reescrita com LIMIT/OFFSET impede que um SELECT sem limite trave a UI
@@ -449,17 +455,17 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     document.set_executing(true);
     document.set_status({});
 
-    session_.execute_async(paged.sql);
+    session().execute_async(paged.sql);
 }
 
 void MainShell::draw() {
     // Colhe o resultado e entrega ao documento que o pediu -- nao ao que
     // estiver ativo agora, porque o usuario pode ter trocado de aba.
-    if (!session_.busy() && executing_document_id_ != 0) {
+    if (!session().busy() && executing_document_id_ != 0) {
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
 
-            if (auto fresh = session_.take_result()) {
+            if (auto fresh = session().take_result()) {
                 // A pagina pediu uma linha a mais do que mostra. Se ela veio,
                 // ha' mais resultado adiante -- e ela nao pode aparecer na
                 // grade, senao o usuario veria 201 linhas ao pedir 200.
@@ -480,7 +486,7 @@ void MainShell::draw() {
                 document->set_status(TRF("%zu row(s), %zu column(s)",
                                          rs.row_count(), rs.column_count()));
             } else {
-                document->set_status(session_.status_message());
+                document->set_status(session().status_message());
             }
             document->set_executing(false);
             break;
@@ -505,10 +511,10 @@ void MainShell::draw() {
     }
     // Commit e rollback: mesmos atalhos do DBeaver.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_C)) {
-        session_.commit_async();
+        session().commit_async();
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_R)) {
-        session_.rollback_async();
+        session().rollback_async();
     }
 
     draw_menu_bar();
@@ -524,11 +530,11 @@ void MainShell::draw() {
 
     // Traduz o estado da sessao para o que o assistente precisa exibir.
     ConnectionDialog::Feedback feedback;
-    feedback.busy      = session_.busy();
-    feedback.failed    = session_.state() == SessionState::failed;
-    feedback.succeeded = session_.state() == SessionState::connected;
+    feedback.busy      = session().busy();
+    feedback.failed    = session().state() == SessionState::failed;
+    feedback.succeeded = session().state() == SessionState::connected;
     if (feedback.failed || feedback.succeeded) {
-        feedback.message = session_.status_message();
+        feedback.message = session().status_message();
     }
     connection_dialog_.draw(feedback);
 
@@ -603,7 +609,7 @@ void MainShell::draw_menu_bar() {
             connection_dialog_.open_new();
         }
         if (ImGui::MenuItem(TR("Edit connection..."), nullptr, false,
-                            session_.state() == SessionState::connected)) {
+                            session().state() == SessionState::connected)) {
             connection_dialog_.open_edit(active_profile_);
         }
         if (ImGui::MenuItem(TR("Import from DBeaver..."))) {
@@ -618,8 +624,8 @@ void MainShell::draw_menu_bar() {
             close_document(active_document_);
         }
         if (ImGui::MenuItem(TR("Disconnect"), nullptr, false,
-                            session_.state() == SessionState::connected)) {
-            session_.disconnect();
+                            session().state() == SessionState::connected)) {
+            session().disconnect();
         }
         ImGui::Separator();
         if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) wants_quit_ = true;
@@ -649,27 +655,27 @@ void MainShell::draw_menu_bar() {
     }
 
     if (ImGui::BeginMenu("SQL")) {
-        const bool can_run = session_.state() == SessionState::connected &&
-                             !session_.busy();
+        const bool can_run = session().state() == SessionState::connected &&
+                             !session().busy();
         if (ImGui::MenuItem(TR("Execute"), "Ctrl+Enter", false, can_run)) {
             execute_current_sql();
         }
         ImGui::Separator();
 
-        const bool auto_commit = session_.auto_commit();
-        const bool in_txn = session_.txn_state() != db::TxnState::idle;
+        const bool auto_commit = session().auto_commit();
+        const bool in_txn = session().txn_state() != db::TxnState::idle;
 
         bool toggle = auto_commit;
         if (ImGui::MenuItem(TR("Auto-commit"), nullptr, &toggle, can_run)) {
-            session_.set_auto_commit_async(toggle);
+            session().set_auto_commit_async(toggle);
         }
         if (ImGui::MenuItem(TR("Commit"), "Ctrl+Shift+C", false,
                             can_run && !auto_commit && in_txn)) {
-            session_.commit_async();
+            session().commit_async();
         }
         if (ImGui::MenuItem(TR("Rollback"), "Ctrl+Shift+R", false,
                             can_run && !auto_commit && in_txn)) {
-            session_.rollback_async();
+            session().rollback_async();
         }
         ImGui::EndMenu();
     }
@@ -725,89 +731,137 @@ void MainShell::draw_menu_bar() {
 
 void MainShell::draw_raft_panel() {
     if (ImGui::Begin(TRW("Raft", "###RaftPanel"))) {
+        const Palette& p = colors();
+
         if (ImGui::Button(TR("New connection"))) connection_dialog_.open_new();
 
-        const SessionState state = session_.state();
-        const bool connected = state == SessionState::connected;
-
         ImGui::SameLine();
-        ImGui::BeginDisabled(!connected);
+        ImGui::BeginDisabled(session().state() != SessionState::connected);
         if (ImGui::Button(TR("Edit"))) connection_dialog_.open_edit(active_profile_);
         ImGui::EndDisabled();
 
         ImGui::Separator();
 
-        if (state == SessionState::disconnected) {
-            ImGui::TextColored(col4(colors().text_dim), TR("no connection"));
-            ImGui::End();
-            return;
+        // Conexoes abertas, a ativa em destaque. Uma Session vazia e' o estado
+        // inicial, nao uma conexao: nao vale uma linha na lista.
+        std::size_t drawn = 0;
+        std::size_t close_requested = connections_.size();
+
+        for (std::size_t i = 0; i < connections_.size(); ++i) {
+            const Connection& connection = connections_[i];
+            const SessionState state = connection.session->state();
+            if (state == SessionState::disconnected &&
+                connection.profile.host.empty()) {
+                continue;
+            }
+            ++drawn;
+
+            ImGui::PushID(static_cast<int>(i));
+
+            const bool active    = i == active_connection_;
+            const bool connected = state == SessionState::connected;
+
+            const std::uint32_t status_color =
+                connected                       ? p.ok
+                : state == SessionState::failed ? p.error
+                : state == SessionState::connecting ? p.warn
+                                                    : p.text_dim;
+
+            ImGui::TextColored(col4(status_color), "●");
+            ImGui::SameLine(0.0f, 6.0f);
+
+            // Selecionavel de largura total: trocar de conexao e' um clique
+            // em qualquer ponto da linha, como no DBeaver.
+            ImGui::PushStyleColor(ImGuiCol_Text, col(active ? p.text_bright
+                                                            : p.text));
+            if (ImGui::Selectable(connection.profile.effective_name().c_str(),
+                                  active, ImGuiSelectableFlags_SpanAllColumns)) {
+                active_connection_ = i;
+                active_profile_    = connection.profile;
+            }
+            ImGui::PopStyleColor();
+
+            if (ImGui::BeginPopupContextItem("##connmenu")) {
+                if (ImGui::MenuItem(TR("Edit connection..."))) {
+                    active_connection_ = i;
+                    active_profile_    = connection.profile;
+                    connection_dialog_.open_edit(connection.profile);
+                }
+                if (ImGui::MenuItem(TR("Disconnect"), nullptr, false, connected)) {
+                    connection.session->disconnect();
+                }
+                if (ImGui::MenuItem(TR("Close connection"))) {
+                    close_requested = i;
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem(TR("Copy name"))) {
+                    ImGui::SetClipboardText(
+                        connection.profile.effective_name().c_str());
+                }
+                ImGui::EndPopup();
+            }
+
+            // Detalhe so' da ativa: repetir host, versao e modo de transacao
+            // para cada conexao encheria o painel de texto igual.
+            if (active) {
+                ImGui::Indent();
+
+                const db::ConnectionTypeInfo& type =
+                    db::connection_type_info(connection.profile.type);
+                ImGui::TextColored(col4(type.color), "%s", type.name);
+
+                if (connected) {
+                    ImGui::TextColored(col4(p.text_dim), "PostgreSQL %s",
+                                       connection.session->server_version().c_str());
+                    ImGui::TextColored(col4(p.text_dim), "%s:%u",
+                                       connection.profile.host.c_str(),
+                                       connection.profile.port);
+                    ImGui::TextColored(col4(p.text_dim), "%s",
+                                       connection.profile.auto_commit
+                                           ? TR("auto-commit")
+                                           : TR("manual transaction"));
+                    if (connection.profile.read_only) {
+                        ImGui::TextColored(col4(p.warn), TR("read only"));
+                    }
+                } else if (state == SessionState::failed) {
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(col4(p.error), "%s",
+                                       connection.session->status_message().c_str());
+                    ImGui::PopTextWrapPos();
+                }
+
+                if (!connection.profile.description.empty()) {
+                    ImGui::TextColored(col4(p.text_dim), "%s",
+                                       connection.profile.description.c_str());
+                }
+                ImGui::Unindent();
+            }
+            ImGui::PopID();
         }
 
-        const std::uint32_t status_color =
-            connected                        ? colors().ok
-            : state == SessionState::failed  ? colors().error
-                                             : colors().warn;
-
-        ImGui::TextColored(col4(status_color), "●");
-        ImGui::SameLine();
-        ImGui::TextUnformatted(active_profile_.effective_name().c_str());
-
-        // Menu de contexto sobre a conexão, como no DBeaver.
-        if (ImGui::BeginPopupContextItem("##connmenu")) {
-            if (ImGui::MenuItem(TR("Edit connection..."))) {
-                connection_dialog_.open_edit(active_profile_);
-            }
-            if (ImGui::MenuItem(TR("Disconnect"), nullptr, false, connected)) {
-                session_.disconnect();
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem(TR("Copy name"))) {
-                ImGui::SetClipboardText(active_profile_.effective_name().c_str());
-            }
-            ImGui::EndPopup();
+        // Fora do laco: apagar do vector enquanto se itera invalidaria o
+        // iterador e a referencia devolvida por session().
+        if (close_requested < connections_.size()) {
+            close_connection(close_requested);
         }
 
-        ImGui::Indent();
-
-        // Faixa do tipo de conexão: produção precisa ser reconhecível de longe.
-        const db::ConnectionTypeInfo& type =
-            db::connection_type_info(active_profile_.type);
-        ImGui::TextColored(col4(type.color), "%s", type.name);
-
-        if (connected) {
-            ImGui::TextColored(col4(colors().text_dim), "PostgreSQL %s",
-                               session_.server_version().c_str());
-            ImGui::TextColored(col4(colors().text_dim), "%s:%u",
-                               active_profile_.host.c_str(),
-                               active_profile_.port);
-            ImGui::TextColored(col4(colors().text_dim), "%s",
-                               active_profile_.auto_commit ? TR("auto-commit")
-                                                           : TR("manual transaction"));
-            if (active_profile_.read_only) {
-                ImGui::TextColored(col4(colors().warn), TR("read only"));
-            }
+        if (drawn == 0) {
+            ImGui::TextColored(col4(p.text_dim), TR("no connection"));
         }
-
-        if (!active_profile_.description.empty()) {
-            ImGui::TextColored(col4(colors().text_dim), "%s",
-                               active_profile_.description.c_str());
-        }
-
-        ImGui::Unindent();
     }
     ImGui::End();
 }
 
 void MainShell::draw_navigator_panel() {
     if (ImGui::Begin(TRW("Navigator", "###NavigatorPanel"))) {
-        if (session_.state() != SessionState::connected) {
+        if (session().state() != SessionState::connected) {
             ImGui::TextColored(col4(colors().text_dim),
                                TR("connect to browse the schema"));
             ImGui::End();
             return;
         }
 
-        const std::vector<db::SchemaMeta> schemas = session_.schemas();
+        const std::vector<db::SchemaMeta> schemas = session().schemas();
 
         for (const db::SchemaMeta& schema : schemas) {
             ImGui::PushID(schema.name.c_str());
@@ -934,8 +988,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     // --- Colunas -------------------------------------------------------------
     if (draw_folder_node(Icon::column, TR("Columns"), table.columns.size(),
                          table.columns_loaded)) {
-        if (!table.columns_loaded && !session_.busy()) {
-            session_.load_columns_async(schema.name, table.name);
+        if (!table.columns_loaded && !session().busy()) {
+            session().load_columns_async(schema.name, table.name);
         }
         if (table.columns.empty()) {
             ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
@@ -976,8 +1030,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     if (table.has_constraints() &&
         draw_folder_node(Icon::constraint, TR("Constraints"),
                          table.constraints.size(), table.constraints_loaded)) {
-        if (!table.constraints_loaded && !session_.busy()) {
-            session_.load_constraints_async(schema.name, table.name);
+        if (!table.constraints_loaded && !session().busy()) {
+            session().load_constraints_async(schema.name, table.name);
         }
         for (const db::ConstraintMeta& constraint : table.constraints) {
             const bool is_pk = constraint.kind == db::ObjKind::primary_key;
@@ -1007,8 +1061,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     if (table.has_indexes() &&
         draw_folder_node(Icon::index, TR("Indexes"), table.indexes.size(),
                          table.indexes_loaded)) {
-        if (!table.indexes_loaded && !session_.busy()) {
-            session_.load_indexes_async(schema.name, table.name);
+        if (!table.indexes_loaded && !session().busy()) {
+            session().load_indexes_async(schema.name, table.name);
         }
         for (const db::IndexMeta& index : table.indexes) {
             // Índice inválido (CREATE INDEX CONCURRENTLY que falhou) existe mas
@@ -1041,8 +1095,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     if (table.has_constraints() &&
         draw_folder_node(Icon::foreign_key, TR("Foreign keys"),
                          table.foreign_keys.size(), table.keys_loaded)) {
-        if (!table.keys_loaded && !session_.busy()) {
-            session_.load_keys_async(schema.name, table.name);
+        if (!table.keys_loaded && !session().busy()) {
+            session().load_keys_async(schema.name, table.name);
         }
         for (const db::ForeignKeyMeta& key : table.foreign_keys) {
             ImGui::BeginGroup();
@@ -1070,8 +1124,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     if (table.has_constraints() &&
         draw_folder_node(Icon::references, TR("References"),
                          table.references.size(), table.keys_loaded)) {
-        if (!table.keys_loaded && !session_.busy()) {
-            session_.load_keys_async(schema.name, table.name);
+        if (!table.keys_loaded && !session().busy()) {
+            session().load_keys_async(schema.name, table.name);
         }
         for (const db::ForeignKeyMeta& reference : table.references) {
             icon_inline(Icon::references, p.warn);
@@ -1093,8 +1147,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     if (table.has_triggers() &&
         draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
                          table.triggers_loaded)) {
-        if (!table.triggers_loaded && !session_.busy()) {
-            session_.load_triggers_async(schema.name, table.name);
+        if (!table.triggers_loaded && !session().busy()) {
+            session().load_triggers_async(schema.name, table.name);
         }
         for (const db::TriggerMeta& trigger : table.triggers) {
             ImGui::BeginGroup();
@@ -1127,8 +1181,8 @@ void MainShell::draw_view_definition(const db::SchemaMeta& schema,
     // "(1)" ao lado de "Definição" nao diria nada.
     if (!draw_folder_node(Icon::view, TR("Definition"), 0, false)) return;
 
-    if (!view.definition_loaded && !session_.busy()) {
-        session_.load_view_definition_async(schema.name, view.name);
+    if (!view.definition_loaded && !session().busy()) {
+        session().load_view_definition_async(schema.name, view.name);
     }
 
     if (view.definition.empty()) {
@@ -1180,8 +1234,8 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
         return;
     }
 
-    if (!schema.sequences_loaded && !session_.busy()) {
-        session_.load_sequences_async(schema.name);
+    if (!schema.sequences_loaded && !session().busy()) {
+        session().load_sequences_async(schema.name);
     }
 
     const Palette& p = colors();
@@ -1212,8 +1266,8 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
         return;
     }
 
-    if (!schema.routines_loaded && !session_.busy()) {
-        session_.load_routines_async(schema.name);
+    if (!schema.routines_loaded && !session().busy()) {
+        session().load_routines_async(schema.name);
     }
 
     const Palette& p = colors();
@@ -1253,8 +1307,8 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
         }
 
         if (open) {
-            if (!routine.definition_loaded && !session_.busy()) {
-                session_.load_routine_definition_async(
+            if (!routine.definition_loaded && !session().busy()) {
+                session().load_routine_definition_async(
                     schema.name, routine.name, routine.arguments);
             }
 
@@ -1280,8 +1334,8 @@ void MainShell::draw_types_folder(const db::SchemaMeta& schema) {
         return;
     }
 
-    if (!schema.types_loaded && !session_.busy()) {
-        session_.load_types_async(schema.name);
+    if (!schema.types_loaded && !session().busy()) {
+        session().load_types_async(schema.name);
     }
 
     const Palette& p = colors();
@@ -1389,8 +1443,8 @@ void MainShell::draw_toolbar() {
     if (ImGui::Begin("##toolbar", nullptr, flags)) {
         const Palette& p = colors();
 
-        const bool connected = session_.state() == SessionState::connected;
-        const bool busy      = session_.busy();
+        const bool connected = session().state() == SessionState::connected;
+        const bool busy      = session().busy();
         const bool can_act   = connected && !busy;
 
         // Separador vertical fino entre grupos de ações.
@@ -1413,7 +1467,7 @@ void MainShell::draw_toolbar() {
         ImGui::SameLine(0.0f, 2.0f);
         if (icon_button("##disconnect", Icon::disconnect, TR("Disconnect"),
                         connected)) {
-            session_.disconnect();
+            session().disconnect();
         }
 
         group_separator();
@@ -1435,16 +1489,16 @@ void MainShell::draw_toolbar() {
         //
         // A razão de a barra e as transações virem juntas: commit e rollback
         // precisam de um lugar visível e permanente.
-        const bool auto_commit    = session_.auto_commit();
-        const db::TxnState txn    = session_.txn_state();
-        const std::size_t pending = session_.uncommitted_changes();
+        const bool auto_commit    = session().auto_commit();
+        const db::TxnState txn    = session().txn_state();
+        const std::size_t pending = session().uncommitted_changes();
         const bool in_txn         = txn != db::TxnState::idle;
 
         // Auto-commit como botão de alternância, tingido quando ligado.
         if (icon_button("##autocommit", Icon::refresh,
                         auto_commit ? TR("Auto-commit: on") : TR("Auto-commit: off"),
                         can_act, auto_commit ? p.data_light : p.text_dim)) {
-            session_.set_auto_commit_async(!auto_commit);
+            session().set_auto_commit_async(!auto_commit);
         }
 
         ImGui::SameLine(0.0f, 2.0f);
@@ -1452,12 +1506,12 @@ void MainShell::draw_toolbar() {
 
         if (icon_button("##commit", Icon::commit, TR("Commit (Ctrl+Shift+C)"),
                         can_txn, pending > 0 ? p.ok : 0)) {
-            session_.commit_async();
+            session().commit_async();
         }
         ImGui::SameLine(0.0f, 2.0f);
         if (icon_button("##rollback", Icon::rollback, TR("Rollback (Ctrl+Shift+R)"),
                         can_txn, pending > 0 ? p.error : 0)) {
-            session_.rollback_async();
+            session().rollback_async();
         }
 
         // --- Indicador de estado da transação --------------------------------
@@ -1595,8 +1649,8 @@ void MainShell::draw_document_tabs() {
 }
 
 void MainShell::draw_document_body(SqlDocument& document) {
-    const bool can_run = session_.state() == SessionState::connected &&
-                         !session_.busy();
+    const bool can_run = session().state() == SessionState::connected &&
+                         !session().busy();
 
     ImGui::BeginDisabled(!can_run);
     if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
@@ -1631,8 +1685,8 @@ void MainShell::draw_editor_panel() {
 void MainShell::draw_grid_toolbar(SqlDocument& document,
                                   const db::ResultSet& rs) {
     const Palette& p = colors();
-    const bool can_run = session_.state() == SessionState::connected &&
-                         !session_.busy();
+    const bool can_run = session().state() == SessionState::connected &&
+                         !session().busy();
 
     if (document.paged()) {
         // Intervalo real de linhas, base 1 -- "linhas 201-400" diz onde o
@@ -1813,7 +1867,7 @@ void MainShell::draw_grid_panel() {
 
 void MainShell::draw_query_log_panel() {
     if (ImGui::Begin(TRW("Queries", "###QueriesPanel"))) {
-        const std::vector<db::QueryLog> log = session_.query_log();
+        const std::vector<db::QueryLog> log = session().query_log();
 
         if (log.empty()) {
             ImGui::TextColored(col4(colors().text_dim), TR("no queries yet"));
@@ -1888,7 +1942,7 @@ void MainShell::draw_status_bar() {
     ImGui::PushStyleColor(ImGuiCol_WindowBg, col4(colors().bg_darkest));
 
     if (ImGui::Begin("##status", nullptr, flags)) {
-        const SessionState state = session_.state();
+        const SessionState state = session().state();
 
         const std::uint32_t color =
             state == SessionState::connected ? colors().ok
@@ -1900,14 +1954,14 @@ void MainShell::draw_status_bar() {
 
         if (state == SessionState::connected) {
             ImGui::TextColored(col4(colors().data), "%s",
-                               session_.database_name().c_str());
+                               session().database_name().c_str());
             ImGui::SameLine();
             ImGui::TextColored(col4(colors().text_dim), "| PostgreSQL %s |",
-                               session_.server_version().c_str());
+                               session().server_version().c_str());
             ImGui::SameLine();
         }
         ImGui::TextColored(col4(colors().text_dim), "%s",
-                           session_.status_message().c_str());
+                           session().status_message().c_str());
     }
     ImGui::End();
 
@@ -1943,6 +1997,68 @@ void MainShell::draw_about_window() {
                            IMGUI_VERSION);
     }
     ImGui::End();
+}
+
+Session& MainShell::session() {
+    // Sempre ha' uma Session, mesmo antes da primeira conexao: os ~70 pontos
+    // que consultam estado (busy(), state(), schemas()) rodam a cada quadro,
+    // e devolver ponteiro nulo obrigaria a checar em todos eles.
+    //
+    // A Session desconectada responde disconnected/false para tudo, que e'
+    // exatamente o que a UI precisa desenhar.
+    if (connections_.empty()) {
+        connections_.push_back({std::make_unique<Session>(),
+                                db::ConnectionProfile{}});
+        active_connection_ = 0;
+    }
+    if (active_connection_ >= connections_.size()) {
+        active_connection_ = connections_.size() - 1;
+    }
+    return *connections_[active_connection_].session;
+}
+
+const Session& MainShell::session() const {
+    return const_cast<MainShell*>(this)->session();
+}
+
+Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
+    // Reusa a Session vazia criada por session(): abrir a primeira conexao
+    // nao deve deixar uma aba morta para tras.
+    const bool reuse_empty =
+        connections_.size() == 1 &&
+        connections_.front().session->state() == SessionState::disconnected;
+
+    if (reuse_empty) {
+        connections_.front().profile = profile;
+        active_connection_ = 0;
+    } else {
+        connections_.push_back({std::make_unique<Session>(), profile});
+        active_connection_ = connections_.size() - 1;
+    }
+
+    Session& target = *connections_[active_connection_].session;
+    target.connect_async(profile.to_conn_config());
+    return target;
+}
+
+void MainShell::close_connection(std::size_t index) {
+    if (index >= connections_.size()) return;
+
+    // Desconecta antes de destruir: o destrutor da Session junta o worker, e
+    // deixar a conexao aberta manteria o socket ate' la'.
+    connections_[index].session->disconnect();
+    connections_.erase(connections_.begin() +
+                       static_cast<std::ptrdiff_t>(index));
+
+    // A ativa passa a ser a anterior, nao a de mesmo indice: fechar a ultima
+    // da lista deixaria active_connection_ apontando para fora.
+    if (connections_.empty()) {
+        active_connection_ = 0;
+    } else if (active_connection_ >= connections_.size()) {
+        active_connection_ = connections_.size() - 1;
+    } else if (index < active_connection_) {
+        --active_connection_;
+    }
 }
 
 void MainShell::load_saved_profiles() {

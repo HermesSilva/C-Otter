@@ -110,7 +110,31 @@ private:
     std::size_t executing_document_id_ = 0;
 
     std::unique_ptr<TextEditor::AutoCompleteConfig> autocomplete_config_;
-    Session session_;
+
+    // --- Conexoes simultaneas ------------------------------------------------
+    //
+    // Cada Session ja' encapsula uma conexao inteira: socket, worker, catalogo
+    // e estado de transacao. Ter varias e' ter uma lista delas, nao refatorar
+    // a classe.
+    //
+    // unique_ptr porque Session contem std::thread e std::mutex, nao
+    // moveis: o vector precisa realocar quando cresce.
+    struct Connection {
+        std::unique_ptr<Session> session;
+        db::ConnectionProfile    profile;
+    };
+
+    std::vector<Connection> connections_;
+    std::size_t             active_connection_ = 0;
+
+    // Conexao ativa. Os ~70 pontos que usam `session_` continuam valendo: a
+    // referencia aponta para a Session da conexao selecionada no Raft.
+    [[nodiscard]] Session& session();
+    [[nodiscard]] const Session& session() const;
+
+    // Cria uma conexao nova e a torna ativa.
+    Session& open_connection(const db::ConnectionProfile& profile);
+    void close_connection(std::size_t index);
 
     // Assistente de conexao completo (abas Principal/PostgreSQL/SSH/SSL/...).
     ConnectionDialog connection_dialog_;

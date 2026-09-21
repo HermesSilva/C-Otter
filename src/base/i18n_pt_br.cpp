@@ -48,6 +48,7 @@ const char* const kPtBr[] = {
     "connect to browse the schema", "conecte-se para navegar o schema",
     "loading...",                 "carregando...",
     "Copy name",                  "Copiar nome",
+    "Close connection",           "Fechar conexão",
 
     // --- Grade de resultado e paginacao ---
     "First page",                 "Primeira página",

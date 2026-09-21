@@ -118,7 +118,8 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 |----------|--------|
 | `< Voltar` (só em nova conexão) | ✅ |
 | `Testar conexão` | ✅ |
-| `Concluir` / `Salvar` | ✅ |
+| `Concluir` / `Salvar` | ✅ fecha o diálogo ao concluir |
+| `Testar conexão` não cria conexão permanente | ✅ reutiliza a ativa |
 | `Cancelar` | ✅ |
 | Indicador pulsante durante a conexão | ✅ |
 | Erro detalhado / sucesso com contagens | ✅ |
@@ -143,7 +144,10 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Aviso de somente leitura | ✅ | |
 | Descrição da conexão | ✅ | Quando preenchida |
 | Menu de contexto | ✅ | Editar, desconectar, copiar nome |
-| Lista de várias conexões | ⬜ | Uma por vez |
+| **Lista de várias conexões** | ✅ | Simultâneas; clique na linha troca a ativa |
+| Indicador de estado por conexão | ✅ | Verde/vermelho/amarelo por linha |
+| Fechar conexão | ✅ | Menu de contexto → Fechar conexão |
+| Detalhe só da conexão ativa | ✅ | Evita repetir host e versão em cada linha |
 | Pastas de organização | ⬜ | Campo existe, árvore não agrupa |
 
 ## 5. Painel Navigator
@@ -340,7 +344,7 @@ visualizador, não uma ferramenta de trabalho.
 |---|------|----------|
 | 1 | Conexão | Senha em disco tem a proteção fraca do DBeaver (chave pública) — **avisado na tela**, ADR 0012 |
 | 2 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
-| 4 | Raft | Uma conexão por vez: as salvas existem, mas só a última reabre preenchida |
+| 4 | Raft | As conexões abertas não são restauradas ao reiniciar — só a última volta preenchida no diálogo |
 | 3 | Grade | `OFFSET` alto é lento: o servidor produz e descarta as linhas puladas (custo inerente ao ADR 0011) |
 
 ### Corrigidos

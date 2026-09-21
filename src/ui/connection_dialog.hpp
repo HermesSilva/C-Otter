@@ -47,6 +47,12 @@ public:
     [[nodiscard]] bool visible() const noexcept { return visible_; }
     [[nodiscard]] db::ConnectionProfile& profile() noexcept { return profile_; }
 
+    // Tres acoes distintas, porque tem efeitos distintos:
+    //
+    //   on_test    conecta para conferir, sem criar uma conexao permanente
+    //   on_connect conclui: cria a conexao e guarda o perfil
+    //   on_save    guarda o perfil sem reconectar (modo edicao)
+    void set_on_test(ConnectFn fn) { on_test_ = std::move(fn); }
     void set_on_connect(ConnectFn fn) { on_connect_ = std::move(fn); }
     void set_on_save(SaveFn fn) { on_save_ = std::move(fn); }
 
@@ -69,6 +75,7 @@ private:
     void draw_tab_general();
 
     db::ConnectionProfile profile_;
+    ConnectFn             on_test_;
     ConnectFn             on_connect_;
     SaveFn                on_save_;
 

@@ -47,7 +47,8 @@ navegação de schema com carregamento tardio, editor SQL com realce e autocompl
 metadados reais, grade virtualizada com paginação e inspetor de queries. 144 fps, 1,8 MB em Release, sem
 dependência de DLL redistribuível.
 
-Funciona também: assistente de conexão com catálogo de drivers e 8 abas, múltiplas abas de
+Funciona também: **várias conexões simultâneas**, assistente de conexão com catálogo de
+drivers e 8 abas, múltiplas abas de
 editor com resultado isolado, transações (auto-commit, commit, rollback), árvore de objetos
 com tabelas, views e materialized views em pastas separadas — constraints, índices,
 FKs, referências, triggers, sequences, funções e o corpo da view — três temas e i18n
