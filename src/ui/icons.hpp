@@ -47,6 +47,7 @@ enum class Icon : std::uint8_t {
     info,
     clock,
     lock,          // canal cifrado (TLS)
+    record,        // visao de registro unico (uma linha por vez)
     filter,
 
     // Tipos de objeto do banco. Cada um tem desenho proprio: reaproveitar um

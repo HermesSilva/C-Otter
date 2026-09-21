@@ -555,6 +555,19 @@ const char* const kPtBr[] = {
     // o comando copia DAQUELA linha, nao para uma direcao.
     "Copy from row above",        "Copiar da linha de cima",
     "Copy from row below",        "Copiar da linha de baixo",
+
+    // Visao de registro unico. "Registro" e nao "linha": na visao o que se ve'
+    // e' um cadastro inteiro, e chama-lo de linha contradiz o que esta' na
+    // tela -- os campos estao empilhados, nao em linha.
+    "Single record view (Tab)",   "Visão de registro único (Tab)",
+    "Back to the grid (Tab)",     "Voltar para a grade (Tab)",
+    "record %zu of %zu",          "registro %zu de %zu",
+    "Previous record",            "Registro anterior",
+    "Next record",                "Próximo registro",
+    // "Value" e "Type" ja' estao no catalogo (painel de valor, diagrama) --
+    // repeti-los daria chave duplicada, que o teste do catalogo recusa.
+    "Column",                     "Coluna",
+    "no rows",                    "sem linhas",
     "SSH host",                   "Host SSH",
     "Authentication##ssh",        "Autenticação##ssh",
     "Public key",                 "Chave pública",

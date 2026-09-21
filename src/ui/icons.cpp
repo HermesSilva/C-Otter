@@ -300,6 +300,18 @@ void draw_lock(const Canvas& c) {
     c.line(0.0f, 0.06f, 0.0f, 0.19f);   // o segredo
 }
 
+// Ficha de cadastro: moldura com pares rotulo/valor empilhados. O contraste
+// entre o traco CURTO (rotulo) e o LONGO (valor) e' o que distingue esta
+// ficha de uma tabela generica a 14 px.
+void draw_record(const Canvas& c) {
+    c.rect(-0.34f, -0.34f, 0.34f, 0.34f, 0.06f);
+
+    for (const float y : {-0.18f, -0.02f, 0.14f}) {
+        c.line(-0.24f, y, -0.10f, y);   // rotulo
+        c.line( 0.02f, y,  0.24f, y);   // valor
+    }
+}
+
 void draw_filter(const Canvas& c) {
     c.dl->PathLineTo(c.at(-0.34f, -0.26f));
     c.dl->PathLineTo(c.at( 0.34f, -0.26f));
@@ -666,6 +678,7 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::info:          draw_info(c);          break;
         case Icon::clock:         draw_clock(c);         break;
         case Icon::lock:          draw_lock(c);          break;
+        case Icon::record:        draw_record(c);        break;
         case Icon::filter:        draw_filter(c);        break;
 
         case Icon::materialized_view: draw_materialized_view(c); break;

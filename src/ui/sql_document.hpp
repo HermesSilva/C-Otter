@@ -118,6 +118,15 @@ public:
     [[nodiscard]] bool pivot_active() const noexcept { return pivot_active_; }
     void set_pivot_active(bool active) noexcept { pivot_active_ = active; }
 
+    // Modo registro: UMA linha por vez, atributos em pilha. E' o `toggleMode`
+    // do DBeaver, e existe para tabela larga -- com 40 colunas, a grade
+    // obriga a rolar na horizontal para ler um cadastro.
+    //
+    // Por DOCUMENTO, nao global: uma aba lendo um cadastro e outra lendo um
+    // relatorio querem visoes diferentes ao mesmo tempo.
+    [[nodiscard]] bool record_mode() const noexcept { return record_mode_; }
+    void set_record_mode(bool on) noexcept { record_mode_ = on; }
+
     [[nodiscard]] db::PivotSpec& pivot_spec() noexcept { return pivot_spec_; }
     [[nodiscard]] const db::PivotSpec& pivot_spec() const noexcept {
         return pivot_spec_;
@@ -171,6 +180,7 @@ private:
     db::PivotSpec               pivot_spec_;
     db::PivotResult             pivot_;
     bool                        pivot_active_ = false;
+    bool                        record_mode_ = false;
     db::EditTarget              edit_target_;
     db::GroupSpec               group_spec_;
     db::GroupResult             groups_;

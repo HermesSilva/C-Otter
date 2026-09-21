@@ -125,7 +125,7 @@ Distribuição dos 275 comandos por área:
 | Inserir/duplicar/excluir linha | ✅ | ✅ 5 de 7 comandos — ver abaixo |
 | Salvar alterações | ✅ | ✅ em transação |
 | Filtro por coluna | ✅ | ✅ no servidor |
-| Visão de registro único | ✅ | ⬜ |
+| Visão de registro único | ✅ | ✅ `Tab`, com nome/valor/tipo e a chave marcada |
 | Agrupamento e subtotais (ADR 0005) | ✅ | ✅ |
 | Linha de totais | ✅ | ✅ |
 | Pivot | ✅ | ✅ local e no servidor |

@@ -102,7 +102,7 @@ Três obstáculos apareceram, nenhum deles visível no build:
 
 | Comando | Tecla | Estado |
 |---|---|:---:|
-| `resultset.toggleMode` | `Tab` | ⬜ grade ↔ registro único |
+| `resultset.toggleMode` | `Tab` | ✅ grade ↔ registro único |
 | `resultset.switchPresentation` | ``Ctrl+` `` | ⬜ |
 | `resultset.grid.togglePreview` | `Ctrl+7` e `F7` | ⬜ painel de valor existe, sem tecla |
 | `resultset.grid.activatePreview` | `Ctrl+Shift+7` | ⬜ |
@@ -111,7 +111,7 @@ Três obstáculos apareceram, nenhum deles visível no build:
 
 ## Cobertura
 
-**5 de 47 comandos têm tecla**, mais a navegação por setas, Home/End e
+**6 de 47 comandos têm tecla**, mais a navegação por setas, Home/End e
 PageUp/PageDown, que o DBeaver trata como comportamento da grade e não como
 comando nomeado.
 

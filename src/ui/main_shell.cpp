@@ -3003,7 +3003,12 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         ImGui::TextColored(col4(p.text_dim), "[null]");
     } else {
         const db::DataKind kind = rs.column(column).info().kind;
-        if (db::is_right_aligned(kind)) {
+
+        // Alinhar numeros a' direita so' faz sentido na GRADE, onde eles
+        // formam uma coluna e a virgula precisa casar. Na visao de registro
+        // cada valor esta' sozinho, e empurra-lo para a direita o afasta do
+        // proprio rotulo -- `limite` ficava a meia tela de "5000.00".
+        if (db::is_right_aligned(kind) && !document.record_mode()) {
             const float width = ImGui::CalcTextSize(
                 value.data(), value.data() + value.size()).x;
             const float available = ImGui::GetContentRegionAvail().x;
@@ -4748,6 +4753,9 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
         }
 
         ImGui::SameLine();
+        draw_record_mode_button(document);
+
+        ImGui::SameLine();
         if (icon_button("##export", Icon::save, TR("Export result..."))) {
             show_export_ = true;
             export_status_.clear();
@@ -4756,6 +4764,9 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
     }
 
     // Sem paginacao: o resultado e' completo, e a contagem e' exata.
+    draw_record_mode_button(document);
+    ImGui::SameLine();
+
     if (icon_button("##export", Icon::save, TR("Export result..."))) {
         show_export_ = true;
         export_status_.clear();
@@ -4869,6 +4880,14 @@ void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs)
         return;   // uma tecla por quadro: navegar e agir juntos surpreenderia
     }
 
+    // Tab alterna grade <-> registro. Vem ANTES do teste de editavel: trocar
+    // de visao nao e' edicao, e um resultado somente leitura -- que e'
+    // justamente o de uma consulta com JOIN -- e' onde a visao de registro
+    // mais ajuda.
+    if (ImGui::Shortcut(ImGuiKey_Tab, kRoute)) {
+        document.set_record_mode(!document.record_mode());
+    }
+
     if (!document.edit_target().editable()) return;
 
     // Acoes. As teclas sao as do DBeaver (docs/GRID-KEYS.md).
@@ -4904,6 +4923,110 @@ void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs)
         std::snprintf(edit_buffer_, sizeof edit_buffer_, "%s",
                       is_null ? "" : std::string(text).c_str());
     }
+}
+
+// Botao que alterna grade <-> registro. Fica na barra do resultado, nao num
+// menu: e' uma troca de VISAO, algo que se faz e desfaz varias vezes lendo um
+// cadastro largo, e um menu por troca seria atrito.
+void MainShell::draw_record_mode_button(SqlDocument& document) {
+    const bool on = document.record_mode();
+    if (icon_button("##recordmode", on ? Icon::table : Icon::record,
+                    on ? TR("Back to the grid (Tab)")
+                       : TR("Single record view (Tab)"))) {
+        document.set_record_mode(!on);
+    }
+}
+
+// Visao de registro unico: os atributos de UMA linha, em pilha.
+//
+// Reusa draw_grid_cell inteira -- edicao, cor condicional, marca de alterado
+// e menu de contexto vem de graca. Uma implementacao propria do desenho da
+// celula seria um segundo lugar para cada uma dessas regras divergir.
+void MainShell::draw_record_view(SqlDocument& document, const db::ResultSet& rs) {
+    const Palette& p = colors();
+
+    if (rs.row_count() == 0) {
+        ImGui::TextColored(col4(p.text_dim), TR("no rows"));
+        return;
+    }
+
+    // A linha mostrada e' a SELECIONADA. Sem selecao, a primeira -- e' o que
+    // o DBeaver faz em changeMode(), e evita uma visao vazia logo ao entrar.
+    std::size_t row = 0;
+    if (has_selection_ && selected_document_ == document.id() &&
+        selected_row_ < rs.row_count()) {
+        row = selected_row_;
+    }
+
+    // Navegacao entre registros. No modo registro as setas verticais andam
+    // entre ATRIBUTOS -- e' a orientacao da tela -- entao trocar de registro
+    // vai nos botoes e nas setas horizontais, como no DBeaver.
+    ImGui::BeginDisabled(row == 0);
+    if (icon_button("##prevrec", Icon::chevron_left, TR("Previous record"))) {
+        selected_document_ = document.id();
+        selected_row_      = row - 1;
+        has_selection_     = true;
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    ImGui::Text(TR("record %zu of %zu"), row + 1, rs.row_count());
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(row + 1 >= rs.row_count());
+    if (icon_button("##nextrec", Icon::chevron_right, TR("Next record"))) {
+        selected_document_ = document.id();
+        selected_row_      = row + 1;
+        has_selection_     = true;
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+
+    constexpr ImGuiTableFlags kFlags =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
+
+    if (!ImGui::BeginTable("##record", 3, kFlags)) return;
+
+    ImGui::TableSetupScrollFreeze(0, 1);
+    // A coluna de valor NAO estica ate' a borda da janela.
+    //
+    // Esticando, um numero alinhado a' direita ficava a meia tela do proprio
+    // rotulo -- ler "limite" e achar o valor exigia atravessar o vazio. 520 px
+    // cabem o texto comum e o usuario pode arrastar quando precisar de mais.
+    ImGui::TableSetupColumn(TR("Column"), ImGuiTableColumnFlags_WidthFixed, 200.0f);
+    ImGui::TableSetupColumn(TR("Value"),  ImGuiTableColumnFlags_WidthFixed, 520.0f);
+    ImGui::TableSetupColumn(TR("Type"),   ImGuiTableColumnFlags_WidthFixed, 140.0f);
+    ImGui::TableHeadersRow();
+
+    for (std::size_t c = 0; c < rs.column_count(); ++c) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        const db::ColumnInfo& info = rs.column(c).info();
+
+        // A chave em destaque: e' o que identifica o registro, e num cadastro
+        // de 40 campos ela se perderia no meio dos outros.
+        //
+        // A fonte e' `key_columns` do alvo de edicao -- indices no ResultSet
+        // --, e nao um campo da coluna: o ColumnInfo nao carrega essa
+        // informacao, e o resultado pode vir de um SELECT que nao a trouxe.
+        const auto& keys = document.edit_target().key_columns;
+        if (std::find(keys.begin(), keys.end(), c) != keys.end()) {
+            icon_inline(Icon::key, p.accent);
+            ImGui::SameLine(0.0f, 4.0f);
+        }
+        ImGui::TextUnformatted(info.name.c_str());
+
+        ImGui::TableSetColumnIndex(1);
+        draw_grid_cell(document, rs, row, c);
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextColored(col4(p.text_dim), "%s", info.type_name.c_str());
+    }
+
+    ImGui::EndTable();
 }
 
 void MainShell::draw_grid_panel() {
@@ -5020,6 +5143,15 @@ void MainShell::draw_grid_panel() {
                        "Narrow the SELECT list to see the remaining ones."),
                     kMaxColumns);
             }
+        }
+
+        // Modo registro: UMA linha por vez, os atributos em pilha. E' o
+        // `toggleMode` do DBeaver, e existe para tabela larga -- com 40
+        // colunas, a grade obriga a rolar na horizontal para ler um cadastro.
+        if (document->record_mode()) {
+            draw_record_view(*document, rs);
+            ImGui::End();
+            return;
         }
 
         if (ImGui::BeginTable("##results", columns, flags)) {
@@ -5674,7 +5806,7 @@ void MainShell::draw_icon_gallery() {
         {Icon::chevron_down, "chevron_down"},
         {Icon::warning, "warning"},       {Icon::error, "error"},
         {Icon::info, "info"},             {Icon::clock, "clock"},
-        {Icon::lock, "lock"},
+        {Icon::lock, "lock"},           {Icon::record, "record"},
         {Icon::filter, "filter"},
     };
 

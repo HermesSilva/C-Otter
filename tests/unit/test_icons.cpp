@@ -88,7 +88,7 @@ constexpr const char* kIconNames[] = {
     "copy",      "chevron_left", "chevron_right",
     "first_page", "last_page", "chevron_down",
     "warning",   "error",
-    "info",      "clock",      "lock",       "filter",
+    "info",      "clock",      "lock",       "record",     "filter",
     "materialized_view", "index", "constraint", "foreign_key",
     "references", "sequence",  "function",  "procedure",  "trigger",
     "data_type", "extension",  "role",      "tablespace", "schema",

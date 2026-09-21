@@ -101,6 +101,8 @@ private:
     void draw_users_folder();
     void draw_editor_panel();
     void handle_grid_keys(SqlDocument& document, const db::ResultSet& rs);
+    void draw_record_mode_button(SqlDocument& document);
+    void draw_record_view(SqlDocument& document, const db::ResultSet& rs);
     void draw_grid_panel();
 
     // Linha acima da grade: contagem, navegacao de paginas e avisos.
