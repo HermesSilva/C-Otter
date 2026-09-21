@@ -1,0 +1,333 @@
+# Guia de elementos — o que funciona e o que não funciona
+
+**Última verificação: 2026-09-21** · build `win-debug`, PostgreSQL 18.2, banco `ERP_TID`
+
+Este é o guia operacional: cada painel, botão, menu e atalho do C-Otter, com o estado
+**verificado na aplicação rodando** — não deduzido do código.
+
+Complementa [`PARITY.md`](PARITY.md), que lista funcionalidades em alto nível contra o
+DBeaver. Aqui a granularidade é o *elemento de interface*.
+
+**Legenda**
+
+| Símbolo | Significado |
+|---------|-------------|
+| ✅ | Funciona — verificado na aplicação |
+| 🟡 | Existe mas incompleto, ou implementado sem estar ligado à UI |
+| ⬜ | Não existe ainda |
+| ❌ | Existe e está quebrado |
+| ➖ | Fora do escopo da v1 |
+
+---
+
+## 1. Janela e estrutura
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Janela principal | ✅ | GLFW + OpenGL 3.3, mesmo código em Windows e Linux |
+| Título com nome do produto | ✅ | `C-Otter - every JOIN is an OTTER JOIN` |
+| Redimensionar / maximizar / minimizar | ✅ | Minimizada, dorme em vez de renderizar |
+| Posicionamento inicial centralizado | ✅ | Respeita a área de trabalho do monitor |
+| Escala por DPI | ✅ | `glfwGetMonitorContentScale` |
+| Tema escuro da lontra | ✅ | Paleta extraída de `Midia/Logo.png` |
+| Tema claro | ⬜ | |
+| Docking de painéis (arrastar abas) | ✅ | |
+| Layout persistido entre execuções | ⬜ | Volta ao padrão a cada início |
+| Ícone da janela | ⬜ | Usa o ícone padrão do sistema |
+| Splash screen | ⬜ | `Midia/Splash.png` existe, não é usado |
+| Múltiplas janelas | ⬜ | |
+
+## 2. Barra de menus
+
+| Menu → Item | Atalho | Estado | Observação |
+|-------------|--------|--------|------------|
+| **Arquivo** → Nova conexão... | `Ctrl+Shift+N` | ✅ | Item e atalho |
+| **Arquivo** → Desconectar | — | ✅ | Desabilitado quando não há conexão |
+| **Arquivo** → Sair | `Alt+F4` | ✅ | |
+| **Arquivo** → Abrir script | `Ctrl+O` | ⬜ | |
+| **Arquivo** → Salvar script | `Ctrl+S` | ⬜ | |
+| **Editar** → Desfazer | `Ctrl+Z` | 🟡 | Item funciona; atalho vem do widget, não do menu |
+| **Editar** → Refazer | `Ctrl+Y` | 🟡 | Idem |
+| **Editar** → Selecionar tudo | `Ctrl+A` | ✅ | |
+| **Editar** → Localizar | `Ctrl+F` | ✅ | Item abre a janela de busca do editor |
+| **SQL** → Executar | `Ctrl+Enter` | ✅ | Item e atalho funcionam |
+| **SQL** → Executar script | `Alt+X` | ⬜ | Splitter pronto em `otter_sql`, não ligado |
+| **SQL** → Formatar | `Ctrl+Shift+F` | ⬜ | |
+| **SQL** → Explicar plano | `Ctrl+Shift+E` | ⬜ | |
+| **Ajuda** → Demo do ImGui | — | ✅ | Ferramenta de desenvolvimento |
+| **Ajuda** → Sobre o C-Otter | — | ✅ | |
+| Contador de FPS / ms | — | ✅ | Canto direito da barra |
+
+## 3. Diálogo de Conexão
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Abre automaticamente ao iniciar | ✅ | |
+| Campo host | ✅ | Pré-preenchido por `PGHOST` |
+| Campo porta | ✅ | `PGPORT`; aceita só dígitos |
+| Campo banco | ✅ | `PGDATABASE` |
+| Campo usuário | ✅ | `PGUSER` |
+| Campo senha (mascarado) | ✅ | `PGPASSWORD` |
+| Botão Conectar | ✅ | Desabilitado durante a conexão |
+| Botão Fechar | ✅ | |
+| Indicador de atividade pulsante | ✅ | |
+| Mensagem de erro detalhada | ✅ | Ex.: `senha incorreta [authentication failed]` |
+| Mensagem de sucesso com contagens | ✅ | `1 schema(s), 32 tabela(s), 34 FK(s)` |
+| Escolher SGBD | ⬜ | Só PostgreSQL |
+| Salvar conexão | ⬜ | **Redigitar a cada execução** |
+| Testar sem conectar | ⬜ | |
+| Aba de opções avançadas (SSL, timeout) | ⬜ | |
+| Lembrar senha em cofre do SO | ⬜ | |
+
+## 4. Painel Raft (conexões)
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Botão "Nova conexão" | ✅ | |
+| Indicador colorido de estado | ✅ | Verde conectado, vermelho falha, amarelo conectando |
+| Nome do banco | ✅ | |
+| Versão do servidor | ✅ | `PostgreSQL 18.2` |
+| Lista de várias conexões | ⬜ | Uma por vez |
+| Menu de contexto | ⬜ | |
+| Pastas de organização | ⬜ | |
+
+## 5. Painel Navigator
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Árvore de schemas | ✅ | Com contagem: `public (32)` |
+| Lista de tabelas | ✅ | |
+| Tamanho da tabela | ✅ | `112 kB` em tom apagado |
+| Views em cor distinta | ✅ | Teal |
+| Expandir tabela → colunas | ✅ | **Carregamento tardio** — só consulta ao expandir |
+| Tipo da coluna | ✅ | Via `format_type`: `character varying(80)` |
+| Marca `PK` | ✅ | |
+| Marca `NOT NULL` | ✅ | |
+| Indicador "carregando..." | ✅ | |
+| Índices, constraints, triggers | ⬜ | |
+| Funções e procedures | ⬜ | |
+| Sequences | ⬜ | |
+| Campo de filtro/busca | ⬜ | |
+| Menu de contexto | ⬜ | Sem "ver dados", "gerar DDL", "renomear" |
+| Duplo clique abre dados | ⬜ | |
+| Arrastar tabela para o editor | ⬜ | |
+| Atualizar (F5) | ⬜ | |
+
+## 6. Editor SQL
+
+### Edição de texto
+
+| Elemento | Atalho | Estado |
+|----------|--------|--------|
+| Realce de sintaxe SQL | — | ✅ |
+| Numeração de linhas | — | ✅ |
+| Destaque da linha atual | — | ✅ |
+| Bracket matching colorido | — | ✅ |
+| Múltiplos cursores | `Alt+clique` | ✅ |
+| Selecionar próxima ocorrência | `Ctrl+D` | ✅ |
+| Desfazer / refazer | `Ctrl+Z` / `Ctrl+Y` | ✅ |
+| Localizar e substituir | `Ctrl+F` | ✅ |
+| Comentar linha | `Ctrl+/` | ✅ |
+| Zoom | `Ctrl+roda` | ✅ |
+| Minimap | — | ✅ |
+| Word wrap | — | 🟡 Suportado pelo widget, sem comando |
+| Code folding | — | 🟡 Idem |
+| Posição do cursor (Ln, Col) | — | ✅ |
+| Contagem de linhas | — | ✅ |
+| Indicador de modificado (`●`) | — | ✅ Compara `GetUndoIndex()` com o ponto salvo |
+
+### Execução
+
+| Elemento | Atalho | Estado | Observação |
+|----------|--------|--------|------------|
+| Botão Executar | `Ctrl+Enter` | ✅ | |
+| Executar só a seleção | `Ctrl+Enter` | ✅ | |
+| Indicador de atividade | — | ✅ | |
+| Botão desabilitado sem conexão | — | ✅ | |
+| Executar script inteiro | `Alt+X` | ⬜ | |
+| Cancelar query | — | 🟡 | `cancel_current_query()` implementado, **sem botão** |
+| Múltiplas abas de editor | — | ⬜ | |
+
+### Autocomplete
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Disparo ao digitar | ✅ | |
+| Disparo manual (`Ctrl+Espaço`) | ✅ | |
+| Sugere tabelas reais do banco | ✅ | |
+| Sugere colunas reais | ✅ | |
+| Keywords do dialeto | ✅ | |
+| Fuzzy por subsequência | ✅ | `cliid` casa `cliente_id` |
+| Destaque do prefixo casado | ✅ | Do próprio widget |
+| Tipo alinhado em coluna | ✅ | Fonte monoespaçada |
+| Marca `PK` na sugestão | ✅ | |
+| Ranking contextual | ✅ | Colunas de tabelas citadas primeiro |
+| Não dispara em comentário/string | ✅ | |
+| **Escopo sintático** | ✅ | Após `FROM` só tabelas; após `SELECT`/`WHERE` colunas e keywords |
+| **Filtro por `alias.`** | ✅ | Após `u.`, só colunas da tabela do alias `u` |
+| Inferência de JOIN por FK | ⬜ | FKs já carregadas, não usadas |
+| Ícone por tipo de objeto | ⬜ | Popup só aceita texto (ADR 0004) |
+| Painel de detalhe lateral | ⬜ | |
+| Sugestão por IA | ⬜ | |
+
+## 7. Painel Resultado (grade)
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Exibição tabular | ✅ | |
+| Cabeçalho com nome da coluna | ✅ | |
+| Cabeçalho fixo ao rolar | ✅ | |
+| Primeira coluna fixa | ✅ | |
+| Virtualização | ✅ | `ImGuiListClipper` — só linhas visíveis |
+| Redimensionar coluna | ✅ | |
+| Reordenar coluna (arrastar) | ✅ | |
+| Números à direita | ✅ | Por `DataKind` |
+| `[null]` distinto de vazio | ✅ | |
+| Contagem de linhas e colunas | ✅ | |
+| **Bytes em memória** | ✅ | Não existe no DBeaver |
+| Rolagem horizontal | ✅ | |
+| Mensagem de comando sem resultado | ✅ | Com linhas afetadas |
+| Ordenar pelo cabeçalho | ⬜ | |
+| Selecionar célula / linha | ⬜ | |
+| Copiar célula | ⬜ | |
+| **Editar célula** | ⬜ | |
+| Inserir / excluir linha | ⬜ | |
+| Salvar alterações | ⬜ | |
+| Filtro por coluna | ⬜ | |
+| Agrupamento e subtotais | ⬜ | ADR 0005 |
+| Linha de totais | ⬜ | ADR 0005 |
+| Pivot | ⬜ | ADR 0005 |
+| Formatação condicional | ⬜ | |
+| Editores de valor (JSON, hex, data) | ⬜ | |
+| Exportar (CSV, JSON, SQL) | ⬜ | |
+| Paginação / carregar mais | ⬜ | Carrega tudo de uma vez |
+| Visão de registro único | ⬜ | |
+| Limite de 64 colunas | ⚠️ | Restrição do ImGui; resultados maiores são truncados |
+
+## 8. Painel Queries (inspetor)
+
+| Elemento | Estado | Observação |
+|----------|--------|------------|
+| Lista de queries da sessão | ✅ | |
+| Tempo de execução | ✅ | Precisão de microssegundo |
+| Contagem de linhas | ✅ | |
+| Estado ok / erro | ✅ | |
+| SQL em uma linha | ✅ | |
+| Tooltip com SQL completo | ✅ | |
+| Mais recentes primeiro | ✅ | |
+| **Queries internas de catálogo** | ✅ | **Melhor que o DBeaver**, que as esconde |
+| Limite de 2000 entradas | ✅ | Descarta as mais antigas |
+| Copiar SQL | ⬜ | |
+| Filtrar por estado | ⬜ | |
+| Reexecutar do histórico | ⬜ | |
+| Persistir entre sessões | ⬜ | |
+
+## 9. Barra de status
+
+| Elemento | Estado |
+|----------|--------|
+| Indicador colorido de conexão | ✅ |
+| Nome do banco | ✅ |
+| Versão do servidor | ✅ |
+| Mensagem de estado / erro | ✅ |
+| Estado da transação | ⬜ |
+| Schema corrente | ⬜ |
+
+## 10. Transações
+
+**Nenhum elemento existe.** É a lacuna mais grave do produto: sem isso, o C-Otter é um
+visualizador, não uma ferramenta de trabalho.
+
+| Elemento | Estado |
+|----------|--------|
+| Alternar autocommit | ⬜ |
+| Commit / Rollback | ⬜ |
+| Savepoints | ⬜ |
+| Indicador de transação aberta | ⬜ |
+| Aviso ao fechar com alterações pendentes | ⬜ |
+
+---
+
+## Defeitos conhecidos
+
+| # | Onde | Problema |
+|---|------|----------|
+| 1 | Grade | Resultados com mais de 64 colunas são truncados **sem aviso** (limite do ImGui) |
+| 2 | Conexão | Não persiste — redigitar host/banco/usuário a cada execução |
+| 3 | Grade | Carrega o resultado inteiro de uma vez; um `SELECT` sem `LIMIT` numa tabela grande trava a UI até terminar |
+| 4 | Editor | O ponto salvo nunca muda porque não há "salvar"; o `●` aparece na primeira edição e fica |
+
+## Pronto no núcleo, ausente na UI
+
+Código implementado **e testado** que ainda não tem ponto de entrada na interface.
+Esta é a lista de maior retorno por esforço: o trabalho difícil já está feito.
+
+| Capacidade | Onde está | Falta |
+|------------|-----------|-------|
+| Separação de script | `sql/script.cpp` | Comando "executar script" (`Alt+X`) |
+| Cancelamento de query | `pgwire/connection.cpp` | Botão durante a execução |
+| Dialetos MySQL/MSSQL/SQLite | `sql/dialect.cpp` | Drivers correspondentes |
+| Foreign keys do schema | `Session::foreign_keys()` | Inferência de JOIN (camada 4) |
+| Comentário de tabela/coluna | `db/catalog.cpp` | Exibir em tooltip |
+| Valor default da coluna | `db/catalog.cpp` | Exibir no Navigator |
+| Mapeamento de SQLSTATE | `pgwire/connection.cpp` | Apontar o erro na posição do editor — o servidor já informa `posição: 15` |
+
+---
+
+---
+
+## Resumo por área
+
+| Área | ✅ | 🟡 | ⬜ | ❌ | Total |
+|------|-----|-----|-----|-----|-------|
+| Janela e estrutura | 7 | 0 | 5 | 0 | 12 |
+| Barra de menus | 8 | 3 | 4 | 0 | 15 |
+| Diálogo de conexão | 10 | 0 | 5 | 0 | 15 |
+| Painel Raft | 4 | 0 | 3 | 0 | 7 |
+| Navigator | 9 | 0 | 8 | 0 | 17 |
+| Editor — texto | 13 | 2 | 0 | 0 | 15 |
+| Editor — execução | 4 | 1 | 2 | 0 | 7 |
+| Editor — autocomplete | 13 | 0 | 3 | 0 | 16 |
+| Grade | 13 | 0 | 14 | 0 | 27 |
+| Inspetor de queries | 9 | 0 | 4 | 0 | 13 |
+| Barra de status | 4 | 0 | 2 | 0 | 6 |
+| Transações | 0 | 0 | 5 | 0 | 5 |
+| **Total** | **94** | **6** | **55** | **0** | **155** |
+
+**Cobertura: ~63% dos elementos** (94 prontos + 6 parciais em 155).
+
+O número difere do de [`PARITY.md`](PARITY.md) (~37%) porque ali a unidade é a
+*funcionalidade* frente ao DBeaver, e aqui é o *elemento de interface* do C-Otter. Uma
+funcionalidade como "editar célula" conta como um item lá e se desdobra em vários aqui.
+
+Ambos os números são reais; medem coisas diferentes. Para saber quanto falta para competir
+com o DBeaver, use `PARITY.md`. Para saber se um botão funciona, use este arquivo.
+
+## Registro visual
+
+| Captura | O que mostra |
+|---------|--------------|
+| `screenshot.png` | Aplicação conectada, com resultado na grade |
+| `query-log.png` | Inspetor de queries, incluindo as de catálogo |
+| `completion-scope.png` | Completion após `FROM` — só tabelas |
+
+## Como verificar
+
+```powershell
+$env:PGPASSWORD="sua-senha"
+$env:PGDATABASE="seu-banco"
+build\win-debug\bin\c-otter.exe
+```
+
+Testes automatizados (80, todos verdes):
+
+```powershell
+build\win-debug\bin\otter_tests.exe
+```
+
+## Manutenção
+
+Este arquivo é verificado **com a aplicação aberta**, não lendo o código. Elemento que muda
+de estado deve ser atualizado no mesmo commit da mudança.
+
+Um guia que afirma que algo funciona quando não funciona é pior que nenhum guia.

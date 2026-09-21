@@ -29,6 +29,16 @@ std::string to_lower(std::string text) {
     return text;
 }
 
+bool iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const auto ca = std::tolower(static_cast<unsigned char>(a[i]));
+        const auto cb = std::tolower(static_cast<unsigned char>(b[i]));
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
 // Casamento por subsequencia: "cliid" casa "cliente_id".
 bool fuzzy_subsequence(std::string_view needle, std::string_view haystack) {
     std::size_t i = 0;
@@ -146,7 +156,8 @@ MainShell::MainShell()
 
 MainShell::~MainShell() = default;
 
-// Gera sugestoes de completion (ADR 0004), agora sobre METADADOS REAIS.
+// Gera sugestoes de completion (ADR 0004), sobre metadados reais e com o
+// escopo sintatico do otter_sql.
 void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     struct Candidate {
         std::string text;
@@ -166,41 +177,105 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
         if (matches(text)) candidates.push_back({std::move(text), rank});
     };
 
-    // Tabelas mencionadas na query atual: suas colunas valem mais.
-    const std::string sql = to_lower(editor_->GetText());
-    auto mentioned = [&sql](std::string_view table) {
-        return sql.find(to_lower(std::string(table))) != std::string::npos;
+    // Camada 2 -- escopo sintatico. Descobre o que faz sentido AQUI: tabelas
+    // depois de FROM, colunas depois de SELECT/WHERE, colunas de UMA tabela
+    // depois de "alias.".
+    const std::string script = editor_->GetText();
+    const TextEditor::DocPos cursor = editor_->GetCurrentCursorPosition();
+
+    // DocPos e' (linha, indice); o analisador trabalha com offset em bytes.
+    std::size_t offset = 0;
+    {
+        std::size_t line = 0;
+        while (line < cursor.line && offset < script.size()) {
+            if (script[offset] == '\n') ++line;
+            ++offset;
+        }
+        offset = std::min(offset + cursor.index, script.size());
+    }
+
+    const sql::ScopeInfo scope =
+        sql::analyze_scope(script, sql::postgres_dialect(), offset);
+
+    const bool want_tables =
+        scope.context == sql::CompletionContext::table_expected ||
+        scope.context == sql::CompletionContext::schema_member ||
+        scope.context == sql::CompletionContext::unknown;
+
+    const bool want_columns =
+        scope.context == sql::CompletionContext::column_expected ||
+        scope.context == sql::CompletionContext::alias_member ||
+        scope.context == sql::CompletionContext::unknown;
+
+    // Tabelas visiveis na query, por nome e por alias.
+    auto in_scope = [&scope](std::string_view table) {
+        return std::any_of(scope.tables.begin(), scope.tables.end(),
+                           [&](const sql::TableRef& ref) {
+                               return iequals(ref.name, table);
+                           });
     };
+
+    // Depois de "alias.", so' interessam as colunas daquela tabela.
+    std::string qualified_table;
+    if (scope.context == sql::CompletionContext::alias_member) {
+        for (const sql::TableRef& ref : scope.tables) {
+            if (iequals(ref.alias, scope.qualifier) ||
+                iequals(ref.name, scope.qualifier)) {
+                qualified_table = ref.name;
+                break;
+            }
+        }
+    }
 
     // Camada 3 -- metadados reais do servidor.
     for (const db::SchemaMeta& schema : session_.schemas()) {
         for (const db::TableMeta& table : schema.tables) {
-            const bool in_query = mentioned(table.name);
+            const bool referenced = in_scope(table.name);
 
-            for (const db::ColumnMeta& column : table.columns) {
-                // Rank 0: coluna de tabela ja' citada na query. Rank 2: demais.
-                int rank = in_query ? 0 : 2;
-                if (column.primary_key) rank -= 1;   // chaves sobem
-                add(column.name + pad_to(column.name, 30) + column.type_name +
-                        (column.primary_key ? "  PK" : ""),
-                    rank);
+            if (want_columns) {
+                // Filtra por tabela quando o cursor esta' apos "alias.".
+                const bool skip = !qualified_table.empty() &&
+                                  !iequals(qualified_table, table.name);
+                if (!skip) {
+                    for (const db::ColumnMeta& column : table.columns) {
+                        // Rank 0: coluna de tabela presente na query.
+                        int rank = referenced ? 0 : 2;
+                        if (column.primary_key) rank -= 1;   // chaves sobem
+                        add(column.name + pad_to(column.name, 30) +
+                                column.type_name +
+                                (column.primary_key ? "  PK" : ""),
+                            rank);
+                    }
+                }
             }
 
-            const char* label = table.kind == db::ObjKind::view ? "view" : "tabela";
-            add(table.name + pad_to(table.name, 30) + label, in_query ? 1 : 3);
+            if (want_tables && qualified_table.empty()) {
+                const char* label =
+                    table.kind == db::ObjKind::view ? "view" : "tabela";
+                add(table.name + pad_to(table.name, 30) + label,
+                    referenced ? 1 : 3);
+            }
         }
     }
 
-    // Camada 1 -- keywords do dialeto, por ultimo: sao as mais previsiveis.
-    static const char* const kKeywords[] = {
-        "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING",
-        "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "ON",
-        "INSERT INTO", "UPDATE", "DELETE FROM", "VALUES", "SET",
-        "COUNT", "SUM", "AVG", "MIN", "MAX", "DISTINCT", "AS",
-        "LIMIT", "OFFSET", "CASE", "WHEN", "THEN", "ELSE", "END",
-        "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "BEGIN", "COMMIT", "ROLLBACK",
-    };
-    for (const char* keyword : kKeywords) add(keyword, 5);
+    // Camada 1 -- keywords, por ultimo: sao as mais previsiveis. Suprimidas
+    // quando o contexto pede um nome de objeto, onde so' atrapalhariam.
+    const bool want_keywords =
+        scope.context == sql::CompletionContext::unknown ||
+        scope.context == sql::CompletionContext::column_expected;
+
+    if (want_keywords) {
+        static const char* const kKeywords[] = {
+            "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING",
+            "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "ON",
+            "INSERT INTO", "UPDATE", "DELETE FROM", "VALUES", "SET",
+            "COUNT", "SUM", "AVG", "MIN", "MAX", "DISTINCT", "AS",
+            "LIMIT", "OFFSET", "CASE", "WHEN", "THEN", "ELSE", "END",
+            "CREATE TABLE", "ALTER TABLE", "DROP TABLE",
+            "BEGIN", "COMMIT", "ROLLBACK",
+        };
+        for (const char* keyword : kKeywords) add(keyword, 5);
+    }
 
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const Candidate& a, const Candidate& b) {
@@ -232,9 +307,13 @@ void MainShell::draw() {
         if (auto fresh = session_.take_result()) result_ = std::move(fresh);
     }
 
-    // Atalhos globais.
+    // Atalhos globais. Registrados aqui, e nao so' rotulados no menu: um
+    // atalho anunciado que nao funciona e' pior que nenhum.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Enter)) {
         execute_current_sql();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
+        show_connect_ = true;
     }
 
     draw_menu_bar();
@@ -328,7 +407,10 @@ void MainShell::draw_menu_bar() {
             editor_->Redo();
         }
         ImGui::Separator();
-        ImGui::MenuItem("Localizar", "Ctrl+F");
+        if (ImGui::MenuItem("Selecionar tudo", "Ctrl+A")) editor_->SelectAll();
+        if (ImGui::MenuItem("Localizar", "Ctrl+F")) {
+            editor_->OpenFindReplaceWindow();
+        }
         ImGui::EndMenu();
     }
 
@@ -470,9 +552,13 @@ void MainShell::draw_editor_panel() {
 
         ImGui::SameLine();
         const TextEditor::DocPos cursor = editor_->GetCurrentCursorPosition();
-        ImGui::TextColored(col4(palette::text_dim), "  Ln %zu, Col %zu  |  %zu linhas",
+        const bool modified = editor_->GetUndoIndex() != save_point_;
+
+        ImGui::TextColored(col4(palette::text_dim),
+                           "  Ln %zu, Col %zu  |  %zu linhas%s",
                            cursor.line + 1, cursor.index + 1,
-                           editor_->GetLineCount());
+                           editor_->GetLineCount(),
+                           modified ? "  ●" : "");
 
         if (session_.busy()) {
             ImGui::SameLine();

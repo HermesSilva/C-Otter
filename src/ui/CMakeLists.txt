@@ -14,6 +14,7 @@ otter_add_library(otter_ui
     DEPS
         otter::otter_base
         otter::otter_db
+        otter::otter_sql
         imgui
         texteditor
 )

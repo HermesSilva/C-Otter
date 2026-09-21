@@ -10,6 +10,7 @@
 
 #include "db/holt.hpp"
 #include "db/result_set.hpp"
+#include "sql/script.hpp"
 #include "ui/session.hpp"
 
 #include <cstddef>
@@ -61,7 +62,10 @@ private:
     char user_[64]      = "postgres";
     char password_[128] = "";
 
-    std::size_t save_point_ = 0;   // indice de undo do ultimo save
+    // Indice de undo correspondente ao ultimo estado salvo. Comparar com
+    // GetUndoIndex() diz se ha' alteracoes pendentes -- e cobre o caso de
+    // desfazer de volta ao ponto salvo, em que o texto deixa de estar sujo.
+    std::size_t save_point_ = 0;
 
     bool layout_initialized_ = false;
     bool wants_quit_         = false;

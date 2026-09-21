@@ -90,7 +90,8 @@ Distribuição dos 275 comandos por área:
 | Autocomplete (`Ctrl+Espaço`) | ✅ | ✅ |
 | Completion sobre metadados reais | ✅ | ✅ |
 | Ranking contextual de sugestões | ✅ | ✅ |
-| Análise de escopo (FROM → tabelas) | ✅ | 🟡 pronto em `otter_sql`, não ligado à UI |
+| Análise de escopo (FROM → tabelas) | ✅ | ✅ |
+| Filtro de colunas por `alias.` | ✅ | ✅ |
 | Minimap | ➖ | ✅ |
 | Executar script inteiro (`Alt+X`) | ✅ | ⬜ |
 | Múltiplas abas de editor | ✅ | ⬜ |
@@ -166,13 +167,16 @@ Office/Excel, e ~45 dos 50 SGBDs. Ver `docs/PLAN.md` §1.
 |------|---------------|-----|-----|-----|
 | Conexão | 14 | 5 | 0 | 8 |
 | Navigator | 14 | 5 | 0 | 9 |
-| Editor SQL | 24 | 12 | 3 | 9 |
+| Editor SQL | 25 | 15 | 1 | 9 |
 | Grade | 21 | 6 | 0 | 14 |
 | Transações | 5 | 0 | 0 | 5 |
 | Diagnóstico | 8 | 4 | 1 | 3 |
-| **Total (sem os itens ➖)** | **86** | **32** | **4** | **48** |
+| **Total (sem os itens ➖)** | **87** | **35** | **2** | **48** |
 
-**Cobertura atual: ~37% dos itens de escopo da v1** (32 de 86, contando parciais como meio).
+**Cobertura atual: ~41% dos itens de escopo da v1** (35 de 87, contando parciais como meio).
+
+Para o inventário elemento a elemento — cada botão, menu e atalho, com estado verificado na
+aplicação rodando — ver [`ELEMENTS.md`](ELEMENTS.md).
 
 Contra os **275 comandos** do DBeaver, o C-Otter implementa hoje cerca de **20**. A diferença
 entre 37% e 7% é que este inventário lista *funcionalidades*, não *comandos* — um comando do
@@ -181,10 +185,12 @@ DBeaver como "copiar célula como Markdown" é uma variação de outro, e o inve
 ## Próximos passos, por impacto
 
 1. **Grade editável + transações** (19 itens) — é o que separa visualizador de ferramenta
-2. **Ligar `analyze_scope` à UI** (1 item, já implementado e testado) — completion com escopo
-3. **Ordenação e filtro na grade** (2 itens) — alto uso, custo baixo
-4. **Múltiplas abas e abrir/salvar arquivo** (3 itens) — fluxo básico de trabalho
-5. **Persistir conexões + cofre de credenciais** (3 itens) — hoje se redigita a cada execução
+2. **Ordenação e filtro na grade** (2 itens) — alto uso, custo baixo
+3. **Múltiplas abas e abrir/salvar arquivo** (3 itens) — fluxo básico de trabalho
+4. **Persistir conexões + cofre de credenciais** (3 itens) — hoje se redigita a cada execução
+5. **Paginação da grade** — hoje um `SELECT` sem `LIMIT` carrega tudo de uma vez
+
+~~Ligar `analyze_scope` à UI~~ — **concluído em 2026-09-21**.
 
 ## Manutenção deste arquivo
 
