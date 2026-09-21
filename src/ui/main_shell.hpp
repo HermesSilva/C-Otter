@@ -102,6 +102,10 @@ private:
 
     void execute_current_sql();
 
+    // Executa o texto inteiro como script: varios comandos separados por ';'
+    // (ou DELIMITER, ou $$...$$), um apos o outro.
+    void execute_script();
+
     // Executa uma pagina da consulta guardada no documento (ADR 0011).
     void execute_page(SqlDocument& document, std::size_t page);
 

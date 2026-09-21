@@ -42,6 +42,25 @@ public:
     // Executa a query em background; o resultado aparece em last_result().
     void execute_async(std::string sql);
 
+    // Executa varios comandos em sequencia, parando no primeiro erro.
+    //
+    // Parar e' o padrao certo para script de migracao: continuar depois de um
+    // CREATE TABLE que falhou executaria os INSERTs seguintes contra uma
+    // tabela que nao existe, multiplicando o estrago.
+    //
+    // O resultado exposto e' o do ULTIMO comando que produziu linhas -- e' o
+    // que o usuario quer ver depois de um script que termina num SELECT.
+    void execute_script_async(std::vector<std::string> statements,
+                              bool stop_on_error = true);
+
+    // Quantos comandos do script ja' rodaram, para a barra de progresso.
+    [[nodiscard]] std::size_t script_progress() const noexcept {
+        return script_done_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] std::size_t script_total() const noexcept {
+        return script_total_.load(std::memory_order_acquire);
+    }
+
     void disconnect();
 
     [[nodiscard]] SessionState state() const noexcept {
@@ -123,6 +142,11 @@ private:
 
     std::atomic<SessionState> state_{SessionState::disconnected};
     std::atomic<bool>         busy_{false};
+
+    // Progresso do script. Atomicos porque a UI le' a cada quadro enquanto o
+    // worker escreve; um mutex aqui seria contencao por nada.
+    std::atomic<std::size_t>  script_done_{0};
+    std::atomic<std::size_t>  script_total_{0};
 
     std::string status_message_;
     std::string database_name_;

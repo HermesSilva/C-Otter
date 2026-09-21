@@ -444,6 +444,47 @@ void MainShell::execute_current_sql() {
     execute_page(*document, 0);
 }
 
+void MainShell::execute_script() {
+    if (session().state() != SessionState::connected || session().busy()) return;
+
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    const std::string text = document->editor().GetText();
+    if (text.empty()) return;
+
+    // O splitter respeita strings, comentarios, $$ ... $$ e blocos BEGIN/END.
+    // Um split por ';' quebraria em qualquer funcao armazenada.
+    const std::vector<sql::Statement> found =
+        sql::split_script(text, sql::postgres_dialect());
+
+    std::vector<std::string> statements;
+    statements.reserve(found.size());
+    for (const sql::Statement& statement : found) {
+        if (!statement.empty()) statements.emplace_back(statement.text);
+    }
+
+    if (statements.empty()) return;
+
+    // Um comando so': usa o caminho normal, que pagina o resultado. Paginar
+    // nao faz sentido para script -- o que interessa e' o efeito de cada
+    // comando, nao navegar pelas linhas do ultimo.
+    if (statements.size() == 1) {
+        execute_current_sql();
+        return;
+    }
+
+    executing_document_id_ = document->id();
+    document->set_executing(true);
+    document->set_status({});
+
+    // Script nao e' paginado: os botoes de pagina somem, e a contagem exibida
+    // passa a ser a do resultado inteiro do ultimo SELECT.
+    document->reset_paging();
+
+    session().execute_script_async(std::move(statements));
+}
+
 void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     if (session().state() != SessionState::connected || session().busy()) return;
     if (document.paged_sql().empty()) return;
@@ -515,6 +556,9 @@ void MainShell::draw() {
     // atalho anunciado que nao funciona e' pior que nenhum.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Enter)) {
         execute_current_sql();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Alt | ImGuiKey_X)) {
+        execute_script();
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
         connection_dialog_.open_new();
@@ -677,6 +721,9 @@ void MainShell::draw_menu_bar() {
                              !session().busy();
         if (ImGui::MenuItem(TR("Execute"), "Ctrl+Enter", false, can_run)) {
             execute_current_sql();
+        }
+        if (ImGui::MenuItem(TR("Execute script"), "Alt+X", false, can_run)) {
+            execute_script();
         }
         ImGui::Separator();
 
@@ -2322,8 +2369,18 @@ void MainShell::draw_status_bar() {
                                session().server_version().c_str());
             ImGui::SameLine();
         }
-        ImGui::TextColored(col4(colors().text_dim), "%s",
-                           session().status_message().c_str());
+        // Progresso do script no lugar da mensagem: num script de 40 comandos,
+        // "executando..." parado seria indistinguivel de travado.
+        const std::size_t total = session().script_total();
+        if (total > 0) {
+            const std::size_t done = session().script_progress();
+            ImGui::TextColored(col4(colors().warn),
+                               TR("running statement %zu of %zu"), done + 1,
+                               total);
+        } else {
+            ImGui::TextColored(col4(colors().text_dim), "%s",
+                               session().status_message().c_str());
+        }
     }
     ImGui::End();
 

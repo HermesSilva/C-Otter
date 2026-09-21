@@ -58,7 +58,7 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **Editar** → Selecionar tudo | `Ctrl+A` | ✅ | |
 | **Editar** → Localizar | `Ctrl+F` | ✅ | Item abre a janela de busca do editor |
 | **SQL** → Executar | `Ctrl+Enter` | ✅ | Item e atalho funcionam |
-| **SQL** → Executar script | `Alt+X` | ⬜ | Splitter pronto em `otter_sql`, não ligado |
+| **SQL** → Executar script | `Alt+X` | ✅ | Item e atalho; para no primeiro erro |
 | **SQL** → Formatar | `Ctrl+Shift+F` | ⬜ | |
 | **SQL** → Explicar plano | `Ctrl+Shift+E` | ⬜ | |
 | **Ajuda** → Demo do ImGui | — | ✅ | Ferramenta de desenvolvimento |
@@ -219,7 +219,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Executar só a seleção | `Ctrl+Enter` | ✅ | |
 | Indicador de atividade | — | ✅ | |
 | Botão desabilitado sem conexão | — | ✅ | |
-| Executar script inteiro | `Alt+X` | ⬜ | |
+| Executar script inteiro | `Alt+X` | ✅ | Para no primeiro erro, dizendo **qual** comando falhou |
+| Progresso do script | — | ✅ | `executando comando 12 de 40` na barra de status |
+| Resultado do último SELECT | — | ✅ | Não do último comando: um script que termina em `COMMIT` deixaria a grade vazia |
 | Cancelar query | — | 🟡 | `cancel_current_query()` implementado, **sem botão** |
 
 ### Abas de editor
@@ -374,7 +376,7 @@ Esta é a lista de maior retorno por esforço: o trabalho difícil já está fei
 
 | Capacidade | Onde está | Falta |
 |------------|-----------|-------|
-| Separação de script | `sql/script.cpp` | Comando "executar script" (`Alt+X`) |
+
 | Cancelamento de query | `pgwire/connection.cpp` | Botão durante a execução |
 | Dialetos MySQL/MSSQL/SQLite | `sql/dialect.cpp` | Drivers correspondentes |
 | Foreign keys do schema | `Session::foreign_keys()` | Inferência de JOIN (camada 4) |

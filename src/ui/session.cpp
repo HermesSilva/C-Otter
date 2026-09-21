@@ -129,6 +129,80 @@ void Session::execute_async(std::string sql) {
     });
 }
 
+void Session::execute_script_async(std::vector<std::string> statements,
+                                   bool stop_on_error) {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+    if (statements.empty()) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+
+    script_done_.store(0, std::memory_order_release);
+    script_total_.store(statements.size(), std::memory_order_release);
+
+    worker_ = std::thread([this, statements = std::move(statements),
+                           stop_on_error] {
+        db::Holt* holt = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt = holt_.get();
+        }
+        if (holt == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        std::optional<db::ResultSet> last_result;
+        std::size_t executed = 0;
+        std::size_t failed   = 0;
+        std::size_t affected = 0;
+        std::string first_error;
+
+        for (const std::string& sql : statements) {
+            auto result = holt->query(sql);
+            ++executed;
+            script_done_.store(executed, std::memory_order_release);
+
+            if (!result) {
+                ++failed;
+                if (first_error.empty()) {
+                    // A mensagem guardada e' a do PRIMEIRO erro, com o numero
+                    // do comando: num script de 40 linhas, "syntax error"
+                    // sozinho nao diz onde procurar.
+                    first_error = TRF("statement %zu failed: %s", executed,
+                                      result.error().to_string().c_str());
+                }
+                if (stop_on_error) break;
+                continue;
+            }
+
+            // Guarda o ultimo que produziu LINHAS. Um script que termina em
+            // COMMIT deixaria a grade vazia se guardassemos o ultimo de todos.
+            if (result->column_count() > 0) {
+                last_result = std::move(*result);
+            } else if (result->affected_rows() > 0) {
+                affected += static_cast<std::size_t>(result->affected_rows());
+            }
+        }
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (last_result) result_ = std::move(*last_result);
+
+        if (failed > 0) {
+            status_message_ = first_error;
+        } else if (affected > 0) {
+            status_message_ = TRF("%zu statement(s), %zu row(s) affected",
+                                  executed, affected);
+        } else {
+            status_message_ = TRF("%zu statement(s) executed", executed);
+        }
+
+        script_total_.store(0, std::memory_order_release);
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
 db::SchemaMeta* Session::find_schema(std::string_view schema) {
     for (db::SchemaMeta& s : schemas_) {
         if (s.name == schema) return &s;
