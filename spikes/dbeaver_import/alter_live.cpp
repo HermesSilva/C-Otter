@@ -375,6 +375,75 @@ int main() {
         check(rs.has_value() && rs->text(0, 0) == "1", "chave primaria intacta");
     }
 
+    std::printf("\nview com OR REPLACE\n");
+    {
+        const otter::db::AlterScript script = otter::db::generate_create_view(
+            "otter_test", "v_probe", "SELECT id, nome FROM otter_test.alter_probe");
+        if (!apply(script)) return 1;
+
+        auto rs = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.VIEWS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='v_probe'");
+        check(rs.has_value() && rs->text(0, 0) == "1", "view criada");
+
+        // OR REPLACE precisa funcionar sobre uma view que JA' existe -- e' o
+        // ponto todo de usa-lo em vez de DROP + CREATE.
+        const otter::db::AlterScript again = otter::db::generate_create_view(
+            "otter_test", "v_probe", "SELECT id FROM otter_test.alter_probe");
+        check(apply(again), "OR REPLACE sobre view existente");
+
+        auto columns = (*holt)->query(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            " WHERE TABLE_SCHEMA='otter_test' AND TABLE_NAME='v_probe'");
+        check(columns.has_value() && columns->text(0, 0) == "1",
+              "a definicao foi SUBSTITUIDA (1 coluna, nao 2)");
+
+        (void)(*holt)->execute("DROP VIEW otter_test.v_probe");
+    }
+
+    std::printf("\ntrigger com USE antes\n");
+    {
+        // O CREATE TRIGGER do MySQL NAO aceita nome qualificado. Sem o USE, a
+        // trigger nasceria no banco errado -- ou o comando falharia, conforme
+        // o banco corrente da conexao.
+        (void)(*holt)->execute("DROP TRIGGER IF EXISTS otter_test.trg_probe");
+
+        otter::db::NewTrigger trigger;
+        trigger.name   = "trg_probe";
+        trigger.table  = "alter_probe";
+        trigger.timing = "BEFORE";
+        trigger.event  = "INSERT";
+        trigger.body   = "SET NEW.nome = UPPER(NEW.nome)";
+
+        const otter::db::AlterScript script =
+            otter::db::generate_create_trigger("otter_test", trigger);
+
+        check(script.statements.size() == 2, "dois comandos (USE + CREATE)");
+        if (!apply(script)) return 1;
+
+        auto rs = (*holt)->query(
+            "SELECT ACTION_TIMING, EVENT_MANIPULATION "
+            "  FROM information_schema.TRIGGERS "
+            " WHERE TRIGGER_SCHEMA='otter_test' AND TRIGGER_NAME='trg_probe'");
+        check(rs.has_value() && rs->row_count() == 1,
+              "trigger criada NO BANCO CERTO");
+        check(rs.has_value() && rs->row_count() == 1 &&
+                  rs->text(0, 0) == "BEFORE",
+              "momento correto");
+
+        // E ela DISPARA: inserir em minusculas precisa sair em maiusculas.
+        if (run("INSERT INTO otter_test.alter_probe (nome) VALUES ('zz')")) {
+            auto value = (*holt)->query(
+                "SELECT nome FROM otter_test.alter_probe "
+                " WHERE nome IN ('zz','ZZ')");
+            check(value.has_value() && value->row_count() == 1 &&
+                      value->text(0, 0) == "ZZ",
+                  "a trigger DISPARA de verdade");
+        }
+
+        (void)(*holt)->execute("DROP TRIGGER otter_test.trg_probe");
+    }
+
     (void)(*holt)->execute("DROP TABLE otter_test.alter_probe");
 
     std::printf("\n%s\n", failures == 0 ? "tudo passou" : "HOUVE FALHAS");

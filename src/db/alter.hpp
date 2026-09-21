@@ -195,4 +195,44 @@ struct NewForeignKey {
                                                     std::string_view table,
                                                     std::string_view name);
 
+// --- View, sequence e trigger ----------------------------------------------------
+
+// CREATE OR REPLACE VIEW.
+//
+// `or_replace` usa a forma que preserva as permissões concedidas sobre a view
+// -- `DROP` + `CREATE` as perderia em silêncio, e o usuário só descobriria
+// quando alguém reclamasse de acesso negado.
+[[nodiscard]] AlterScript generate_create_view(std::string_view schema,
+                                               std::string_view name,
+                                               std::string_view definition,
+                                               bool or_replace = true);
+
+struct NewSequence {
+    std::string  name;
+    std::int64_t start = 1;
+    std::int64_t increment = 1;
+    std::int64_t minimum = 0;
+    std::int64_t maximum = 0;     // 0 = sem limite explícito
+    bool         cycle = false;
+};
+
+[[nodiscard]] AlterScript generate_create_sequence(std::string_view schema,
+                                                   const NewSequence& sequence);
+
+struct NewTrigger {
+    std::string name;
+    std::string table;
+    std::string timing;      // BEFORE, AFTER
+    std::string event;       // INSERT, UPDATE, DELETE
+    std::string body;        // o corpo, sem o BEGIN/END quando for uma linha
+};
+
+// CREATE TRIGGER.
+//
+// No MySQL o comando NÃO aceita nome qualificado: é preciso `USE <banco>`
+// antes. O script gerado traz o `USE` como primeiro comando, e por isso
+// devolve dois em vez de um.
+[[nodiscard]] AlterScript generate_create_trigger(std::string_view schema,
+                                                  const NewTrigger& trigger);
+
 } // namespace otter::db

@@ -18,10 +18,10 @@ operações: `create`, `modify`, `rename`, `delete`.
 | Índice | ✅ | ✅ | ✅ criar e remover |
 | Constraint (PK, UNIQUE, CHECK) | ✅ | ✅ | ✅ criar e remover |
 | Foreign key | ✅ | ✅ | ✅ criar e remover |
-| View | ✅ | ✅ | ⬜ |
+| View | ✅ | ✅ | ✅ `CREATE OR REPLACE` |
 | Materialized view | ✅ | ➖ | ⬜ |
-| Sequence | ✅ | ✅ MariaDB | ⬜ |
-| Trigger | ✅ | ✅ | ⬜ |
+| Sequence | ✅ | ✅ MariaDB | ✅ |
+| Trigger | ✅ | ✅ | ✅ gerador, sem tela |
 | Procedure / function | ✅ | ✅ | ⬜ |
 | Schema / database | ✅ | ✅ | ⬜ |
 | Tipo de dado | ✅ | ➖ | ⬜ |
@@ -121,11 +121,14 @@ Perderia dados. Parece óbvio, mas é um atalho tentador quando o SGBD não tem
 | **Constraint: PK, UNIQUE, CHECK** | ✅ |
 | **Chave estrangeira: criar e remover** | ✅ |
 | Índice de constraint é RECUSADO | ✅ o MySQL aceitaria e perderia a chave |
-| View, sequence, trigger, procedure | ⬜ |
+| **View** (`CREATE OR REPLACE`, que preserva permissões) | ✅ |
+| **Sequence** | ✅ |
+| **Trigger** (com o `USE` que o MySQL exige) | ✅ gerador |
+| Procedure e function | ⬜ |
 
 Verificado contra **MySQL 8.0.46 real** em 2026-09-21:
 
-- `spikes/alter_live` — 28 verificações, 0 falhas. Prova o que o teste
+- `spikes/alter_live` — 37 verificações, 0 falhas. Prova o que o teste
   unitário **não** prova: que a coluna continua auto-incrementando depois do
   `MODIFY`, que o comentário sobreviveu à mudança de nulidade, que o `DEFAULT`
   sobreviveu ao rename, que a coluna foi para a posição pedida, e — o mais
@@ -158,9 +161,22 @@ E a armadilha: remover o índice de uma chave primária ou única. O PostgreSQL
 isso a recusa é nossa, antes de chegar ao servidor — e é testada contra ele,
 provando que a chave sobrevive.
 
+### Duas diferenças que só o servidor revelou
+
+`CREATE TRIGGER` do MySQL **não aceita nome qualificado**: é preciso
+`USE <banco>` antes. Por isso o script tem dois comandos. Sem o `USE`, a
+trigger nasceria no banco errado — ou o comando falharia, conforme o banco
+corrente da conexão.
+
+A view guarda o corpo **como escrito**. Um `FROM` sem banco depende do banco
+corrente, e a conexão do C-Otter não tem um por padrão: o MySQL recusa com
+"No database selected", mensagem que não aponta para a causa. O gerador avisa
+quando a consulta não tem nome qualificado.
+
 ## 5. O que falta
 
 1. Tela de `CREATE TABLE` (o gerador já existe) — ⬜
-2. View, sequence, trigger, procedure — ⬜
-3. Schema/database — ⬜
-4. `ALTER` de índice: renomear, trocar método — ⬜
+2. Telas de view, sequence e trigger (os geradores já existem) — ⬜
+3. Procedure e function — ⬜
+4. Schema/database — ⬜
+5. `ALTER` de índice: renomear, trocar método — ⬜

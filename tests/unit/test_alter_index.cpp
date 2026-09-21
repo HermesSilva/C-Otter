@@ -359,3 +359,168 @@ OTTER_TEST(foreign_key_can_point_to_another_schema) {
     OTTER_CHECK(has(first(generate_add_foreign_key("otter_test", "pedido", key)),
                     "REFERENCES outro.cliente"));
 }
+
+// --- View, sequence e trigger ------------------------------------------------------
+
+OTTER_TEST(view_uses_or_replace_to_keep_permissions) {
+    // DROP + CREATE perderia as permissões concedidas sobre a view, em
+    // silêncio -- e o usuário só descobriria quando alguém reclamasse de
+    // acesso negado, dias depois.
+    const DialectGuard guard(QuoteStyle::double_quotes);
+
+    const AlterScript script = generate_create_view(
+        "otter_test", "cliente_ativo",
+        "SELECT * FROM otter_test.cliente WHERE ativo");
+
+    OTTER_CHECK(script.ok());
+    OTTER_CHECK(has(first(script), "CREATE OR REPLACE VIEW"));
+    OTTER_CHECK(script.warnings.empty());
+
+    // Sem OR REPLACE, o aviso diz o que vai acontecer.
+    const AlterScript plain = generate_create_view(
+        "s", "v", "SELECT 1", /*or_replace=*/false);
+    OTTER_CHECK(!has(first(plain), "OR REPLACE"));
+    OTTER_CHECK(!plain.warnings.empty());
+}
+
+OTTER_TEST(view_drops_the_trailing_semicolon_of_the_query) {
+    // A consulta do usuário quase sempre termina em ';'. Dentro de
+    // "CREATE VIEW ... AS <query>;" o ';' fica no meio do comando quando a UI
+    // acrescenta o dela.
+    const DialectGuard guard(QuoteStyle::double_quotes);
+
+    const AlterScript script =
+        generate_create_view("s", "v", "SELECT 1 FROM t;");
+    OTTER_CHECK(!has(first(script), ";"));
+}
+
+OTTER_TEST(view_refuses_without_a_query) {
+    OTTER_CHECK(!generate_create_view("s", "v", "").ok());
+    OTTER_CHECK(!generate_create_view("s", "", "SELECT 1").ok());
+}
+
+OTTER_TEST(sequence_refuses_a_zero_increment) {
+    // Incremento zero é aceito pela sintaxe e gera uma sequence que devolve
+    // sempre o mesmo número. O servidor recusa, mas com uma mensagem que não
+    // diz o que fazer.
+    NewSequence sequence;
+    sequence.name      = "seq";
+    sequence.increment = 0;
+
+    const AlterScript script = generate_create_sequence("s", sequence);
+    OTTER_CHECK(!script.ok());
+    OTTER_CHECK(has(script.error, "increment"));
+}
+
+OTTER_TEST(sequence_warns_that_mysql_has_none) {
+    // No MySQL o equivalente é AUTO_INCREMENT, que é propriedade da COLUNA.
+    // CREATE SEQUENCE ali dá erro de sintaxe -- e o aviso diz o que usar.
+    NewSequence sequence;
+    sequence.name = "seq";
+
+    {
+        const DialectGuard guard(QuoteStyle::backticks);
+        const AlterScript script = generate_create_sequence("s", sequence);
+        OTTER_CHECK(script.ok());
+        OTTER_CHECK(!script.warnings.empty());
+    }
+    {
+        const DialectGuard guard(QuoteStyle::double_quotes);
+        OTTER_CHECK(generate_create_sequence("s", sequence).warnings.empty());
+    }
+}
+
+OTTER_TEST(sequence_says_no_cycle_explicitly) {
+    // NO CYCLE é o padrão nos dois SGBDs, mas dizer torna o DDL legível sem
+    // consultar o manual.
+    const DialectGuard guard(QuoteStyle::double_quotes);
+
+    NewSequence sequence;
+    sequence.name  = "seq";
+    sequence.start = 100;
+
+    const std::string sql = first(generate_create_sequence("s", sequence));
+    OTTER_CHECK(has(sql, "START WITH 100"));
+    OTTER_CHECK(has(sql, "NO CYCLE"));
+
+    // Com CYCLE vem um aviso: a sequence pode repetir um valor já devolvido.
+    sequence.cycle = true;
+    const AlterScript cycling = generate_create_sequence("s", sequence);
+    OTTER_CHECK(has(first(cycling), "CYCLE"));
+    OTTER_CHECK(!has(first(cycling), "NO CYCLE"));
+    OTTER_CHECK(!cycling.warnings.empty());
+}
+
+OTTER_TEST(trigger_mysql_needs_a_use_statement_first) {
+    // O CREATE TRIGGER do MySQL NÃO aceita nome qualificado: é preciso
+    // `USE <banco>` antes. Sem ele, a trigger nasceria no banco errado -- ou
+    // o comando falharia, conforme o banco corrente.
+    const DialectGuard guard(QuoteStyle::backticks);
+
+    NewTrigger trigger;
+    trigger.name   = "trg_antes";
+    trigger.table  = "pedido";
+    trigger.timing = "BEFORE";
+    trigger.event  = "INSERT";
+    trigger.body   = "SET NEW.criado = NOW()";
+
+    const AlterScript script = generate_create_trigger("otter_test", trigger);
+    OTTER_CHECK(script.ok());
+    OTTER_CHECK_EQ(script.statements.size(), std::size_t{2});
+    OTTER_CHECK(has(script.statements[0], "USE otter_test"));
+    OTTER_CHECK(has(script.statements[1], "CREATE TRIGGER trg_antes BEFORE INSERT"));
+
+    // E o nome da tabela vai SEM o banco, porque o USE já o definiu.
+    OTTER_CHECK(!has(script.statements[1], "otter_test.pedido"));
+}
+
+OTTER_TEST(trigger_postgres_calls_a_function) {
+    // No PostgreSQL a trigger chama uma FUNÇÃO que precisa existir antes -- o
+    // corpo é o nome dela, não código. Dizer isso evita que o usuário cole um
+    // bloco PL/pgSQL que o servidor recusa.
+    const DialectGuard guard(QuoteStyle::double_quotes);
+
+    NewTrigger trigger;
+    trigger.name   = "trg_antes";
+    trigger.table  = "pedido";
+    trigger.timing = "BEFORE";
+    trigger.event  = "INSERT";
+    trigger.body   = "fn_preenche()";
+
+    const AlterScript script = generate_create_trigger("otter_test", trigger);
+    OTTER_CHECK(script.ok());
+    OTTER_CHECK_EQ(script.statements.size(), std::size_t{1});   // sem USE
+    OTTER_CHECK(has(first(script), "EXECUTE FUNCTION fn_preenche()"));
+    OTTER_CHECK(has(first(script), "ON otter_test.pedido"));
+    OTTER_CHECK(!script.warnings.empty());
+}
+
+OTTER_TEST(trigger_refuses_an_incomplete_spec) {
+    NewTrigger trigger;
+    trigger.name = "t";
+    OTTER_CHECK(!generate_create_trigger("s", trigger).ok());
+
+    trigger.table = "x";
+    OTTER_CHECK(!generate_create_trigger("s", trigger).ok());   // sem corpo
+
+    trigger.body = "SELECT 1";
+    OTTER_CHECK(!generate_create_trigger("s", trigger).ok());   // sem timing
+}
+
+OTTER_TEST(view_warns_about_an_unqualified_query) {
+    // A view guarda o corpo COMO ESCRITO. Um FROM sem banco depende do banco
+    // corrente da conexão, e a nossa não tem um por padrão -- o MySQL recusa
+    // com "No database selected", que não aponta para a causa.
+    //
+    // Encontrado ao rodar o spike contra o servidor real.
+    const DialectGuard guard(QuoteStyle::double_quotes);
+
+    const AlterScript unqualified =
+        generate_create_view("s", "v", "SELECT * FROM cliente");
+    OTTER_CHECK(unqualified.ok());
+    OTTER_CHECK(!unqualified.warnings.empty());
+
+    const AlterScript qualified =
+        generate_create_view("s", "v", "SELECT * FROM otter_test.cliente");
+    OTTER_CHECK(qualified.warnings.empty());
+}

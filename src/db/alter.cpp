@@ -650,5 +650,154 @@ AlterScript generate_drop_foreign_key(std::string_view schema,
     script.destructive.push_back(0);
     return script;
 }
+// --- View, sequence e trigger ------------------------------------------------------
+
+AlterScript generate_create_view(std::string_view schema, std::string_view name,
+                                 std::string_view definition, bool or_replace) {
+    AlterScript script;
+
+    if (name.empty()) {
+        script.error = "view name is required";
+        return script;
+    }
+    if (definition.empty()) {
+        script.error = "a view needs a query";
+        return script;
+    }
+
+    // CREATE OR REPLACE preserva as PERMISSOES concedidas sobre a view. Fazer
+    // DROP + CREATE as perderia em silencio, e o usuario so' descobriria
+    // quando alguem reclamasse de acesso negado -- dias depois.
+    std::string statement = or_replace ? "CREATE OR REPLACE VIEW "
+                                       : "CREATE VIEW ";
+    statement += qualified_name(schema, name) + " AS\n" +
+                 std::string(strip_trailing_semicolon(definition));
+
+    script.statements.push_back(std::move(statement));
+
+    if (!or_replace) {
+        script.warnings.push_back(
+            "without OR REPLACE this fails when the view already exists");
+    }
+
+    // A view guarda o corpo COMO ESCRITO. Uma tabela sem banco no FROM
+    // depende do banco corrente da conexão -- e a nossa não tem um por
+    // padrão, o que faz o MySQL recusar com "No database selected", uma
+    // mensagem que não aponta para a causa.
+    if (definition.find('.') == std::string_view::npos) {
+        script.warnings.push_back(
+            "the query has no qualified table name; it depends on the current "
+            "database and may fail");
+    }
+    return script;
+}
+
+AlterScript generate_create_sequence(std::string_view schema,
+                                     const NewSequence& sequence) {
+    AlterScript script;
+
+    if (sequence.name.empty()) {
+        script.error = "sequence name is required";
+        return script;
+    }
+    if (sequence.increment == 0) {
+        // Incremento zero e' aceito pela sintaxe e gera uma sequence que
+        // devolve sempre o mesmo numero. O servidor recusa, mas com uma
+        // mensagem que nao diz o que fazer.
+        script.error = "the increment cannot be zero";
+        return script;
+    }
+
+    // Sequence so' existe no PostgreSQL e no MariaDB 10.3+. No MySQL o
+    // equivalente e' AUTO_INCREMENT, que e' propriedade da COLUNA -- oferecer
+    // CREATE SEQUENCE ali daria erro de sintaxe.
+    if (is_mysql()) {
+        script.warnings.push_back(
+            "MySQL has no sequences; use AUTO_INCREMENT on the column. This "
+            "only works on MariaDB 10.3 and later");
+    }
+
+    std::string statement = "CREATE SEQUENCE " +
+                            qualified_name(schema, sequence.name);
+
+    statement += "\n  START WITH " + std::to_string(sequence.start);
+    statement += "\n  INCREMENT BY " + std::to_string(sequence.increment);
+
+    if (sequence.minimum != 0) {
+        statement += "\n  MINVALUE " + std::to_string(sequence.minimum);
+    }
+    if (sequence.maximum != 0) {
+        statement += "\n  MAXVALUE " + std::to_string(sequence.maximum);
+    }
+
+    // NO CYCLE explicito: e' o padrao nos dois SGBDs, mas dizer torna o DDL
+    // legivel sem consultar o manual.
+    statement += sequence.cycle ? "\n  CYCLE" : "\n  NO CYCLE";
+
+    if (sequence.cycle) {
+        script.warnings.push_back(
+            "with CYCLE the sequence restarts after the maximum, and can "
+            "return a value it already returned");
+    }
+
+    script.statements.push_back(std::move(statement));
+    return script;
+}
+
+AlterScript generate_create_trigger(std::string_view schema,
+                                    const NewTrigger& trigger) {
+    AlterScript script;
+
+    if (trigger.name.empty() || trigger.table.empty()) {
+        script.error = "a trigger needs a name and a table";
+        return script;
+    }
+    if (trigger.body.empty()) {
+        script.error = "a trigger needs a body";
+        return script;
+    }
+    if (trigger.timing.empty() || trigger.event.empty()) {
+        script.error = "a trigger needs a timing (BEFORE/AFTER) and an event";
+        return script;
+    }
+
+    if (is_mysql()) {
+        // O CREATE TRIGGER do MySQL NAO aceita nome qualificado: e' preciso
+        // `USE <banco>` antes. Por isso o script tem dois comandos.
+        if (!schema.empty()) {
+            script.statements.push_back("USE " + quote_if_needed(schema));
+        }
+
+        script.statements.push_back(
+            "CREATE TRIGGER " + quote_if_needed(trigger.name) + " " +
+            trigger.timing + " " + trigger.event + " ON " +
+            quote_if_needed(trigger.table) + " FOR EACH ROW\n" +
+            std::string(strip_trailing_semicolon(trigger.body)));
+
+        // O MySQL permite UMA trigger por combinacao (momento, evento,
+        // tabela) ate' a versao 5.7. Do 8.0 em diante aceita varias, mas a
+        // ordem entre elas precisa ser declarada com FOLLOWS/PRECEDES.
+        script.warnings.push_back(
+            "MySQL before 8.0 allows only one trigger per timing and event "
+            "on the same table");
+        return script;
+    }
+
+    // PostgreSQL: a trigger chama uma FUNCAO, que precisa existir antes. O
+    // corpo aqui e' o nome da funcao, nao codigo -- e dizer isso evita que o
+    // usuario cole um bloco PL/pgSQL que o servidor recusa.
+    script.statements.push_back(
+        "CREATE TRIGGER " + quote_if_needed(trigger.name) + " " +
+        trigger.timing + " " + trigger.event + " ON " +
+        qualified_name(schema, trigger.table) +
+        "\n  FOR EACH ROW EXECUTE FUNCTION " +
+        std::string(strip_trailing_semicolon(trigger.body)));
+
+    script.warnings.push_back(
+        "in PostgreSQL the trigger calls a FUNCTION that must already exist; "
+        "the body here is the function name, not code");
+
+    return script;
+}
 
 } // namespace otter::db
