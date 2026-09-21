@@ -646,6 +646,107 @@ const char* const kPtBr[] = {
     "query failed",               "falha na query",
     "cancelled",                  "cancelado",
     "timed out",                  "tempo esgotado",
+
+    // --- Arvore de paginas do dialogo de conexao (docs/DIALOG-PARITY.md) ---
+    //
+    // Rotulos das categorias: sao os do DBeaver, e a traducao segue a do
+    // DBeaver em pt-BR -- quem usa as duas ferramentas ve a mesma palavra.
+    "Connection settings",        "Configurações de conexão",
+    "Internal parameters",        "Parâmetros internos",
+    "Metadata",                   "Metadados",
+    "Errors and timeouts",        "Erros e tempos limite",
+    "Data Transfer",              "Transferência de dados",
+    "Data Editor",                "Editor de dados",
+    "Binary Editor",              "Editor binário",
+    "Data Formats",               "Formatos de dados",
+    "Grid",                       "Grade",
+    "SQL Editor",                 "Editor SQL",
+    "Code Completion",            "Completar código",
+    "Code Editor",                "Editor de código",
+    "Formatting",                 "Formatação",
+    "SQL Processing",             "Processamento SQL",
+
+    // Rodape, na ordem do DBeaver.
+    "Test Connection ...",        "Testar conexão ...",
+    "OK",                         "OK",
+
+    // Paginas que a arvore lista mas o C-Otter ainda nao implementou.
+    "Not implemented yet.",       "Ainda não implementado.",
+    "The DBeaver dialog has this page. It is listed here so the structure "
+    "matches; the options are not available in this version.",
+        "O diálogo do DBeaver tem esta página. Ela aparece aqui para a "
+        "estrutura corresponder; as opções não existem nesta versão.",
+    "Error handling and query timeouts",
+        "Tratamento de erros e tempo limite de consulta",
+    "Import and export defaults for this connection",
+        "Padrões de importação e exportação desta conexão",
+    "Data editor defaults for this connection",
+        "Padrões do editor de dados desta conexão",
+    "Grid appearance for this connection",
+        "Aparência da grade desta conexão",
+    "Binary and BLOB display format",
+        "Formato de exibição de binários e BLOB",
+    "Number, date and time formats",
+        "Formatos de número, data e hora",
+    "SQL editor defaults for this connection",
+        "Padrões do editor SQL desta conexão",
+    "Code completion behaviour for this connection",
+        "Comportamento do completar código desta conexão",
+    "Code editor behaviour for this connection",
+        "Comportamento do editor de código desta conexão",
+    "SQL formatting style for this connection",
+        "Estilo de formatação SQL desta conexão",
+    "Statement delimiters and execution options",
+        "Delimitadores de comando e opções de execução",
+    "Metadata reading options for this driver",
+        "Opções de leitura de metadados deste driver",
+
+    // --- Modelos de autenticacao (estavam como literais em portugues) ---
+    "Database Native",            "Banco de dados nativo",
+    "No Authentication",          "Sem autenticação",
+
+    // --- Ajuda dos campos do dialogo de conexao ---
+    "Lists every database on the server, not only the connected one.",
+        "Lista todos os bancos do servidor, não apenas o conectado.",
+    "Includes template0 and template1.",
+        "Inclui template0 e template1.",
+    "Includes databases the user has no permission to connect to.",
+        "Inclui bancos aos quais o usuário não tem permissão de conectar.",
+    "Computes the on-disk size of tables and indexes. On very large "
+    "databases it makes expanding the tree slower.",
+        "Calcula o tamanho em disco de tabelas e índices. Em bancos muito "
+        "grandes, torna a expansão da árvore mais lenta.",
+    "Loads the columns of each key along with the key. Useful for "
+    "JOIN inference; costs one extra query.",
+        "Carrega as colunas de cada chave junto com a chave. Útil para "
+        "inferência de JOIN; custa uma consulta a mais.",
+    "Runs SET ROLE when opening the connection.",
+        "Executa SET ROLE ao abrir a conexão.",
+    "Not implemented - the settings are saved, but the tunnel is "
+    "not established.",
+        "Não implementado — a configuração é salva, mas o túnel não é "
+        "estabelecido.",
+    "When off, every change needs an explicit commit. Production "
+    "connections start with auto-commit off.",
+        "Desligado, cada alteração exige commit explícito. Conexões de "
+        "produção começam com auto-commit desligado.",
+    "Run in order, right after the connection is established.",
+        "Executadas na ordem, logo após a conexão ser estabelecida.",
+    "Groups the connection in the tree. Use / for subfolders.",
+        "Agrupa a conexão na árvore. Use / para subpastas.",
+    "auto-commit: %s | confirm execute: %s | confirm data change: %s",
+        "auto-commit: %s | confirmar execução: %s | "
+        "confirmar alteração de dados: %s",
+    "on",                         "ligado",
+    "off",                        "desligado",
+    "yes",                        "sim",
+    "no",                         "não",
+    "Blocks INSERT, UPDATE, DELETE and DDL on the client.",
+        "Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.",
+    "Sets search_path when connecting.",
+        "Define o search_path ao conectar.",
+    "Isolation level is not available in this version.",
+        "O nível de isolamento não existe nesta versão.",
 };
 
 } // namespace

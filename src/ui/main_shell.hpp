@@ -50,7 +50,9 @@ private:
     void draw_toolbar();
     void draw_dockspace();
     void draw_raft_panel();
-    void draw_saved_profiles();
+    // Devolve quantas linhas desenhou: o painel precisa do total para saber
+    // se mostra "nenhuma conexao".
+    std::size_t draw_saved_profiles();
 
     // Nome do SGBD para exibicao, a partir do driver_id do perfil.
     static std::string dbms_name(const std::string& driver_id);

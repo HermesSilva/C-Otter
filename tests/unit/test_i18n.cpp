@@ -144,6 +144,42 @@ OTTER_TEST(i18n_pt_br_has_no_duplicate_keys) {
     }
 }
 
+OTTER_TEST(i18n_pt_br_keys_are_english) {
+    // A CHAVE e' o texto em ingles; so' a traducao leva acento. Uma chave
+    // acentuada significa que alguem escreveu TR("Conexão") no codigo de UI:
+    // a UI em ingles passaria a mostrar portugues, porque sem entrada no
+    // catalogo o TR() devolve a propria chave.
+    //
+    // Foi o que aconteceu com o combo de autenticacao do dialogo de conexao,
+    // que era um array de literais em portugues fora do TR() -- dizia "Banco
+    // de dados nativo" mesmo com a interface em ingles.
+    //
+    // Ha' excecoes legitimas: strings de formato compartilhadas e nomes
+    // proprios iguais nos dois idiomas. Nenhuma delas leva acento, entao o
+    // criterio e' o acento, nao a lingua.
+    const std::span<const char* const> entries = i18n::pt_br_entries();
+
+    for (std::size_t i = 0; i + 1 < entries.size(); i += 2) {
+        const std::string key(entries[i]);
+
+        // UTF-8: todo byte de caractere acentuado tem o bit alto ligado.
+        // ASCII puro e' o que se espera de uma chave em ingles.
+        bool has_high_byte = false;
+        for (const unsigned char c : key) {
+            if (c > 0x7F) {
+                has_high_byte = true;
+                break;
+            }
+        }
+
+        if (has_high_byte) {
+            std::printf("    chave com acento (deveria ser ingles): \"%s\"\n",
+                        key.c_str());
+        }
+        OTTER_CHECK(!has_high_byte);
+    }
+}
+
 OTTER_TEST(i18n_builtin_pt_br_is_registered) {
     // Verifica que o catalogo pt-BR sobrevive ao /OPT:REF do linker: com
     // registro por objeto global, a unidade de traducao inteira era

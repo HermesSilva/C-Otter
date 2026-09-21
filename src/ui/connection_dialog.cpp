@@ -149,7 +149,9 @@ void ConnectionDialog::draw(const Feedback& feedback) {
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(760, 560), ImGuiCond_Appearing);
+    // Maior que as 760x560 das abas: a arvore come' 230px de largura, e as
+    // paginas passaram a ter conteudo proprio em vez de dividir uma aba.
+    ImGui::SetNextWindowSize(ImVec2(940, 620), ImGuiCond_Appearing);
 
     const char* title = editing_ ? TR("Edit connection###ConnDialog")
                                  : TR("New connection###ConnDialog");
@@ -294,53 +296,27 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     ImGui::EndChild();
     ImGui::PopStyleColor();
 
-    if (ImGui::BeginTabBar("##conntabs", ImGuiTabBarFlags_None)) {
-        if (ImGui::BeginTabItem(TR("Main"))) {
-            draw_tab_main();
-            ImGui::EndTabItem();
-        }
-        // A aba do SGBD so' aparece para o driver a que ela pertence.
-        //
-        // Era um literal fixo "PostgreSQL", e numa conexao MySQL mentia duas
-        // vezes: o rotulo dizia PostgreSQL, e o conteudo oferecia template0 e
-        // template1 -- bancos que o MySQL nao tem. Quem editasse um perfil
-        // MySQL via a aba PostgreSQL e concluia, com razao, que o dialogo
-        // estava confuso sobre qual banco estava configurando.
-        if (profile_.driver_id == "postgresql") {
-            if (ImGui::BeginTabItem("PostgreSQL")) {
-                draw_tab_postgres();
-                ImGui::EndTabItem();
-            }
-        }
-        if (ImGui::BeginTabItem("Driver")) {
-            draw_tab_driver_properties();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem(TR("SSH"))) {
-            draw_tab_ssh();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem(TR("SSL"))) {
-            draw_tab_ssl();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem(TR("Proxy"))) {
-            draw_tab_proxy();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem(TR("Initialization"))) {
-            draw_tab_initialization();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem(TR("General"))) {
-            draw_tab_general();
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
-    }
+    // Arvore a' esquerda, pagina a' direita -- a estrutura do DBeaver.
+    //
+    // A altura reserva o rodape; o painel da esquerda tem largura fixa, como
+    // la', para o conteudo nao dancar ao trocar de pagina.
+    const float footer = 72.0f;
+    const float body = ImGui::GetContentRegionAvail().y - footer;
+
+    // 230px: "Configurações de conexão" cabe inteiro. Com 190 o rotulo
+    // truncava para "Configurações de conexã" -- e um rotulo cortado e'
+    // justamente o que impede reconhecer a pagina que se procura.
+    ImGui::BeginChild("##pagetree", ImVec2(230.0f, body), ImGuiChildFlags_Borders);
+    draw_page_tree();
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    ImGui::BeginChild("##pagebody", ImVec2(0, body), ImGuiChildFlags_Borders);
+    draw_page_body();
+    ImGui::EndChild();
 
     // Rodapé fixo com as ações.
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 72.0f);
     ImGui::Separator();
 
     if (!editing_) {
@@ -352,12 +328,18 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
 
     // "Testar" conecta e DEIXA o dialogo aberto: o ponto e' ver o resultado
     // no rodape e continuar ajustando os campos.
-    if (ImGui::Button(TR("Test connection"), ImVec2(130, 0)) && on_test_) {
+    //
+    // Fica a' ESQUERDA, e OK/Close a' direita, como no DBeaver: quem procura
+    // o botao de confirmar olha para o canto inferior direito.
+    if (ImGui::Button(TR("Test Connection ..."), ImVec2(150, 0)) && on_test_) {
         on_test_(profile_);
     }
-    ImGui::SameLine();
 
-    if (ImGui::Button(editing_ ? TR("Save") : TR("Finish"), ImVec2(100, 0))) {
+    // Empurra OK/Close para a direita. Dois botoes de 100 + o espacamento.
+    const float pair = 100.0f * 2 + ImGui::GetStyle().ItemSpacing.x;
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - pair);
+
+    if (ImGui::Button(editing_ ? TR("OK") : TR("Finish"), ImVec2(100, 0))) {
         // Apenas UM dos dois: on_save_ e on_connect_ gravam o perfil em
         // disco, e chamar os dois abriria a conexao duas vezes alem de
         // gravar duas.
@@ -377,7 +359,7 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (ImGui::Button(TR("Cancel"), ImVec2(100, 0))) visible_ = false;
+    if (ImGui::Button(TR("Close"), ImVec2(100, 0))) visible_ = false;
 
     if (feedback.busy) {
         ImGui::SameLine();
@@ -394,9 +376,122 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     }
 }
 
-void ConnectionDialog::draw_tab_main() {
-    ImGui::BeginChild("##main", ImVec2(0, -80));
+// A arvore de paginas, na ordem e no aninhamento de
+// EditConnectionWizard.addPages() -- ver docs/DIALOG-PARITY.md.
+//
+// Declarar a hierarquia numa tabela, em vez de espalha-la em chamadas de
+// TreeNode, deixa a comparacao com o DBeaver ser uma leitura linha a linha.
+// Os rotulos sao os oficiais (UIConnectionMessages.properties e os
+// bundle.properties), nao traducoes livres: quem vem de la' procura por
+// estas palavras.
+void ConnectionDialog::draw_page_tree() {
+    using Page = ConnectionDialog::Page;
 
+    // `selectable == false` marca a categoria que apenas agrupa. No DBeaver
+    // "Data Editor" e "SQL Editor" ABREM pagina, entao sao selecionaveis; e'
+    // o comportamento herdado aqui.
+    static const PageNode kNodes[] = {
+        {Page::connection_settings, "Connection settings",  0, true},
+        {Page::initialization,      "Initialization",       1, true},
+        {Page::transactions,        "Transactions",         1, true},
+        {Page::driver_properties,   "Internal parameters",  1, true},
+        {Page::general,             "General",              0, true},
+        {Page::metadata,            "Metadata",             0, true},
+        {Page::errors_timeouts,     "Errors and timeouts",  0, true},
+        {Page::data_transfer,       "Data Transfer",        0, true},
+        {Page::data_editor,         "Data Editor",          0, true},
+        {Page::binary_editor,       "Binary Editor",        1, true},
+        {Page::data_formats,        "Data Formats",         1, true},
+        {Page::data_editor_grid,    "Grid",                 1, true},
+        {Page::sql_editor,          "SQL Editor",           0, true},
+        {Page::sql_code_editor,     "Code Editor",          1, true},
+        {Page::sql_completion,      "Code Completion",      1, true},
+        {Page::sql_formatting,      "Formatting",           1, true},
+        {Page::sql_processing,      "SQL Processing",       1, true},
+    };
+
+    for (const PageNode& node : kNodes) {
+        // O recuo faz o papel do aninhamento. Um TreeNode de verdade
+        // permitiria colapsar, mas o DBeaver abre as categorias por padrao e
+        // colapsa-las esconderia justamente o que se quer comparar.
+        if (node.depth > 0) ImGui::Indent(16.0f * node.depth);
+
+        const bool selected = node.selectable && page_ == node.page;
+        if (ImGui::Selectable(TR(node.label), selected) && node.selectable) {
+            page_ = node.page;
+        }
+
+        if (node.depth > 0) ImGui::Unindent(16.0f * node.depth);
+    }
+}
+
+void ConnectionDialog::draw_page_body() {
+    using Page = ConnectionDialog::Page;
+
+    switch (page_) {
+    case Page::connection_settings: draw_page_connection_settings(); break;
+    case Page::initialization:      draw_page_initialization();      break;
+    case Page::transactions:        draw_page_transactions();        break;
+    case Page::driver_properties:   draw_page_driver_properties();   break;
+    case Page::general:             draw_page_general();             break;
+    case Page::metadata:            draw_page_metadata();            break;
+
+    // Abaixo, o que o DBeaver oferece e o C-Otter ainda nao. Cada uma diz o
+    // que falta, em vez de mostrar uma pagina vazia que parece defeito.
+    case Page::errors_timeouts:
+        draw_page_placeholder("Error handling and query timeouts");
+        break;
+    case Page::data_transfer:
+        draw_page_placeholder("Import and export defaults for this connection");
+        break;
+    case Page::data_editor:
+        draw_page_placeholder("Data editor defaults for this connection");
+        break;
+    case Page::data_editor_grid:
+        draw_page_placeholder("Grid appearance for this connection");
+        break;
+    case Page::binary_editor:
+        draw_page_placeholder("Binary and BLOB display format");
+        break;
+    case Page::data_formats:
+        draw_page_placeholder("Number, date and time formats");
+        break;
+    case Page::sql_editor:
+        draw_page_placeholder("SQL editor defaults for this connection");
+        break;
+    case Page::sql_completion:
+        draw_page_placeholder("Code completion behaviour for this connection");
+        break;
+    case Page::sql_code_editor:
+        draw_page_placeholder("Code editor behaviour for this connection");
+        break;
+    case Page::sql_formatting:
+        draw_page_placeholder("SQL formatting style for this connection");
+        break;
+    case Page::sql_processing:
+        draw_page_placeholder("Statement delimiters and execution options");
+        break;
+    }
+}
+
+// A pagina existe na arvore porque o DBeaver a tem, mas o C-Otter ainda nao
+// implementou o que vai dentro. Dizer isso e' a diretriz 6: um campo que
+// parece funcionar e nao funciona e' pior que um campo ausente -- e uma
+// pagina em branco parece defeito.
+void ConnectionDialog::draw_page_placeholder(const char* what) {
+    ImGui::TextColored(col4(colors().warn), "%s", TR("Not implemented yet."));
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(col4(colors().text_dim), "%s", TR(what));
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("The DBeaver dialog has this page. It is listed here so "
+                          "the structure matches; the options are not available "
+                          "in this version."));
+    ImGui::PopTextWrapPos();
+}
+
+void ConnectionDialog::draw_page_connection_settings() {
     ImGui::TextColored(col4(colors().data), TR("Server"));
     ImGui::Separator();
 
@@ -414,9 +509,12 @@ void ConnectionDialog::draw_tab_main() {
     ImGui::TextColored(col4(colors().data), TR("Authentication"));
     ImGui::Separator();
 
-    static constexpr const char* kAuthModels[] = {
-        "Banco de dados nativo", "Sem autenticação", "Ident / Peer",
-        "Kerberos", "AWS IAM",
+    // Passam por TR() na montagem, nao no literal: um array `constexpr` de
+    // literais em portugues nao traduz, e era o que acontecia aqui -- o
+    // combo dizia "Banco de dados nativo" mesmo com a UI em ingles.
+    const char* kAuthModels[] = {
+        TR("Database Native"), TR("No Authentication"), TR("Ident / Peer"),
+        TR("Kerberos"), TR("AWS IAM"),
     };
     int auth = static_cast<int>(profile_.auth_model);
     ImGui::SetNextItemWidth(220);
@@ -457,26 +555,51 @@ void ConnectionDialog::draw_tab_main() {
     }
     ImGui::EndDisabled();
 
-    ImGui::EndChild();
+    // Rede, nas abas de baixo -- e' onde o DBeaver as poe.
+    //
+    // Eram abas de primeiro nivel, irmas de "Principal". No DBeaver SSH, SSL
+    // e Proxy pertencem a' pagina do driver (ConnectionPageSettings), nao a'
+    // raiz: quem procura SSL procura DENTRO das configuracoes de conexao.
+    ImGui::Spacing();
+    if (ImGui::BeginTabBar("##network", ImGuiTabBarFlags_None)) {
+        if (ImGui::BeginTabItem(TR("SSH"))) {
+            draw_tab_ssh();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(TR("SSL"))) {
+            draw_tab_ssl();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(TR("Proxy"))) {
+            draw_tab_proxy();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
 }
 
-void ConnectionDialog::draw_tab_postgres() {
-    ImGui::BeginChild("##pg", ImVec2(0, -80));
+// "Metadata" no DBeaver: as opcoes de leitura do catalogo. Aqui elas sao as
+// do SGBD conectado -- so' PostgreSQL tem pagina propria por enquanto.
+void ConnectionDialog::draw_page_metadata() {
+    if (profile_.driver_id != "postgresql") {
+        draw_page_placeholder("Metadata reading options for this driver");
+        return;
+    }
 
     ImGui::TextColored(col4(colors().data), TR("Navigator settings"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Show all databases"),
                     &profile_.postgres.show_non_default_databases);
-    help_marker("Lista todos os bancos do servidor, não apenas o conectado.");
+    help_marker(TR("Lists every database on the server, not only the connected one."));
 
     ImGui::Checkbox(TR("Show template databases"),
                     &profile_.postgres.show_template_databases);
-    help_marker("Inclui template0 e template1.");
+    help_marker(TR("Includes template0 and template1."));
 
     ImGui::Checkbox(TR("Show inaccessible databases"),
                     &profile_.postgres.show_unavailable_databases);
-    help_marker("Inclui bancos aos quais o usuário não tem permissão de conectar.");
+    help_marker(TR("Includes databases the user has no permission to connect to."));
 
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), TR("Performance"));
@@ -484,8 +607,8 @@ void ConnectionDialog::draw_tab_postgres() {
 
     ImGui::Checkbox(TR("Read size statistics"),
                     &profile_.postgres.show_database_statistics);
-    help_marker("Calcula o tamanho em disco de tabelas e índices. Em bancos "
-                "muito grandes, torna a expansão da árvore mais lenta.");
+    help_marker(TR("Computes the on-disk size of tables and indexes. On very large "
+                   "databases it makes expanding the tree slower."));
 
     ImGui::Checkbox(TR("Read all data types"),
                     &profile_.postgres.read_all_data_types);
@@ -494,8 +617,8 @@ void ConnectionDialog::draw_tab_postgres() {
 
     ImGui::Checkbox(TR("Read key columns"),
                     &profile_.postgres.read_keys_with_columns);
-    help_marker("Carrega as colunas de cada chave junto com a chave. Útil "
-                "para inferência de JOIN; custa uma consulta a mais.");
+    help_marker(TR("Loads the columns of each key along with the key. Useful for "
+                   "JOIN inference; costs one extra query."));
 
     ImGui::Checkbox(TR("Use prepared statements"),
                     &profile_.postgres.use_prepared_statements);
@@ -506,18 +629,15 @@ void ConnectionDialog::draw_tab_postgres() {
 
     ImGui::SetNextItemWidth(260);
     input_string(TR("Session role"), profile_.postgres.session_role, 64);
-    help_marker("Executa SET ROLE ao abrir a conexão.");
+    help_marker(TR("Runs SET ROLE when opening the connection."));
 
     ImGui::Checkbox(TR("Replace legacy timezone"),
                     &profile_.postgres.replace_legacy_timezone);
     help_marker("Converte timestamptz do formato antigo para o atual.");
 
-    ImGui::EndChild();
 }
 
-void ConnectionDialog::draw_tab_driver_properties() {
-    ImGui::BeginChild("##driverprops", ImVec2(0, -80));
-
+void ConnectionDialog::draw_page_driver_properties() {
     ImGui::TextColored(col4(colors().data), TR("Driver properties"));
     ImGui::TextColored(col4(colors().text_dim),
                        TR("Parameters passed directly to the driver on connect."));
@@ -568,16 +688,20 @@ void ConnectionDialog::draw_tab_driver_properties() {
         property_value_[0] = '\0';
     }
 
-    ImGui::EndChild();
 }
 
 void ConnectionDialog::draw_tab_ssh() {
-    ImGui::BeginChild("##ssh", ImVec2(0, -80));
+    ImGui::BeginChild("##ssh", ImVec2(0, 0));
 
     ImGui::Checkbox(TR("Use SSH tunnel"), &profile_.ssh.enabled);
+
+    // Com quebra: o aviso e' mais largo que o painel e sem isto some' a
+    // metade dele, justamente a que diz que o tunel nao e' estabelecido.
+    ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(col4(colors().warn),
-                       "Não implementado — a configuração é salva, mas o túnel "
-                       "não é estabelecido.");
+                       TR("Not implemented - the settings are saved, but the tunnel is "
+                          "not established."));
+    ImGui::PopTextWrapPos();
     ImGui::Separator();
 
     ImGui::BeginDisabled(!profile_.ssh.enabled);
@@ -626,7 +750,7 @@ void ConnectionDialog::draw_tab_ssh() {
 }
 
 void ConnectionDialog::draw_tab_ssl() {
-    ImGui::BeginChild("##ssl", ImVec2(0, -80));
+    ImGui::BeginChild("##ssl", ImVec2(0, 0));
 
     // O binario do Linux ainda nao tem TLS (tls_openssl.cpp e' um esboco).
     // Deixar a caixa clicavel la' seria oferecer algo que falha so' na hora
@@ -655,7 +779,7 @@ void ConnectionDialog::draw_tab_ssl() {
         profile_.ssl.mode = static_cast<db::SslMode>(mode);
     }
     help_marker("require exige criptografia; verify-ca valida o certificado do "
-                "servidor; verify-full valida também o nome do host.");
+                "server; verify-full also validates the host name.");
 
     // allow e prefer significam "tenta cifrar, aceita em claro": protegem
     // contra um escuta passivo e contra mais ninguem. Existem para nao perder
@@ -679,16 +803,18 @@ void ConnectionDialog::draw_tab_ssl() {
     // Estes tres campos sao gravados e lidos -- um perfil importado do
     // DBeaver nao os perde -- mas o aperto de mao ainda nao os usa: a
     // validacao vai pela cadeia de certificados do sistema.
+    ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(col4(colors().warn),
                        TR("Certificate files are saved but not used yet; "
                           "validation uses the system certificate store."));
+    ImGui::PopTextWrapPos();
 
     ImGui::EndDisabled();
     ImGui::EndChild();
 }
 
 void ConnectionDialog::draw_tab_proxy() {
-    ImGui::BeginChild("##proxy", ImVec2(0, -80));
+    ImGui::BeginChild("##proxy", ImVec2(0, 0));
 
     ImGui::Checkbox(TR("Use SOCKS proxy"), &profile_.proxy.enabled);
     ImGui::TextColored(col4(colors().warn), TR("Not implemented."));
@@ -712,29 +838,37 @@ void ConnectionDialog::draw_tab_proxy() {
     ImGui::EndChild();
 }
 
-void ConnectionDialog::draw_tab_initialization() {
-    ImGui::BeginChild("##init", ImVec2(0, -80));
-
+// No DBeaver, Transactions e' pagina propria (PrefPageTransactions), irma de
+// Initialization dentro de "Connection settings" -- nao uma secao dela.
+void ConnectionDialog::draw_page_transactions() {
     ImGui::TextColored(col4(colors().data), TR("Transactions"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Auto-commit"), &profile_.auto_commit);
-    help_marker("Desligado, cada alteração exige commit explícito. "
-                "Conexões de produção começam com auto-commit desligado.");
+    help_marker(TR("When off, every change needs an explicit commit. Production "
+                   "connections start with auto-commit off."));
 
     ImGui::Checkbox(TR("Read-only connection"), &profile_.read_only);
-    help_marker("Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.");
+    help_marker(TR("Blocks INSERT, UPDATE, DELETE and DDL on the client."));
 
+    // O DBeaver tem aqui o nivel de isolamento, lido da conexao viva. O
+    // C-Otter ainda nao o consulta, entao a opcao nao existe em vez de
+    // aparecer com um valor inventado (diretriz 6).
     ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("Isolation level is not available in this version."));
+}
+
+void ConnectionDialog::draw_page_initialization() {
     ImGui::TextColored(col4(colors().data), TR("Session"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
     input_string(TR("Default schema"), profile_.default_schema, 64);
-    help_marker("Define o search_path ao conectar.");
+    help_marker(TR("Sets search_path when connecting."));
 
     ImGui::Text(TR("Initialization queries"));
-    help_marker("Executadas na ordem, logo após a conexão ser estabelecida.");
+    help_marker(TR("Run in order, right after the connection is established."));
 
     std::vector<char> buffer(
         std::max<std::size_t>(2048, profile_.bootstrap_queries.size() + 1), '\0');
@@ -761,12 +895,9 @@ void ConnectionDialog::draw_tab_initialization() {
 
     ImGui::Checkbox(TR("Close idle connections"), &profile_.close_idle_connections);
 
-    ImGui::EndChild();
 }
 
-void ConnectionDialog::draw_tab_general() {
-    ImGui::BeginChild("##general", ImVec2(0, -80));
-
+void ConnectionDialog::draw_page_general() {
     ImGui::TextColored(col4(colors().data), TR("Identification"));
     ImGui::Separator();
 
@@ -779,7 +910,7 @@ void ConnectionDialog::draw_tab_general() {
 
     ImGui::SetNextItemWidth(260);
     input_string(TR("Folder"), profile_.folder, 128);
-    help_marker("Agrupa a conexão na árvore. Use / para subpastas.");
+    help_marker(TR("Groups the connection in the tree. Use / for subfolders."));
 
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), TR("Connection type"));
@@ -803,13 +934,12 @@ void ConnectionDialog::draw_tab_general() {
     const db::ConnectionTypeInfo& current = db::connection_type_info(profile_.type);
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().text_dim),
-                       "auto-commit: %s | confirmar execução: %s | "
-                       "confirmar alteração de dados: %s",
-                       current.auto_commit ? "ligado" : "desligado",
-                       current.confirm_execute ? "sim" : "não",
-                       current.confirm_data_change ? "sim" : "não");
+                       TR("auto-commit: %s | confirm execute: %s | "
+                          "confirm data change: %s"),
+                       current.auto_commit ? TR("on") : TR("off"),
+                       current.confirm_execute ? TR("yes") : TR("no"),
+                       current.confirm_data_change ? TR("yes") : TR("no"));
 
-    ImGui::EndChild();
 }
 
 } // namespace otter::ui

@@ -11,7 +11,16 @@
 #include <memory>
 #include <string>
 
+struct ImFont;
+
 namespace otter::ui {
+
+// Fonte monoespacada, para o que E' codigo: o editor SQL.
+//
+// A interface usa a fonte do sistema (ver load_ui_font). Devolve nulo se o
+// sistema nao tinha nenhuma mono instalada -- quem chama testa antes de
+// PushFont().
+[[nodiscard]] ImFont* mono_font();
 
 struct WindowConfig {
     std::string title  = "C-Otter";

@@ -1,8 +1,11 @@
 // C-Otter -- ui/connection_dialog.hpp
 //
 // Assistente de conexao completo, equivalente ao do DBeaver: selecao de driver
-// por catalogo, e abas Principal / PostgreSQL / Driver / SSH / SSL / Proxy /
-// Inicializacao / Geral.
+// por catalogo, e uma ARVORE de categorias a' esquerda com a pagina escolhida
+// a' direita -- a mesma estrutura de `EditConnectionWizard`.
+//
+// Eram abas horizontais ate' 2026-09-21. Ver docs/DIALOG-PARITY.md: a arvore
+// nao e' enfeite, e' onde quem vem do DBeaver procura cada opcao.
 #pragma once
 
 #include "db/connection_config.hpp"
@@ -62,17 +65,58 @@ private:
     // Etapas do assistente, como no DBeaver.
     enum class Step { select_driver, configure };
 
+    // Identifica cada pagina da arvore. A ordem e o aninhamento vivem em
+    // `page_tree()`, no .cpp, espelhando EditConnectionWizard.addPages().
+    enum class Page {
+        connection_settings,   // a pagina do driver: host, porta, usuario
+        initialization,
+        transactions,
+        driver_properties,     // "Internal parameters" no DBeaver
+        general,
+        metadata,              // opcoes do SGBD (hoje so' PostgreSQL)
+        errors_timeouts,
+        data_transfer,
+        data_editor,
+        data_editor_grid,
+        binary_editor,
+        data_formats,
+        sql_editor,
+        sql_completion,
+        sql_code_editor,
+        sql_formatting,
+        sql_processing,
+    };
+
+    // Um no' da arvore da esquerda. `page` so' vale se `selectable`.
+    struct PageNode {
+        Page        page;
+        const char* label;      // rotulo oficial do DBeaver, passa por TR()
+        int         depth;      // 0 = raiz
+        bool        selectable; // falso = categoria que so' agrupa
+    };
+
     void draw_driver_catalog();
     void draw_configuration(const Feedback& feedback);
+    void draw_page_tree();
+    void draw_page_body();
 
-    void draw_tab_main();
-    void draw_tab_postgres();
-    void draw_tab_driver_properties();
+    // Uma por pagina da arvore.
+    void draw_page_connection_settings();
+    void draw_page_metadata();
+    void draw_page_driver_properties();
+    void draw_page_initialization();
+    void draw_page_transactions();
+    void draw_page_general();
+
+    // Continuam ABAS, dentro de "Connection settings": e' onde o DBeaver as
+    // poe (ConnectionPageSettings), nao na raiz da arvore.
     void draw_tab_ssh();
     void draw_tab_ssl();
     void draw_tab_proxy();
-    void draw_tab_initialization();
-    void draw_tab_general();
+
+    // Paginas cujo conteudo ainda nao existe no C-Otter. Dizem isso na tela,
+    // em vez de fingir (diretriz 6).
+    void draw_page_placeholder(const char* what);
 
     db::ConnectionProfile profile_;
     ConnectFn             on_test_;
@@ -82,6 +126,9 @@ private:
     Step  step_ = Step::select_driver;
     bool  visible_ = false;
     bool  editing_ = false;
+
+    // Pagina aberta. "Connection settings" e' a primeira, como no DBeaver.
+    Page  page_ = Page::connection_settings;
 
     char  driver_filter_[64] = "";
     int   category_index_ = 0;

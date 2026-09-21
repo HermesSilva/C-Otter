@@ -30,6 +30,9 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Redimensionar / maximizar / minimizar | ✅ | Minimizada, dorme em vez de renderizar |
 | Posicionamento inicial centralizado | ✅ | Respeita a área de trabalho do monitor |
 | Escala por DPI | ✅ | `glfwGetMonitorContentScale` |
+| **Fonte do sistema na interface** | ✅ | Segoe UI / DejaVu Sans. Até 2026-09-21 a UI inteira era monoespaçada |
+| **Fonte monoespaçada no editor SQL** | ✅ | Cascadia Mono / Consolas — só o editor: SQL é código |
+| Fonte da grade de resultados | ✅ | A da interface; o alinhamento vem do `ImGuiTable` |
 | **Três temas** | ✅ | Escuro (paleta de `Midia/Logo.png`), Claro e Âmbar |
 | Troca de tema em tempo real | ✅ | Ajuda → Tema; contraste WCAG testado |
 | **Internacionalização** | ✅ | Inglês padrão + pt-BR embutido |
@@ -68,7 +71,8 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 
 ## 3. Assistente de Conexão
 
-Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers + 8 abas.
+Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
+árvore de categorias (era catálogo + 8 abas na primeira versão do mesmo dia).
 
 ### Etapa 1 — catálogo de drivers
 
@@ -82,46 +86,65 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Botão Avançar / Cancelar | ✅ | Avançar desabilitado sem driver disponível |
 | Ícones dos SGBDs | ⬜ | O DBeaver mostra o logo de cada banco |
 
-### Etapa 2 — configuração (8 abas)
+### Etapa 2 — configuração (árvore de categorias)
 
-| Aba | Elemento | Estado |
-|-----|----------|--------|
-| **Principal** | Host, porta, banco | ✅ |
+Eram 8 abas horizontais até 2026-09-21. Passou a ser a **árvore de categorias à
+esquerda** do DBeaver, extraída de `EditConnectionWizard.addPages()` por
+`tools/map_conn_dialog.py` — mapa em [`DIALOG-PARITY.md`](DIALOG-PARITY.md).
+Rótulos oficiais, vindos do `bundle.properties`.
+
+| Página | Elemento | Estado |
+|--------|----------|--------|
+| **Configurações de conexão** | Host, porta, banco | ✅ |
 | | Método de autenticação (5 opções) | ✅ |
 | | Usuário, senha, salvar senha | ✅ |
 | | Campos de credencial desabilitados quando o método não usa | ✅ |
-| **PostgreSQL** | Mostrar todos os bancos / templates / sem acesso | ✅ |
-| | Ler estatísticas de tamanho | ✅ |
-| | Ler todos os tipos / colunas das chaves | ✅ |
-| | Prepared statements, role da sessão, fuso legado | ✅ |
-| | Tooltips explicando cada opção | ✅ |
-| **Driver** | Tabela de propriedades editável | ✅ |
+| | Abas SSH / SSL / Proxy **dentro desta página**, como no DBeaver | ✅ |
+| → **Inicialização** | Schema padrão, consultas de bootstrap | ✅ (UI) |
+| | Timeout, keep-alive, fechar ociosas | ✅ |
+| → **Transações** | Auto-commit, somente leitura | ✅ |
+| | Nível de isolamento | ⬜ **avisado na tela** (exige conexão viva) |
+| → **Parâmetros internos** | Tabela de propriedades editável | ✅ |
 | | Adicionar / remover propriedade | ✅ |
 | | Propriedades aplicadas na conexão | ⬜ |
-| **SSH** | Host, porta, usuário, tipo de autenticação | ✅ (UI) |
-| | Senha / chave privada / agente | ✅ (UI) |
-| | Túnel efetivamente estabelecido | ⬜ **avisado na tela** |
-| **SSL** | Modo (disable→verify-full), certificados | ✅ (UI) |
-| | TLS negociado | ⬜ **avisado na tela** |
-| **Proxy** | Host, porta, credenciais SOCKS | ✅ (UI) |
-| | Proxy usado | ⬜ **avisado na tela** |
-| **Inicialização** | Auto-commit, somente leitura | ✅ |
-| | Schema padrão, consultas de bootstrap | ✅ (UI) |
-| | Timeout, keep-alive, fechar ociosas | ✅ |
 | **Geral** | Nome, descrição, pasta | ✅ |
 | | Tipo: Desenvolvimento / Teste / Produção | ✅ |
 | | Cor por tipo e resumo do comportamento | ✅ |
 | | Produção desliga auto-commit automaticamente | ✅ |
+| **Metadados** | Mostrar todos os bancos / templates / sem acesso | ✅ |
+| | Ler estatísticas de tamanho | ✅ |
+| | Ler todos os tipos / colunas das chaves | ✅ |
+| | Prepared statements, role da sessão, fuso legado | ✅ |
+| | Página só existe para PostgreSQL; outros drivers avisam | ✅ |
+| **Erros e tempos limite** | — | ⬜ **avisado na tela** |
+| **Transferência de dados** | — | ⬜ **avisado na tela** |
+| **Editor de dados** | Editor binário, Formatos de dados, Grade | ⬜ **avisado na tela** |
+| **Editor SQL** | Editor de código, Completar código, Formatação, Processamento SQL | ⬜ **avisado na tela** |
+
+As abas de rede continuam existindo, com o mesmo conteúdo de antes:
+
+| Aba (em Configurações de conexão) | Elemento | Estado |
+|-----|----------|--------|
+| **SSH** | Host, porta, usuário, tipo de autenticação | ✅ (UI) |
+| | Senha / chave privada / agente | ✅ (UI) |
+| | Túnel efetivamente estabelecido | ⬜ **avisado na tela** |
+| **SSL** | Modo (disable→verify-full), certificados | ✅ (UI) |
+| | TLS negociado | ✅ Windows; ⬜ Linux — **avisado na tela** |
+| **Proxy** | Host, porta, credenciais SOCKS | ✅ (UI) |
+| | Proxy usado | ⬜ **avisado na tela** |
 
 ### Rodapé
+
+Na ordem do DBeaver desde 2026-09-21: `Test Connection ...` à esquerda,
+`OK` e `Close` à direita.
 
 | Elemento | Estado |
 |----------|--------|
 | `< Voltar` (só em nova conexão) | ✅ |
-| `Testar conexão` | ✅ |
-| `Concluir` / `Salvar` | ✅ fecha o diálogo ao concluir |
+| `Testar conexão ...` **à esquerda** | ✅ |
+| `OK` / `Concluir` **à direita** | ✅ fecha o diálogo ao concluir |
 | `Testar conexão` não cria conexão permanente | ✅ reutiliza a ativa |
-| `Cancelar` | ✅ |
+| `Fechar` **à direita** | ✅ |
 | Indicador pulsante durante a conexão | ✅ |
 | Erro detalhado / sucesso com contagens | ✅ |
 | Faixa colorida do tipo no topo | ✅ |
@@ -132,24 +155,28 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 
 ## 4. Painel Raft (conexões)
 
+**Lista única desde 2026-09-21.** Tinha três blocos — os botões do topo, as
+conexões *abertas*, e as *salvas* sob um rótulo esmaecido. O DBeaver não
+divide: cada perfil é uma linha só, conectada ou não, com o estado no ponto à
+esquerda. A mesma conexão aparecia ora em cima ora embaixo conforme houvesse
+sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
+
 | Elemento | Estado | Observação |
 |----------|--------|------------|
-| Botão "Nova conexão" | ✅ | |
-| Botão "Editar" | ✅ | Reabre o assistente com o perfil ativo |
-| Indicador colorido de estado | ✅ | Verde conectado, vermelho falha, amarelo conectando |
+| **Lista única, conectadas e salvas juntas** | ✅ | Sem cabeçalho de seção, como no DBeaver |
+| Indicador colorido de estado | ✅ | `●` verde conectado, vermelho falha, amarelo conectando; `○` salvo |
 | Nome efetivo da conexão | ✅ | Nome do usuário ou `banco@host` |
-| Tipo de conexão colorido | ✅ | Desenvolvimento / Teste / Produção |
-| Versão do servidor | ✅ | `PostgreSQL 18.2` |
-| Host e porta | ✅ | |
-| Modo de transação | ✅ | `auto-commit` ou `transação manual` |
-| Aviso de somente leitura | ✅ | |
-| Descrição da conexão | ✅ | Quando preenchida |
-| Menu de contexto | ✅ | Editar, desconectar, copiar nome |
+| Duplo clique conecta um perfil salvo | ✅ | Clique simples só seleciona |
+| Menu de contexto na conexão | ✅ | Editar, desconectar, fechar, copiar nome |
+| Menu de contexto na área vazia | ✅ | Nova conexão — substitui os botões do topo |
 | **Lista de várias conexões** | ✅ | Simultâneas; clique na linha troca a ativa |
-| Indicador de estado por conexão | ✅ | Verde/vermelho/amarelo por linha |
 | Fechar conexão | ✅ | Menu de contexto → Fechar conexão |
-| Detalhe só da conexão ativa | ✅ | Evita repetir host e versão em cada linha |
+| Versão, host, transação, somente leitura, descrição | ✅ | Em **tooltip**, não empilhados na lista |
+| Tipo de conexão colorido | ✅ | No tooltip; a faixa colorida fica no diálogo |
+| Botão "Nova conexão" no topo | ➖ | Removido: o DBeaver usa barra e menu de contexto |
+| Botão "Editar" no topo | ➖ | Removido: menu de contexto da conexão |
 | Pastas de organização | ⬜ | Campo existe, árvore não agrupa |
+| Ícone do SGBD por conexão | ⬜ | O DBeaver mostra o logo do banco |
 
 ## 5. Painel Navigator
 
@@ -409,23 +436,24 @@ Esta é a lista de maior retorno por esforço: o trabalho difícil já está fei
 
 ## Resumo por área
 
+Contado em 2026-09-21 varrendo as tabelas acima; itens ➖ (fora do escopo)
+ficam de fora do total.
+
 | Área | ✅ | 🟡 | ⬜ | ❌ | Total |
 |------|-----|-----|-----|-----|-------|
-| Janela e estrutura | 7 | 0 | 5 | 0 | 12 |
-| Barra de menus | 8 | 3 | 4 | 0 | 15 |
-| Diálogo de conexão | 10 | 0 | 5 | 0 | 15 |
-| Painel Raft | 4 | 0 | 3 | 0 | 7 |
-| Navigator | 9 | 0 | 8 | 0 | 17 |
-| Editor — texto | 13 | 2 | 0 | 0 | 15 |
-| Editor — execução | 4 | 1 | 2 | 0 | 7 |
-| Editor — autocomplete | 13 | 0 | 3 | 0 | 16 |
-| Grade | 13 | 0 | 14 | 0 | 27 |
+| Janela e estrutura | 17 | 0 | 3 | 0 | 20 |
+| Barra de menus | 16 | 2 | 0 | 0 | 18 |
+| Assistente de conexão | 41 | 0 | 10 | 0 | 51 |
+| Painel Raft | 10 | 0 | 2 | 0 | 12 |
+| Navigator | 32 | 0 | 1 | 0 | 33 |
+| Editor SQL | 45 | 3 | 6 | 0 | 54 |
+| Grade | 51 | 0 | 3 | 0 | 54 |
 | Inspetor de queries | 9 | 0 | 4 | 0 | 13 |
 | Barra de status | 4 | 0 | 2 | 0 | 6 |
-| Transações | 0 | 0 | 5 | 0 | 5 |
-| **Total** | **94** | **6** | **55** | **0** | **155** |
+| Transações | 4 | 0 | 2 | 0 | 6 |
+| **Total** | **229** | **5** | **33** | **0** | **267** |
 
-**94 de 155 elementos existentes funcionam.**
+**229 de 267 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -441,10 +469,11 @@ Esta é a lista de maior retorno por esforço: o trabalho difícil já está fei
 > | Comandos | 281 | 7 | **2,5%** |
 > | Atalhos | 147 | 6 | **4,1%** |
 >
-> Um diálogo de conexão com 5 campos conta como 10 elementos prontos aqui; o equivalente no
-> DBeaver tem catálogo de drivers, abas de propriedades, SSH, SSL e teste de conexão — algo
-> como 80. Medir a própria interface contra si mesma produz um número que sobe enquanto o
-> produto não se aproxima do alvo.
+> O diálogo de conexão conta 51 elementos aqui, com 41 prontos. O do DBeaver tem
+> **34 páginas** alcançáveis (`tools/map_conn_dialog.py`), das quais 6 têm
+> equivalente com conteúdo — e cada página tem seus próprios campos, que esta
+> conta nem enumera. Medir a própria interface contra si mesma produz um número
+> que sobe enquanto o produto não se aproxima do alvo.
 >
 > **Para progresso, use [`UI-SCOPE.md`](UI-SCOPE.md) e [`PARITY.md`](PARITY.md).**
 > Este arquivo responde apenas: *"este botão funciona?"*
@@ -496,7 +525,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (416, todos verdes):
+Testes automatizados (417, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

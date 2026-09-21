@@ -7,6 +7,7 @@
 #include "db/export.hpp"
 #include "sql/format.hpp"
 #include "sql/paging.hpp"
+#include "ui/app_window.hpp"   // mono_font(), para o editor SQL
 #include "ui/file_dialog.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
@@ -232,6 +233,15 @@ MainShell::MainShell()
         remember_profile(profile);
         open_connection(profile);
         connection_dialog_.close();
+    }
+
+    // Abre o dialogo de conexao ja' na etapa de configuracao, para conferir a
+    // arvore de paginas numa captura (docs/DIALOG-PARITY.md).
+    //
+    // Automatizar "Editar" a partir da lista erra o alvo: a posicao do item
+    // depende de quantas conexoes ha' gravadas. Uma flag acerta sempre.
+    if (std::getenv("OTTER_SHOW_CONN_DIALOG") != nullptr) {
+        connection_dialog_.open_edit(profile);
     }
 }
 
@@ -1285,24 +1295,28 @@ std::string MainShell::dbms_name(const std::string& driver_id) {
     return driver != nullptr ? std::string(driver->display_name()) : driver_id;
 }
 
+// Lista UNICA de conexoes, como a do DBeaver.
+//
+// Eram tres blocos: os botoes "Nova conexao"/"Editar", as conexoes ABERTAS, e
+// as "salvas" sob um rotulo esmaecido. O DBeaver nao divide: cada perfil e'
+// uma linha so', conectada ou nao, e o estado vive no ponto colorido a'
+// esquerda. Quem vinha de la' via a mesma conexao ora em cima ora embaixo,
+// dependendo de haver sessao aberta -- e o rotulo "salvas", em caixa baixa,
+// parecia um item da lista e nao um cabecalho.
+//
+// O detalhe (versao, host, modo de transacao) saiu do corpo do painel para o
+// tooltip: empilhado sob a conexao ativa, ele empurrava as demais para baixo
+// e mudava a altura da lista conforme o que estava selecionado.
 void MainShell::draw_raft_panel() {
     if (ImGui::Begin(TRW("Raft", "###RaftPanel"))) {
         const Palette& p = colors();
 
-        if (ImGui::Button(TR("New connection"))) connection_dialog_.open_new();
-
-        ImGui::SameLine();
-        ImGui::BeginDisabled(session().state() != SessionState::connected);
-        if (ImGui::Button(TR("Edit"))) connection_dialog_.open_edit(active_profile_);
-        ImGui::EndDisabled();
-
-        ImGui::Separator();
-
-        // Conexoes abertas, a ativa em destaque. Uma Session vazia e' o estado
-        // inicial, nao uma conexao: nao vale uma linha na lista.
-        std::size_t drawn = 0;
         std::size_t close_requested = connections_.size();
+        std::size_t drawn = 0;
 
+        // Primeiro as conexoes com sessao (abertas ou com falha), depois os
+        // perfis salvos que ainda nao foram abertos. Sem separador entre os
+        // dois grupos: para quem olha, e' uma lista so'.
         for (std::size_t i = 0; i < connections_.size(); ++i) {
             const Connection& connection = connections_[i];
             const SessionState state = connection.session->state();
@@ -1337,6 +1351,36 @@ void MainShell::draw_raft_panel() {
             }
             ImGui::PopStyleColor();
 
+            // Tooltip com o que antes ficava empilhado na lista.
+            if (ImGui::IsItemHovered()) {
+                const db::ConnectionTypeInfo& type =
+                    db::connection_type_info(connection.profile.type);
+
+                ImGui::BeginTooltip();
+                ImGui::TextColored(col4(type.color), "%s", type.name);
+                if (connected) {
+                    ImGui::Text("%s %s",
+                                dbms_name(connection.profile.driver_id).c_str(),
+                                connection.session->server_version().c_str());
+                    ImGui::Text("%s@%s:%u", connection.profile.user.c_str(),
+                                connection.profile.host.c_str(),
+                                connection.profile.port);
+                    ImGui::TextUnformatted(connection.profile.auto_commit
+                                               ? TR("auto-commit")
+                                               : TR("manual transaction"));
+                    if (connection.profile.read_only) {
+                        ImGui::TextColored(col4(p.warn), TR("read only"));
+                    }
+                } else if (state == SessionState::failed) {
+                    ImGui::TextColored(col4(p.error), "%s",
+                                       connection.session->status_message().c_str());
+                }
+                if (!connection.profile.description.empty()) {
+                    ImGui::TextUnformatted(connection.profile.description.c_str());
+                }
+                ImGui::EndTooltip();
+            }
+
             if (ImGui::BeginPopupContextItem("##connmenu")) {
                 if (ImGui::MenuItem(TR("Edit connection..."))) {
                     active_connection_ = i;
@@ -1356,44 +1400,6 @@ void MainShell::draw_raft_panel() {
                 }
                 ImGui::EndPopup();
             }
-
-            // Detalhe so' da ativa: repetir host, versao e modo de transacao
-            // para cada conexao encheria o painel de texto igual.
-            if (active) {
-                ImGui::Indent();
-
-                const db::ConnectionTypeInfo& type =
-                    db::connection_type_info(connection.profile.type);
-                ImGui::TextColored(col4(type.color), "%s", type.name);
-
-                if (connected) {
-                    ImGui::TextColored(
-                        col4(p.text_dim), "%s %s",
-                        dbms_name(connection.profile.driver_id).c_str(),
-                        connection.session->server_version().c_str());
-                    ImGui::TextColored(col4(p.text_dim), "%s:%u",
-                                       connection.profile.host.c_str(),
-                                       connection.profile.port);
-                    ImGui::TextColored(col4(p.text_dim), "%s",
-                                       connection.profile.auto_commit
-                                           ? TR("auto-commit")
-                                           : TR("manual transaction"));
-                    if (connection.profile.read_only) {
-                        ImGui::TextColored(col4(p.warn), TR("read only"));
-                    }
-                } else if (state == SessionState::failed) {
-                    ImGui::PushTextWrapPos(0.0f);
-                    ImGui::TextColored(col4(p.error), "%s",
-                                       connection.session->status_message().c_str());
-                    ImGui::PopTextWrapPos();
-                }
-
-                if (!connection.profile.description.empty()) {
-                    ImGui::TextColored(col4(p.text_dim), "%s",
-                                       connection.profile.description.c_str());
-                }
-                ImGui::Unindent();
-            }
             ImGui::PopID();
         }
 
@@ -1403,23 +1409,38 @@ void MainShell::draw_raft_panel() {
             close_connection(close_requested);
         }
 
+        drawn += draw_saved_profiles();
+
         if (drawn == 0) {
             ImGui::TextColored(col4(p.text_dim), TR("no connection"));
         }
 
-        draw_saved_profiles();
+        // Menu do painel vazio: e' por onde se cria conexao agora que os
+        // botoes sairam do topo. O DBeaver faz igual -- botao direito na area
+        // vazia da arvore oferece "Create New Connection".
+        if (ImGui::BeginPopupContextWindow(
+                "##raftmenu", ImGuiPopupFlags_MouseButtonRight |
+                              ImGuiPopupFlags_NoOpenOverItems)) {
+            if (ImGui::MenuItem(TR("New connection..."))) {
+                connection_dialog_.open_new();
+            }
+            ImGui::EndPopup();
+        }
     }
     ImGui::End();
 }
 
 // Perfis salvos que ainda nao foram abertos.
 //
-// Sem esta secao, importar do DBeaver gravava o perfil e nao mudava nada na
-// tela: a lista acima so' mostra conexoes ABERTAS, e o unico caminho ate' o
-// que foi importado era reabrir o dialogo de conexao. Foi o que a captura de
-// tela mostrou depois de importar -- "1 conexao importada" e nenhuma linha
+// Sem estas linhas, importar do DBeaver gravava o perfil e nao mudava nada na
+// tela: o laco de cima so' mostra conexoes com sessao, e o unico caminho ate'
+// o que foi importado era reabrir o dialogo de conexao. Foi o que a captura
+// de tela mostrou depois de importar -- "1 conexao importada" e nenhuma linha
 // nova.
-void MainShell::draw_saved_profiles() {
+//
+// Nao ha' cabecalho separando-as das de cima: continuam a MESMA lista, como
+// no DBeaver. O que distingue e' o ponto de estado a' esquerda.
+std::size_t MainShell::draw_saved_profiles() {
     const Palette& p = colors();
 
     // Um perfil ja' aberto nao se repete aqui: apareceria duas vezes na mesma
@@ -1436,20 +1457,20 @@ void MainShell::draw_saved_profiles() {
         return false;
     };
 
-    std::size_t pending = 0;
-    for (const db::StoredProfile& stored : saved_profiles_) {
-        if (!already_open(stored.profile)) ++pending;
-    }
-    if (pending == 0) return;
-
-    ImGui::Separator();
-    ImGui::TextColored(col4(p.text_dim), TR("saved"));
+    std::size_t drawn = 0;
 
     for (std::size_t i = 0; i < saved_profiles_.size(); ++i) {
         const db::StoredProfile& stored = saved_profiles_[i];
         if (already_open(stored.profile)) continue;
+        ++drawn;
 
         ImGui::PushID(static_cast<int>(1000 + i));
+
+        // O ponto de estado, apagado: a linha tem a mesma forma da conexao
+        // aberta logo acima, e o que muda e' a cor. Sem ele, os dois grupos
+        // teriam recuo diferente e voltariam a parecer listas distintas.
+        ImGui::TextColored(col4(p.text_dim), "○");
+        ImGui::SameLine(0.0f, 6.0f);
 
         ImGui::BeginDisabled(!stored.supported);
 
@@ -1483,6 +1504,8 @@ void MainShell::draw_saved_profiles() {
         }
         ImGui::PopID();
     }
+
+    return drawn;
 }
 
 bool MainShell::matches_filter(std::string_view name) const {
@@ -2902,7 +2925,13 @@ void MainShell::draw_document_body(SqlDocument& document) {
     }
 
     ImGui::Separator();
+
+    // SQL e' codigo: aqui, e so' aqui, a fonte e' monoespacada. O resto da
+    // interface usa a do sistema, como no DBeaver (ver load_ui_font).
+    ImFont* mono = mono_font();
+    if (mono != nullptr) ImGui::PushFont(mono);
     document.editor().Render("##sql", ImGui::GetContentRegionAvail());
+    if (mono != nullptr) ImGui::PopFont();
 }
 
 void MainShell::draw_editor_panel() {

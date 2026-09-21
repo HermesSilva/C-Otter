@@ -33,12 +33,12 @@ void glfw_error_callback(int code, const char* description) {
     std::fprintf(stderr, "[glfw] erro %d: %s\n", code, description);
 }
 
-// Carrega uma fonte monoespacada do sistema com cobertura latina.
+// Latin + Latin-1 + Latin Extended-A cobrem portugues; os demais blocos
+// trazem aspas tipograficas, setas e simbolos usados na grade.
+//
 // A fonte embutida do ImGui cobre so' ASCII: acentos do portugues e o sigma da
 // linha de totais virariam '?'.
-void load_ui_font(ImGuiIO& io, float scale) {
-    // Latin + Latin-1 + Latin Extended-A cobrem portugues; os demais blocos
-    // trazem aspas tipograficas, setas e simbolos usados na grade.
+const ImWchar* latin_ranges() {
     static const ImWchar ranges[] = {
         0x0020, 0x00FF,   // Basic Latin + Latin-1 Supplement
         0x0100, 0x017F,   // Latin Extended-A
@@ -49,48 +49,95 @@ void load_ui_font(ImGuiIO& io, float scale) {
         0x2260, 0x2265,   // comparadores
         0,
     };
+    return ranges;
+}
 
-    const float size = 16.0f * scale;
-
-#ifdef _WIN32
-    wchar_t win_dir[MAX_PATH] = {};
-    if (GetWindowsDirectoryW(win_dir, MAX_PATH) != 0) {
-        char dir[MAX_PATH * 2] = {};
-        WideCharToMultiByte(CP_UTF8, 0, win_dir, -1, dir, sizeof(dir), nullptr, nullptr);
-
-        // SQL e' codigo: fonte monoespacada preserva o alinhamento de colunas.
-        const char* candidates[] = {"\\Fonts\\CascadiaMono.ttf",
-                                    "\\Fonts\\CascadiaCode.ttf",
-                                    "\\Fonts\\consola.ttf"};
-        for (const char* candidate : candidates) {
-            const std::string path = std::string(dir) + candidate;
-            if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-
-            ImFontConfig config;
-            config.OversampleH = 2;
-            config.OversampleV = 1;
-            config.PixelSnapH  = true;
-            if (io.Fonts->AddFontFromFileTTF(path.c_str(), size, &config, ranges)) {
-                return;
-            }
-        }
-    }
-#else
-    const char* candidates[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
-    };
-    for (const char* path : candidates) {
+ImFont* load_first_available(ImGuiIO& io, const char* const* paths,
+                             std::size_t count, float size) {
+    for (std::size_t i = 0; i < count; ++i) {
         ImFontConfig config;
         config.OversampleH = 2;
         config.OversampleV = 1;
         config.PixelSnapH  = true;
-        if (io.Fonts->AddFontFromFileTTF(path, size, &config, ranges)) return;
+
+        ImFont* font =
+            io.Fonts->AddFontFromFileTTF(paths[i], size, &config, latin_ranges());
+        if (font != nullptr) return font;
     }
-#endif
-    // Nenhuma encontrada: segue com a fonte embutida (so' ASCII).
+    return nullptr;
 }
+
+// Carrega DUAS fontes: a da interface e a do editor.
+//
+// Ate' 2026-09-21 a UI inteira usava monoespacada, com a justificativa de que
+// "SQL e' codigo". A justificativa vale para o EDITOR; menus, rotulos, botoes
+// e a arvore de objetos nao sao codigo, e o DBeaver os desenha com a fonte do
+// sistema. Monoespacar tudo deixava a interface com cara de terminal e larga
+// demais -- um rotulo em Consolas ocupa ~20% mais que em Segoe UI, e era por
+// isso que "Configuracoes de conexao" nao cabia na arvore do dialogo.
+//
+// A mono fica em io.Fonts->Fonts[1], para o editor SQL empurrar com
+// PushFont(). A grade usa a da interface: alinhamento de coluna ela ja'
+// resolve com ImGuiTable, que mede cada celula.
+void load_ui_font(ImGuiIO& io, float scale) {
+    const float size = 16.0f * scale;
+
+#ifdef _WIN32
+    wchar_t win_dir[MAX_PATH] = {};
+    if (GetWindowsDirectoryW(win_dir, MAX_PATH) == 0) return;
+
+    char dir[MAX_PATH * 2] = {};
+    WideCharToMultiByte(CP_UTF8, 0, win_dir, -1, dir, sizeof(dir), nullptr, nullptr);
+
+    const std::string ui_paths[] = {
+        std::string(dir) + "\\Fonts\\segoeui.ttf",
+        std::string(dir) + "\\Fonts\\tahoma.ttf",
+        std::string(dir) + "\\Fonts\\arial.ttf",
+    };
+    const std::string mono_paths[] = {
+        std::string(dir) + "\\Fonts\\CascadiaMono.ttf",
+        std::string(dir) + "\\Fonts\\CascadiaCode.ttf",
+        std::string(dir) + "\\Fonts\\consola.ttf",
+    };
+#else
+    const std::string ui_paths[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+    };
+    const std::string mono_paths[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+    };
+#endif
+
+    const char* ui_c[3] = {ui_paths[0].c_str(), ui_paths[1].c_str(),
+                           ui_paths[2].c_str()};
+    const char* mono_c[3] = {mono_paths[0].c_str(), mono_paths[1].c_str(),
+                             mono_paths[2].c_str()};
+
+    // A PRIMEIRA carregada vira a padrao do ImGui -- por isso a da interface
+    // vem antes. Se nenhuma existir, a mono assume o posto: uma UI
+    // monoespacada ainda e' melhor que a embutida, que perde os acentos.
+    ImFont* ui = load_first_available(io, ui_c, 3, size);
+    ImFont* mono = load_first_available(io, mono_c, 3, size);
+
+    if (ui == nullptr && mono == nullptr) return;  // sobra a embutida, so' ASCII
+}
+
+} // namespace
+
+// Fonte monoespacada para o editor SQL. Nula se o sistema nao tinha nenhuma:
+// quem chama deve testar antes de PushFont().
+ImFont* mono_font() {
+    ImGuiIO& io = ImGui::GetIO();
+    // [0] e' a da interface, [1] a mono -- na ordem em que load_ui_font as
+    // registrou.
+    return io.Fonts->Fonts.Size > 1 ? io.Fonts->Fonts[1] : nullptr;
+}
+
+namespace {
 
 } // namespace
 
