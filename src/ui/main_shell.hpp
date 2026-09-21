@@ -11,6 +11,7 @@
 #include "db/holt.hpp"
 #include "db/connection_store.hpp"
 #include "db/export.hpp"
+#include "db/plan.hpp"
 #include "db/result_set.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
@@ -113,6 +114,11 @@ private:
     // Reindenta o SQL da aba ativa (Ctrl+Shift+F).
     void format_current_sql();
 
+    // --- Plano de execucao (ADR 0013) ----------------------------------------
+    void explain_current_sql(bool analyze);
+    void draw_plan_window();
+    void draw_plan_node(const db::PlanNode& node, double max_cost, int depth);
+
     // --- Arquivo -------------------------------------------------------------
     void open_script_file();
     // `save_as` forca o dialogo mesmo quando o documento ja' tem caminho.
@@ -190,6 +196,11 @@ private:
 
     // --- Exportacao ----------------------------------------------------------
     bool               show_export_ = false;
+
+    // Plano da ultima explicacao e o modo pedido.
+    std::optional<db::QueryPlan> plan_;
+    bool               show_plan_ = false;
+    bool               plan_analyze_ = false;
     db::ExportOptions  export_options_;
     std::string        export_path_;
     std::string        export_status_;

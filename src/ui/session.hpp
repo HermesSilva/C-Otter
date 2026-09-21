@@ -7,6 +7,7 @@
 #pragma once
 
 #include "db/catalog.hpp"
+#include "db/plan.hpp"
 #include "db/holt.hpp"
 
 #include <atomic>
@@ -52,6 +53,14 @@ public:
     // que o usuario quer ver depois de um script que termina num SELECT.
     void execute_script_async(std::vector<std::string> statements,
                               bool stop_on_error = true);
+
+    // Roda EXPLAIN e guarda o plano. Com `analyze`, envolve em transacao e
+    // da' ROLLBACK -- EXPLAIN ANALYZE executa a consulta de verdade
+    // (ADR 0013).
+    void explain_async(std::string sql, bool analyze);
+
+    // Plano da ultima explicacao, se houve.
+    [[nodiscard]] std::optional<db::QueryPlan> take_plan();
 
     // Quantos comandos do script ja' rodaram, para a barra de progresso.
     [[nodiscard]] std::size_t script_progress() const noexcept {
@@ -154,6 +163,7 @@ private:
     std::vector<db::SchemaMeta>     schemas_;
     std::vector<db::ForeignKeyMeta> foreign_keys_;
     std::optional<db::ResultSet>    result_;
+    std::optional<db::QueryPlan>    plan_;
 
     std::thread worker_;
 };

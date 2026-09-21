@@ -524,6 +524,204 @@ void MainShell::save_script_file(bool save_as) {
     document->set_status(std::string(TRF("saved to %s", path.c_str())));
 }
 
+void MainShell::explain_current_sql(bool analyze) {
+    if (session().state() != SessionState::connected || session().busy()) return;
+
+    SqlDocument* document = active_document();
+    if (document == nullptr) return;
+
+    std::string sql = document->sql_to_execute();
+    if (sql.empty()) return;
+
+    plan_analyze_ = analyze;
+    show_plan_    = true;
+    plan_.reset();
+
+    session().explain_async(std::move(sql), analyze);
+}
+
+void MainShell::draw_plan_node(const db::PlanNode& node, double max_cost,
+                               int depth) {
+    const Palette& p = colors();
+
+    ImGui::PushID(&node);
+
+    // Barra de custo relativo antes do rotulo: num plano de 40 nos, o que
+    // importa e' achar o caro, e a barra responde isso sem ler numero.
+    const float share = max_cost > 0.0
+                            ? static_cast<float>(node.self_cost() / max_cost)
+                            : 0.0f;
+
+    const std::uint32_t bar_color =
+        node.is_sequential_scan() ? p.error
+        : share > 0.3f            ? p.warn
+                                  : p.accent;
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float bar_width = ImGui::GetFontSize() * 3.0f;
+    const float bar_height = ImGui::GetFontSize() * 0.55f;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(
+        ImVec2(origin.x, origin.y + bar_height * 0.4f),
+        ImVec2(origin.x + bar_width, origin.y + bar_height * 1.4f),
+        with_alpha(p.text_dim, 0.20f), 2.0f);
+    dl->AddRectFilled(
+        ImVec2(origin.x, origin.y + bar_height * 0.4f),
+        ImVec2(origin.x + bar_width * std::max(share, 0.02f),
+               origin.y + bar_height * 1.4f),
+        bar_color, 2.0f);
+
+    ImGui::Dummy(ImVec2(bar_width + 6.0f, ImGui::GetFontSize()));
+    ImGui::SameLine();
+
+    const bool has_children = !node.children.empty();
+    bool open = false;
+
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          col(node.is_sequential_scan() ? p.error : p.text));
+    if (has_children) {
+        ImGui::SetNextItemOpen(depth < 3, ImGuiCond_Once);
+        open = ImGui::TreeNode(node.type.c_str());
+    } else {
+        ImGui::TextUnformatted(node.type.c_str());
+    }
+    ImGui::PopStyleColor();
+
+    // A relacao acessada ao lado do tipo: "Seq Scan" sozinho nao diz em que.
+    if (!node.relation.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.data), "on %s", node.relation.c_str());
+    }
+    if (!node.index_name.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(col4(p.accent_light), "using %s",
+                           node.index_name.c_str());
+    }
+
+    ImGui::SameLine();
+    if (node.has_actuals) {
+        ImGui::TextColored(col4(p.text_dim), "  %.2f ms  %lld row(s)",
+                           node.actual_time,
+                           static_cast<long long>(node.actual_rows));
+
+        // Estimativa muito errada explica plano ruim: o planejador escolhe
+        // Nested Loop porque acha que vem 1 linha, e vem 50 mil.
+        const double error = node.estimation_error();
+        if (error >= 10.0) {
+            ImGui::SameLine();
+            icon_inline(Icon::warning, p.warn, 0.85f);
+            ImGui::SameLine(0.0f, 2.0f);
+            ImGui::TextColored(col4(p.warn), TR("estimate off by %.0fx"), error);
+        }
+    } else {
+        ImGui::TextColored(col4(p.text_dim), "  cost %.2f  ~%lld row(s)",
+                           node.total_cost,
+                           static_cast<long long>(node.estimated_rows));
+    }
+
+    // Condicoes no tooltip: ocupam muito espaco na linha e quase sempre sao
+    // o que se quer ler depois de identificar o no' caro.
+    if (ImGui::IsItemHovered()) {
+        std::string tip = node.type;
+        if (!node.relation.empty())        tip += "\non " + node.relation;
+        if (!node.index_condition.empty()) tip += "\nIndex Cond: " + node.index_condition;
+        if (!node.join_condition.empty())  tip += "\nJoin: " + node.join_condition;
+        if (!node.filter.empty())          tip += "\nFilter: " + node.filter;
+        if (!node.sort_keys.empty())       tip += "\nSort: " + node.sort_keys;
+
+        char buffer[128];
+        std::snprintf(buffer, sizeof buffer,
+                      "\n\ncost %.2f..%.2f  width %d",
+                      node.startup_cost, node.total_cost, node.row_width);
+        tip += buffer;
+        if (node.loops > 1) {
+            std::snprintf(buffer, sizeof buffer, "\nloops %lld",
+                          static_cast<long long>(node.loops));
+            tip += buffer;
+        }
+        ImGui::SetTooltip("%s", tip.c_str());
+    }
+
+    if (open) {
+        for (const db::PlanNode& child : node.children) {
+            draw_plan_node(child, max_cost, depth + 1);
+        }
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+
+void MainShell::draw_plan_window() {
+    const Palette& p = colors();
+
+    ImGui::SetNextWindowSize(ImVec2(920, 560), ImGuiCond_Appearing);
+    if (ImGui::Begin(TRW("Execution plan", "###ExecutionPlan"), &show_plan_,
+                     ImGuiWindowFlags_NoDocking)) {
+
+        // Caixa do ANALYZE com o aviso ao lado, nao num tooltip escondido:
+        // marcar esta caixa faz a consulta RODAR (ADR 0013).
+        if (ImGui::Checkbox(TR("Run the query and measure (ANALYZE)"),
+                            &plan_analyze_)) {
+            explain_current_sql(plan_analyze_);
+        }
+        if (plan_analyze_) {
+            icon_inline(Icon::warning, p.warn);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(col4(p.warn), TR(
+                "ANALYZE executes the query. Writes are rolled back, but the "
+                "work is done and the time is real."));
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::SameLine();
+        if (icon_button("##replan", Icon::refresh, TR("Explain again"),
+                        !session().busy())) {
+            explain_current_sql(plan_analyze_);
+        }
+
+        ImGui::Separator();
+
+        if (session().busy()) {
+            ImGui::TextColored(col4(p.text_dim), TR("  explaining..."));
+            ImGui::End();
+            return;
+        }
+
+        if (!plan_ || plan_->empty()) {
+            ImGui::TextColored(col4(p.text_dim), "%s",
+                               session().status_message().c_str());
+            ImGui::End();
+            return;
+        }
+
+        if (plan_->analyzed) {
+            ImGui::TextColored(col4(p.text_dim),
+                               TR("planning %.2f ms  |  execution %.2f ms"),
+                               plan_->planning_time, plan_->execution_time);
+        } else {
+            ImGui::TextColored(col4(p.text_dim),
+                               TR("estimated cost %.2f  |  query not executed"),
+                               plan_->root.total_cost);
+        }
+
+        ImGui::Separator();
+
+        const double max_cost = plan_->max_total_cost();
+        if (ImGui::BeginChild("##plantree", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()))) {
+            draw_plan_node(plan_->root, max_cost, 0);
+        }
+        ImGui::EndChild();
+
+        if (icon_text_button("##copyplan", Icon::copy, TR("Copy JSON"),
+                             TR("Copy the raw EXPLAIN output"))) {
+            ImGui::SetClipboardText(plan_->raw_json.c_str());
+        }
+    }
+    ImGui::End();
+}
+
 void MainShell::format_current_sql() {
     SqlDocument* document = active_document();
     if (document == nullptr) return;
@@ -608,6 +806,11 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
 void MainShell::draw() {
     // Colhe o resultado e entrega ao documento que o pediu -- nao ao que
     // estiver ativo agora, porque o usuario pode ter trocado de aba.
+    // Plano pronto: o worker guardou; a UI recolhe no quadro seguinte.
+    if (show_plan_ && !session().busy() && !plan_) {
+        if (auto fresh = session().take_plan()) plan_ = std::move(*fresh);
+    }
+
     if (!session().busy() && executing_document_id_ != 0) {
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
@@ -663,6 +866,9 @@ void MainShell::draw() {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F)) {
         format_current_sql();
     }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E)) {
+        explain_current_sql(/*analyze=*/false);
+    }
     // Shift primeiro: Ctrl+Shift+S tambem satisfaz Ctrl+S, e testar na ordem
     // inversa faria "salvar como" nunca acontecer.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
@@ -710,6 +916,7 @@ void MainShell::draw() {
     connection_dialog_.draw(feedback);
 
     if (show_about_) draw_about_window();
+    if (show_plan_) draw_plan_window();
     if (show_export_) draw_export_window();
     if (show_import_) draw_import_window();
     if (show_icons_) draw_icon_gallery();
@@ -848,6 +1055,9 @@ void MainShell::draw_menu_bar() {
         if (ImGui::MenuItem(TR("Format SQL"), "Ctrl+Shift+F", false,
                             active_document() != nullptr)) {
             format_current_sql();
+        }
+        if (ImGui::MenuItem(TR("Explain plan"), "Ctrl+Shift+E", false, can_run)) {
+            explain_current_sql(/*analyze=*/false);
         }
         ImGui::Separator();
 

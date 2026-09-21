@@ -13,6 +13,7 @@ otter_add_library(otter_db
         connection_store.cpp
         ddl.cpp
         export.cpp
+        plan.cpp
         drivers/postgres.cpp
     DEPS
         otter::otter_base

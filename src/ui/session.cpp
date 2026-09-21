@@ -203,6 +203,76 @@ void Session::execute_script_async(std::vector<std::string> statements,
     });
 }
 
+void Session::explain_async(std::string sql, bool analyze) {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+    if (sql.empty()) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+
+    worker_ = std::thread([this, sql = std::move(sql), analyze] {
+        db::Holt* holt = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt = holt_.get();
+        }
+        if (holt == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        const std::vector<std::string> statements =
+            db::explain_statements(sql, analyze);
+
+        std::optional<db::QueryPlan> plan;
+        std::string message;
+
+        // O ROLLBACK e' o ultimo comando e precisa rodar MESMO se o EXPLAIN
+        // falhar -- e' o que garante que a analise nao deixa rastro
+        // (ADR 0013). Por isso o laco nao interrompe no erro.
+        for (std::size_t i = 0; i < statements.size(); ++i) {
+            const std::string& statement = statements[i];
+            auto result = holt->query(statement);
+
+            if (!result) {
+                // Guarda o primeiro erro, mas segue para o ROLLBACK.
+                if (message.empty()) message = result.error().to_string();
+                continue;
+            }
+
+            // O EXPLAIN devolve o JSON numa unica celula.
+            if (result->row_count() > 0 && result->column_count() > 0) {
+                auto parsed = db::parse_plan_json(result->text(0, 0));
+                if (parsed) plan = std::move(*parsed);
+                else if (message.empty()) message = parsed.error().to_string();
+            }
+        }
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        plan_ = std::move(plan);
+
+        if (!message.empty()) {
+            status_message_ = message;
+        } else if (plan_) {
+            status_message_ = analyze
+                ? TRF("plan analyzed in %.2f ms (rolled back)",
+                      plan_->execution_time)
+                : std::string(TR("plan estimated (query not executed)"));
+        }
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+std::optional<db::QueryPlan> Session::take_plan() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (!plan_) return std::nullopt;
+
+    std::optional<db::QueryPlan> out = std::move(plan_);
+    plan_.reset();
+    return out;
+}
+
 db::SchemaMeta* Session::find_schema(std::string_view schema) {
     for (db::SchemaMeta& s : schemas_) {
         if (s.name == schema) return &s;

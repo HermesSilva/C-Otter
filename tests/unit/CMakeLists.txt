@@ -12,6 +12,7 @@ add_executable(otter_tests
     test_icons.cpp
     test_paging.cpp
     test_pgwire.cpp
+    test_plan.cpp
     test_result_set.cpp
     test_sql.cpp
     test_theme.cpp

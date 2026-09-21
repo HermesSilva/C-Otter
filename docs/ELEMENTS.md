@@ -60,7 +60,8 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **SQL** → Executar | `Ctrl+Enter` | ✅ | Item e atalho funcionam |
 | **SQL** → Executar script | `Alt+X` | ✅ | Item e atalho; para no primeiro erro |
 | **SQL** → Formatar | `Ctrl+Shift+F` | ✅ | Estilo "rio" do psql; preserva strings e comentários |
-| **SQL** → Explicar plano | `Ctrl+Shift+E` | ⬜ | |
+| **SQL** → Explicar plano | `Ctrl+Shift+E` | ✅ | Árvore com custo, `Seq Scan` em vermelho (ADR 0013) |
+| `EXPLAIN ANALYZE` | — | ✅ | Caixa separada, **com aviso**; sempre em transação com rollback |
 | **Ajuda** → Demo do ImGui | — | ✅ | Ferramenta de desenvolvimento |
 | **Ajuda** → Sobre o C-Otter | — | ✅ | |
 | Contador de FPS / ms | — | ✅ | Canto direito da barra |
@@ -480,7 +481,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (209, todos verdes):
+Testes automatizados (221, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe
