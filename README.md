@@ -40,11 +40,28 @@ Termos do projeto que apareceram no código e nos docs:
 
 ## Estado
 
-Planejamento. Três documentos:
+**Em desenvolvimento — a aplicação roda e conecta a bancos reais.**
+
+Funciona hoje: conexão PostgreSQL via protocolo v3 nativo (SCRAM-SHA-256, sem libpq),
+navegação de schema com carregamento tardio, editor SQL com realce e autocomplete sobre
+metadados reais, grade virtualizada e inspetor de queries. 144 fps, 1,8 MB em Release, sem
+dependência de DLL redistribuível.
+
+**Cobertura frente ao DBeaver: ~37%** dos itens no escopo da v1 — ver
+[`docs/PARITY.md`](docs/PARITY.md) para o inventário item a item.
+
+```powershell
+$env:PGPASSWORD="..."; $env:PGDATABASE="..."
+build\win-release\bin\c-otter.exe
+```
+
+### Documentação
 
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
 - [`docs/PLAN.md`](docs/PLAN.md) — roteiro de implementação em fases
-- [`docs/EFFORT.md`](docs/EFFORT.md) — carga de trabalho em homem-hora e protocolo de paridade
+- [`docs/EFFORT.md`](docs/EFFORT.md) — carga de trabalho em homem-hora
+- [`docs/PARITY.md`](docs/PARITY.md) — **inventário do que está e do que não está pronto**
+- [`docs/adr/`](docs/adr/) — decisões arquiteturais, com as revogadas marcadas
 
 ## Licença
 
