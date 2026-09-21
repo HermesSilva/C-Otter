@@ -218,6 +218,8 @@ StoredProfile profile_from_json(const std::string& id,
             ed["show-whitespace"].as_bool(defaults.show_whitespace);
         editor.page_size = static_cast<int>(
             ed["page-size"].as_number(defaults.page_size));
+        editor.hex_limit_kb = static_cast<int>(
+            ed["hex-limit-kb"].as_number(defaults.hex_limit_kb));
         editor.export_format = static_cast<int>(
             ed["export-format"].as_number(defaults.export_format));
         editor.export_write_header =
@@ -470,6 +472,10 @@ json::Value profile_to_json(const StoredProfile& stored) {
         }
         if (editor.page_size != defaults.page_size) {
             ed["page-size"] = json::Value(static_cast<double>(editor.page_size));
+        }
+        if (editor.hex_limit_kb != defaults.hex_limit_kb) {
+            ed["hex-limit-kb"] =
+                json::Value(static_cast<double>(editor.hex_limit_kb));
         }
         if (editor.export_format != defaults.export_format) {
             ed["export-format"] =

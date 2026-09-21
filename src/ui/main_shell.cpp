@@ -4101,8 +4101,13 @@ void MainShell::open_value_panel(SqlDocument& document, const db::ResultSet& rs,
             break;
 
         case db::ValueView::binary:
+            // O limite vem do perfil (pagina "Editor binário"). Era 64 KB
+            // fixo -- pouco para inspecionar um arquivo, muito para uma
+            // coluna de hashes.
             value_panel_.text = db::format_hex(
-                {reinterpret_cast<const std::byte*>(value.data()), value.size()});
+                {reinterpret_cast<const std::byte*>(value.data()), value.size()},
+                static_cast<std::size_t>(
+                    editor_options_for(document).hex_limit_kb) * 1024);
             break;
 
         case db::ValueView::boolean:

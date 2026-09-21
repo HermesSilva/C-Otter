@@ -117,6 +117,8 @@ private:
     void draw_page_errors_timeouts();
     void draw_page_data_editor();
     void draw_page_data_transfer();
+    void draw_page_binary_editor();
+    void draw_page_data_formats();
 
     // Continuam ABAS, dentro de "Connection settings": e' onde o DBeaver as
     // poe (ConnectionPageSettings), nao na raiz da arvore.

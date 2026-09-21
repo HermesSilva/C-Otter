@@ -745,6 +745,41 @@ const char* const kPtBr[] = {
         "Bloqueia INSERT, UPDATE, DELETE e DDL no cliente.",
     "Sets search_path when connecting.",
         "Define o search_path ao conectar.",
+    // --- Pagina Editor binário (main.resultset.editors) ---
+    "Hex dump",                   "Despejo hexadecimal",
+    "Limit (KB)",                 "Limite (KB)",
+    "How much of a BLOB the value panel formats. Beyond this it stops and "
+    "says how much was left out -- formatting 200 MB would spend memory "
+    "nobody reads.",
+        "Quanto de um BLOB o painel de valor formata. Além disso ele para e "
+        "diz quanto ficou de fora — formatar 200 MB gastaria memória que "
+        "ninguém lê.",
+    "The panel picks the view from the TYPE: indented JSON, hex for binary, "
+    "a checkbox for boolean.",
+        "O painel escolhe a visão pelo TIPO: JSON indentado, hexadecimal "
+        "para binário, caixa para booleano.",
+
+    // --- Pagina Formatos de dados (main.dataformat) ---
+    "Values as the server sends them",
+        "Valores como o servidor os envia",
+    "Numbers, dates and times appear exactly as the server formatted them. "
+    "Nothing is reformatted on the way.",
+        "Números, datas e horas aparecem exatamente como o servidor os "
+        "formatou. Nada é reformatado no caminho.",
+    "This is deliberate: a client mask hides what is really stored. A "
+    "timestamp shown as 31/12/2025 does not say whether the column has a "
+    "time zone, and a number rounded for display hides the scale that will "
+    "be used in a comparison.",
+        "Isso é deliberado: uma máscara no cliente esconde o que está "
+        "realmente gravado. Um timestamp exibido como 31/12/2025 não diz se "
+        "a coluna tem fuso horário, e um número arredondado para exibição "
+        "esconde a escala que valerá numa comparação.",
+    "To change the format, change it at the source: the DateStyle and "
+    "TimeZone parameters on the \"Internal parameters\" page, or a cast in "
+    "the query.",
+        "Para mudar o formato, mude na origem: os parâmetros DateStyle e "
+        "TimeZone na página \"Parâmetros internos\", ou um cast na consulta.",
+
     // --- Pagina Transferência de dados (main.datatransfer) ---
     "Export defaults",            "Padrões de exportação",
     "Format",                     "Formato",

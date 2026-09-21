@@ -151,6 +151,13 @@ struct EditorOptions {
     // num banco local e caro num servidor do outro lado do Atlantico.
     int  page_size               = 200;
 
+    // --- Editor binario (main.resultset.editors) ---
+    //
+    // Quantos KB de um BLOB o painel de valor formata em hexadecimal. Um
+    // BLOB de 200 MB inteiro consumiria memoria sem que ninguem lesse alem
+    // das primeiras linhas; o painel diz quanto ficou de fora.
+    int  hex_limit_kb         = 64;
+
     // --- Transferencia de dados (main.datatransfer) ---
     //
     // Padroes da janela de exportacao para ESTA conexao. Ela sempre pergunta

@@ -119,7 +119,8 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | **Erros e tempos limite** | Tempo limite, keep-alive, fechar ociosas | ✅ moveram-se de "Inicialização", onde ninguém procuraria |
 | **Transferência de dados** | Formato, cabeçalho e NULL padrão da exportação | ✅ a janela abre com eles; importação avisada na tela |
 | **Editor de dados** → **Grade** | Texto do NULL, alinhar números à direita | ✅ alimenta a grade |
-| **Editor de dados** → Editor binário, Formatos de dados | — | ⬜ **avisado na tela** |
+| **Editor de dados** → **Editor binário** | Limite do despejo hexadecimal | ✅ alimenta o painel de valor |
+| **Editor de dados** → **Formatos de dados** | — | ➖ valores saem como o servidor os envia; a página explica por quê e para onde ir (DateStyle, TimeZone, cast) |
 | **Editor SQL** → **Formatação** | Caixa das palavras-chave, indentação, estilo rio, quebra do SELECT | ✅ alimenta o Ctrl+Shift+F |
 | **Editor SQL** → **Completar código** | Sugerir ao digitar, atraso, em comentários/strings, inserir único | ✅ alimenta o popup |
 | **Editor SQL** → **Editor de código** | Tab, indentar sozinho, números de linha, parênteses | ✅ alimenta o TextEditor |
@@ -472,7 +473,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 18 | 0 | 0 | 0 | 18 |
-| Assistente de conexão | 50 | 1 | 4 | 1 | 56 |
+| Assistente de conexão | 51 | 1 | 3 | 1 | 56 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 58 | 0 | 3 | 0 | 61 |
@@ -480,9 +481,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **274** | **1** | **10** | **1** | **286** |
+| **Total** | **275** | **1** | **9** | **1** | **286** |
 
-**274 de 286 elementos existentes funcionam.**
+**275 de 286 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

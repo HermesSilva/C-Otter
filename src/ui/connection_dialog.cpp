@@ -442,12 +442,8 @@ void ConnectionDialog::draw_page_body() {
     case Page::data_transfer:     draw_page_data_transfer();    break;
     case Page::data_editor:       draw_page_data_editor();      break;
     case Page::data_editor_grid:  draw_page_data_editor();      break;
-    case Page::binary_editor:
-        draw_page_placeholder("Binary and BLOB display format");
-        break;
-    case Page::data_formats:
-        draw_page_placeholder("Number, date and time formats");
-        break;
+    case Page::binary_editor:     draw_page_binary_editor();    break;
+    case Page::data_formats:      draw_page_data_formats();     break;
     case Page::sql_editor:
         draw_page_placeholder("SQL editor defaults for this connection");
         break;
@@ -1070,6 +1066,56 @@ void ConnectionDialog::draw_page_initialization() {
         profile_.bootstrap_queries = buffer.data();
     }
 
+}
+
+// Formatos de dados (main.dataformat).
+//
+// O C-Otter exibe numeros, datas e horas COMO O SERVIDOR OS ENVIA, sem
+// reformatar. E' uma divergencia deliberada do DBeaver, que tem mascaras por
+// tipo -- e a razao esta' na tela, nao so' aqui.
+void ConnectionDialog::draw_page_data_formats() {
+    ImGui::TextColored(col4(colors().data), TR("Values as the server sends them"));
+    ImGui::Separator();
+
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("Numbers, dates and times appear exactly as the "
+                          "server formatted them. Nothing is reformatted on "
+                          "the way."));
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("This is deliberate: a client mask hides what is "
+                          "really stored. A timestamp shown as 31/12/2025 "
+                          "does not say whether the column has a time zone, "
+                          "and a number rounded for display hides the scale "
+                          "that will be used in a comparison."));
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("To change the format, change it at the source: "
+                          "the DateStyle and TimeZone parameters on the "
+                          "\"Internal parameters\" page, or a cast in the "
+                          "query."));
+    ImGui::PopTextWrapPos();
+}
+
+// Editor binario (main.resultset.editors).
+void ConnectionDialog::draw_page_binary_editor() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Hex dump"));
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(140);
+    ImGui::InputInt(TR("Limit (KB)"), &editor.hex_limit_kb, 16, 64);
+    editor.hex_limit_kb = std::clamp(editor.hex_limit_kb, 1, 16384);
+    help_marker(TR("How much of a BLOB the value panel formats. Beyond this "
+                   "it stops and says how much was left out -- formatting "
+                   "200 MB would spend memory nobody reads."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("The panel picks the view from the TYPE: indented "
+                          "JSON, hex for binary, a checkbox for boolean."));
 }
 
 // Transferencia de dados (main.datatransfer).
