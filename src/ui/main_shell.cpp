@@ -140,18 +140,30 @@ MainShell::MainShell()
 
     editor_->SetAutoCompleteConfig(autocomplete_config_.get());
 
-    // Pre-preenche a partir do ambiente, como psql e outras ferramentas fazem.
-    // Evita redigitar a cada execucao durante o desenvolvimento.
-    auto from_env = [](const char* name, char* target, std::size_t size) {
-        if (const char* value = std::getenv(name)) {
-            std::snprintf(target, size, "%s", value);
-        }
+    // O assistente conecta e, ao concluir, tambem guarda o perfil ativo.
+    connection_dialog_.set_on_connect([this](const db::ConnectionProfile& profile) {
+        active_profile_ = profile;
+        session_.connect_async(profile.to_conn_config());
+    });
+    connection_dialog_.set_on_save([this](const db::ConnectionProfile& profile) {
+        active_profile_ = profile;
+    });
+
+    // Abre primeiro: open_new() reinicia o perfil, e so' depois disso faz
+    // sentido preencher a partir do ambiente (como psql faz).
+    connection_dialog_.open_new();
+
+    db::ConnectionProfile& profile = connection_dialog_.profile();
+    auto from_env = [](const char* name, std::string& target) {
+        if (const char* value = std::getenv(name)) target = value;
     };
-    from_env("PGHOST",     host_,     sizeof(host_));
-    from_env("PGPORT",     port_,     sizeof(port_));
-    from_env("PGDATABASE", database_, sizeof(database_));
-    from_env("PGUSER",     user_,     sizeof(user_));
-    from_env("PGPASSWORD", password_, sizeof(password_));
+    from_env("PGHOST",     profile.host);
+    from_env("PGDATABASE", profile.database);
+    from_env("PGUSER",     profile.user);
+    from_env("PGPASSWORD", profile.password);
+    if (const char* port = std::getenv("PGPORT")) {
+        profile.port = static_cast<std::uint16_t>(std::atoi(port));
+    }
 }
 
 MainShell::~MainShell() = default;
@@ -313,7 +325,7 @@ void MainShell::draw() {
         execute_current_sql();
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
-        show_connect_ = true;
+        connection_dialog_.open_new();
     }
 
     draw_menu_bar();
@@ -326,9 +338,18 @@ void MainShell::draw() {
     draw_query_log_panel();
     draw_status_bar();
 
-    if (show_connect_) draw_connect_dialog();
-    if (show_about_)   draw_about_window();
-    if (show_demo_)    ImGui::ShowDemoWindow(&show_demo_);
+    // Traduz o estado da sessao para o que o assistente precisa exibir.
+    ConnectionDialog::Feedback feedback;
+    feedback.busy      = session_.busy();
+    feedback.failed    = session_.state() == SessionState::failed;
+    feedback.succeeded = session_.state() == SessionState::connected;
+    if (feedback.failed || feedback.succeeded) {
+        feedback.message = session_.status_message();
+    }
+    connection_dialog_.draw(feedback);
+
+    if (show_about_) draw_about_window();
+    if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
 }
 
 void MainShell::draw_dockspace() {
@@ -388,7 +409,13 @@ void MainShell::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
 
     if (ImGui::BeginMenu("Arquivo")) {
-        if (ImGui::MenuItem("Nova conexão...", "Ctrl+Shift+N")) show_connect_ = true;
+        if (ImGui::MenuItem("Nova conexão...", "Ctrl+Shift+N")) {
+            connection_dialog_.open_new();
+        }
+        if (ImGui::MenuItem("Editar conexão...", nullptr, false,
+                            session_.state() == SessionState::connected)) {
+            connection_dialog_.open_edit(active_profile_);
+        }
         if (ImGui::MenuItem("Desconectar", nullptr, false,
                             session_.state() == SessionState::connected)) {
             session_.disconnect();
@@ -444,31 +471,76 @@ void MainShell::draw_menu_bar() {
 
 void MainShell::draw_raft_panel() {
     if (ImGui::Begin("Raft")) {
-        if (ImGui::Button("Nova conexão")) show_connect_ = true;
-        ImGui::Separator();
+        if (ImGui::Button("Nova conexão")) connection_dialog_.open_new();
 
         const SessionState state = session_.state();
+        const bool connected = state == SessionState::connected;
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!connected);
+        if (ImGui::Button("Editar")) connection_dialog_.open_edit(active_profile_);
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
 
         if (state == SessionState::disconnected) {
             ImGui::TextColored(col4(palette::text_dim), "nenhuma conexão");
-        } else {
-            const std::string database = session_.database_name();
+            ImGui::End();
+            return;
+        }
 
-            const std::uint32_t color =
-                state == SessionState::connected  ? palette::ok
-                : state == SessionState::failed   ? palette::error
-                                                  : palette::warn;
-            ImGui::TextColored(col4(color), "●");
-            ImGui::SameLine();
-            ImGui::TextUnformatted(database.c_str());
+        const std::uint32_t status_color =
+            connected                        ? palette::ok
+            : state == SessionState::failed  ? palette::error
+                                             : palette::warn;
 
-            if (state == SessionState::connected) {
-                ImGui::Indent();
-                ImGui::TextColored(col4(palette::text_dim), "PostgreSQL %s",
-                                   session_.server_version().c_str());
-                ImGui::Unindent();
+        ImGui::TextColored(col4(status_color), "●");
+        ImGui::SameLine();
+        ImGui::TextUnformatted(active_profile_.effective_name().c_str());
+
+        // Menu de contexto sobre a conexão, como no DBeaver.
+        if (ImGui::BeginPopupContextItem("##connmenu")) {
+            if (ImGui::MenuItem("Editar conexão...")) {
+                connection_dialog_.open_edit(active_profile_);
+            }
+            if (ImGui::MenuItem("Desconectar", nullptr, false, connected)) {
+                session_.disconnect();
+                result_.reset();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Copiar nome")) {
+                ImGui::SetClipboardText(active_profile_.effective_name().c_str());
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::Indent();
+
+        // Faixa do tipo de conexão: produção precisa ser reconhecível de longe.
+        const db::ConnectionTypeInfo& type =
+            db::connection_type_info(active_profile_.type);
+        ImGui::TextColored(col4(type.color), "%s", type.name);
+
+        if (connected) {
+            ImGui::TextColored(col4(palette::text_dim), "PostgreSQL %s",
+                               session_.server_version().c_str());
+            ImGui::TextColored(col4(palette::text_dim), "%s:%u",
+                               active_profile_.host.c_str(),
+                               active_profile_.port);
+            ImGui::TextColored(col4(palette::text_dim), "%s",
+                               active_profile_.auto_commit ? "auto-commit"
+                                                           : "transação manual");
+            if (active_profile_.read_only) {
+                ImGui::TextColored(col4(palette::warn), "somente leitura");
             }
         }
+
+        if (!active_profile_.description.empty()) {
+            ImGui::TextColored(col4(palette::text_dim), "%s",
+                               active_profile_.description.c_str());
+        }
+
+        ImGui::Unindent();
     }
     ImGui::End();
 }
@@ -718,68 +790,6 @@ void MainShell::draw_query_log_panel() {
     ImGui::End();
 }
 
-void MainShell::draw_connect_dialog() {
-    ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Appearing);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
-                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-
-    if (ImGui::Begin("Conexão", &show_connect_,
-                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextColored(col4(palette::data), "PostgreSQL");
-        ImGui::Separator();
-
-        ImGui::SetNextItemWidth(-120.0f);
-        ImGui::InputText("host", host_, sizeof(host_));
-        ImGui::SetNextItemWidth(-120.0f);
-        ImGui::InputText("porta", port_, sizeof(port_),
-                         ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SetNextItemWidth(-120.0f);
-        ImGui::InputText("banco", database_, sizeof(database_));
-        ImGui::SetNextItemWidth(-120.0f);
-        ImGui::InputText("usuário", user_, sizeof(user_));
-        ImGui::SetNextItemWidth(-120.0f);
-        ImGui::InputText("senha", password_, sizeof(password_),
-                         ImGuiInputTextFlags_Password);
-
-        ImGui::Separator();
-
-        const bool connecting = session_.state() == SessionState::connecting;
-        ImGui::BeginDisabled(connecting);
-
-        if (ImGui::Button("Conectar", ImVec2(120, 0))) {
-            db::ConnConfig config;
-            config.host     = host_;
-            config.port     = static_cast<std::uint16_t>(std::atoi(port_));
-            config.database = database_;
-            config.user     = user_;
-            config.password = password_;
-            session_.connect_async(config);
-        }
-        ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        if (ImGui::Button("Fechar", ImVec2(120, 0))) show_connect_ = false;
-
-        if (connecting) {
-            ImGui::SameLine();
-            draw_busy_indicator();
-        }
-
-        const SessionState state = session_.state();
-        if (state == SessionState::failed) {
-            ImGui::Separator();
-            ImGui::PushTextWrapPos(400.0f);
-            ImGui::TextColored(col4(palette::error), "%s",
-                               session_.status_message().c_str());
-            ImGui::PopTextWrapPos();
-        } else if (state == SessionState::connected) {
-            ImGui::Separator();
-            ImGui::TextColored(col4(palette::ok), "%s",
-                               session_.status_message().c_str());
-        }
-    }
-    ImGui::End();
-}
 
 void MainShell::draw_status_bar() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();

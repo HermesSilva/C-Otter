@@ -58,38 +58,84 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | **Ajuda** → Sobre o C-Otter | — | ✅ | |
 | Contador de FPS / ms | — | ✅ | Canto direito da barra |
 
-## 3. Diálogo de Conexão
+## 3. Assistente de Conexão
+
+Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers + 8 abas.
+
+### Etapa 1 — catálogo de drivers
 
 | Elemento | Estado | Observação |
 |----------|--------|------------|
-| Abre automaticamente ao iniciar | ✅ | |
-| Campo host | ✅ | Pré-preenchido por `PGHOST` |
-| Campo porta | ✅ | `PGPORT`; aceita só dígitos |
-| Campo banco | ✅ | `PGDATABASE` |
-| Campo usuário | ✅ | `PGUSER` |
-| Campo senha (mascarado) | ✅ | `PGPASSWORD` |
-| Botão Conectar | ✅ | Desabilitado durante a conexão |
-| Botão Fechar | ✅ | |
-| Indicador de atividade pulsante | ✅ | |
-| Mensagem de erro detalhada | ✅ | Ex.: `senha incorreta [authentication failed]` |
-| Mensagem de sucesso com contagens | ✅ | `1 schema(s), 32 tabela(s), 34 FK(s)` |
-| Escolher SGBD | ⬜ | Só PostgreSQL |
-| Salvar conexão | ⬜ | **Redigitar a cada execução** |
-| Testar sem conectar | ⬜ | |
-| Aba de opções avançadas (SSL, timeout) | ⬜ | |
-| Lembrar senha em cofre do SO | ⬜ | |
+| Lista de 18 drivers | ✅ | Com categoria e estado |
+| Coluna de categorias | ✅ | Todos, Popular, SQL, NoSQL, Analítico, Arquivos, Embarcado, Séries temporais |
+| Filtro por nome | ✅ | Sem diferenciar maiúsculas |
+| Drivers indisponíveis esmaecidos | ✅ | Com o motivo: "protocolo em desenvolvimento", "fase 3", "fora do escopo" |
+| Duplo clique avança | ✅ | |
+| Botão Avançar / Cancelar | ✅ | Avançar desabilitado sem driver disponível |
+| Ícones dos SGBDs | ⬜ | O DBeaver mostra o logo de cada banco |
+
+### Etapa 2 — configuração (8 abas)
+
+| Aba | Elemento | Estado |
+|-----|----------|--------|
+| **Principal** | Host, porta, banco | ✅ |
+| | Método de autenticação (5 opções) | ✅ |
+| | Usuário, senha, salvar senha | ✅ |
+| | Campos de credencial desabilitados quando o método não usa | ✅ |
+| **PostgreSQL** | Mostrar todos os bancos / templates / sem acesso | ✅ |
+| | Ler estatísticas de tamanho | ✅ |
+| | Ler todos os tipos / colunas das chaves | ✅ |
+| | Prepared statements, role da sessão, fuso legado | ✅ |
+| | Tooltips explicando cada opção | ✅ |
+| **Driver** | Tabela de propriedades editável | ✅ |
+| | Adicionar / remover propriedade | ✅ |
+| | Propriedades aplicadas na conexão | ⬜ |
+| **SSH** | Host, porta, usuário, tipo de autenticação | ✅ (UI) |
+| | Senha / chave privada / agente | ✅ (UI) |
+| | Túnel efetivamente estabelecido | ⬜ **avisado na tela** |
+| **SSL** | Modo (disable→verify-full), certificados | ✅ (UI) |
+| | TLS negociado | ⬜ **avisado na tela** |
+| **Proxy** | Host, porta, credenciais SOCKS | ✅ (UI) |
+| | Proxy usado | ⬜ **avisado na tela** |
+| **Inicialização** | Auto-commit, somente leitura | ✅ |
+| | Schema padrão, consultas de bootstrap | ✅ (UI) |
+| | Timeout, keep-alive, fechar ociosas | ✅ |
+| **Geral** | Nome, descrição, pasta | ✅ |
+| | Tipo: Desenvolvimento / Teste / Produção | ✅ |
+| | Cor por tipo e resumo do comportamento | ✅ |
+| | Produção desliga auto-commit automaticamente | ✅ |
+
+### Rodapé
+
+| Elemento | Estado |
+|----------|--------|
+| `< Voltar` (só em nova conexão) | ✅ |
+| `Testar conexão` | ✅ |
+| `Concluir` / `Salvar` | ✅ |
+| `Cancelar` | ✅ |
+| Indicador pulsante durante a conexão | ✅ |
+| Erro detalhado / sucesso com contagens | ✅ |
+| Faixa colorida do tipo no topo | ✅ |
+| **Persistir a conexão em disco** | ⬜ **redigitar a cada execução** |
+| Senha no cofre do SO | ⬜ |
 
 ## 4. Painel Raft (conexões)
 
 | Elemento | Estado | Observação |
 |----------|--------|------------|
 | Botão "Nova conexão" | ✅ | |
+| Botão "Editar" | ✅ | Reabre o assistente com o perfil ativo |
 | Indicador colorido de estado | ✅ | Verde conectado, vermelho falha, amarelo conectando |
-| Nome do banco | ✅ | |
+| Nome efetivo da conexão | ✅ | Nome do usuário ou `banco@host` |
+| Tipo de conexão colorido | ✅ | Desenvolvimento / Teste / Produção |
 | Versão do servidor | ✅ | `PostgreSQL 18.2` |
+| Host e porta | ✅ | |
+| Modo de transação | ✅ | `auto-commit` ou `transação manual` |
+| Aviso de somente leitura | ✅ | |
+| Descrição da conexão | ✅ | Quando preenchida |
+| Menu de contexto | ✅ | Editar, desconectar, copiar nome |
 | Lista de várias conexões | ⬜ | Uma por vez |
-| Menu de contexto | ⬜ | |
-| Pastas de organização | ⬜ | |
+| Pastas de organização | ⬜ | Campo existe, árvore não agrupa |
 
 ## 5. Painel Navigator
 

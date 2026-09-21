@@ -11,6 +11,7 @@
 #include "db/holt.hpp"
 #include "db/result_set.hpp"
 #include "sql/script.hpp"
+#include "ui/connection_dialog.hpp"
 #include "ui/session.hpp"
 
 #include <cstddef>
@@ -44,7 +45,6 @@ private:
     void draw_query_log_panel();
     void draw_status_bar();
     void draw_about_window();
-    void draw_connect_dialog();
 
     void execute_current_sql();
 
@@ -52,15 +52,14 @@ private:
     std::unique_ptr<TextEditor::AutoCompleteConfig> autocomplete_config_;
     Session session_;
 
+    // Assistente de conexao completo (abas Principal/PostgreSQL/SSH/SSL/...).
+    ConnectionDialog connection_dialog_;
+
+    // Perfil da conexao ativa, para a UI exibir nome, tipo e cor.
+    db::ConnectionProfile active_profile_;
+
     // Resultado ativo na grade. Copiado da sessao quando o worker termina.
     std::optional<db::ResultSet> result_;
-
-    // Campos do dialogo de conexao.
-    char host_[128]     = "localhost";
-    char port_[8]       = "5432";
-    char database_[128] = "ERP_TID";
-    char user_[64]      = "postgres";
-    char password_[128] = "";
 
     // Indice de undo correspondente ao ultimo estado salvo. Comparar com
     // GetUndoIndex() diz se ha' alteracoes pendentes -- e cobre o caso de
@@ -71,7 +70,6 @@ private:
     bool wants_quit_         = false;
     bool show_about_         = false;
     bool show_demo_          = false;
-    bool show_connect_       = true;   // abre ao iniciar
 };
 
 } // namespace otter::ui

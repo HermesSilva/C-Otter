@@ -8,6 +8,7 @@ otter_add_library(otter_db
         types.cpp
         result_set.cpp
         catalog.cpp
+        connection_config.cpp
         drivers/postgres.cpp
     DEPS
         otter::otter_base

@@ -9,6 +9,7 @@ otter_add_library(otter_ui
     SOURCES
         theme.cpp
         main_shell.cpp
+        connection_dialog.cpp
         session.cpp
         app_window_glfw.cpp
     DEPS
