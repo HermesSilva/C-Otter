@@ -429,3 +429,75 @@ OTTER_TEST(store_keeps_two_profiles_that_differ_only_by_driver) {
     OTTER_CHECK(found_pg);
     OTTER_CHECK(found_my);
 }
+
+// --- Preferencias do editor, por conexao ------------------------------------
+//
+// Por que existe: elas so' valem se sobreviverem ao reinicio. Um campo que o
+// usuario ajusta e que volta ao padrao na proxima sessao e' o tipo de coisa
+// que a diretriz 6 chama de campo que finge funcionar.
+
+OTTER_TEST(store_round_trips_the_editor_options) {
+    const TempDir dir("editor-options");
+
+    StoredProfile stored;
+    stored.id       = "postgres-editor";
+    stored.provider = "postgresql";
+    stored.driver   = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host = "localhost";
+
+    // Todos DIFERENTES do padrao: gravar so' o que difere e' a regra, e um
+    // teste com valores padrao nao provaria nada.
+    stored.profile.editor.keyword_case         = 2;     // minusculas
+    stored.profile.editor.indent_width         = 2;
+    stored.profile.editor.river_style          = false;
+    stored.profile.editor.wrap_select_after    = 7;
+    stored.profile.editor.complete_on_typing   = false;
+    stored.profile.editor.complete_in_comments = true;
+    stored.profile.editor.complete_in_strings  = true;
+    stored.profile.editor.auto_insert_single   = true;
+    stored.profile.editor.complete_delay_ms    = 500;
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+
+    const EditorOptions& e = back->front().profile.editor;
+    OTTER_CHECK_EQ(e.keyword_case, 2);
+    OTTER_CHECK_EQ(e.indent_width, 2);
+    OTTER_CHECK(!e.river_style);
+    OTTER_CHECK_EQ(e.wrap_select_after, std::size_t{7});
+    OTTER_CHECK(!e.complete_on_typing);
+    OTTER_CHECK(e.complete_in_comments);
+    OTTER_CHECK(e.complete_in_strings);
+    OTTER_CHECK(e.auto_insert_single);
+    OTTER_CHECK_EQ(e.complete_delay_ms, 500);
+}
+
+OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
+    // Um perfil importado do DBeaver nao tem "otter-editor". Ele precisa
+    // carregar com os padroes, nao com zeros -- indent_width zero produziria
+    // SQL formatado sem indentacao nenhuma.
+    const TempDir dir("editor-absent");
+
+    StoredProfile stored;
+    stored.id       = "postgres-plain";
+    stored.provider = "postgresql";
+    stored.driver   = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host = "localhost";
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+
+    const EditorOptions defaults;
+    const EditorOptions& e = back->front().profile.editor;
+    OTTER_CHECK_EQ(e.keyword_case, defaults.keyword_case);
+    OTTER_CHECK_EQ(e.indent_width, defaults.indent_width);
+    OTTER_CHECK_EQ(e.river_style, defaults.river_style);
+    OTTER_CHECK_EQ(e.complete_delay_ms, defaults.complete_delay_ms);
+}

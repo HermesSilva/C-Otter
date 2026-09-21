@@ -179,6 +179,33 @@ StoredProfile profile_from_json(const std::string& id,
     profile.folder      = std::string(node["folder"].as_string());
     profile.save_password = node["save-password"].as_bool();
 
+    // Preferencias do editor. Ausentes -- num perfil importado do DBeaver,
+    // ou gravado antes desta versao -- ficam no padrao de EditorOptions.
+    if (const json::Value& ed = node["otter-editor"]; ed.is_object()) {
+        EditorOptions& editor = profile.editor;
+        const EditorOptions defaults;
+
+        editor.keyword_case = static_cast<int>(
+            ed["keyword-case"].as_number(defaults.keyword_case));
+        editor.indent_width = static_cast<int>(
+            ed["indent-width"].as_number(defaults.indent_width));
+        editor.river_style = ed["river-style"].as_bool(defaults.river_style);
+        editor.wrap_select_after = static_cast<std::size_t>(
+            ed["wrap-select-after"].as_number(
+                static_cast<double>(defaults.wrap_select_after)));
+
+        editor.complete_on_typing =
+            ed["complete-on-typing"].as_bool(defaults.complete_on_typing);
+        editor.complete_in_comments =
+            ed["complete-in-comments"].as_bool(defaults.complete_in_comments);
+        editor.complete_in_strings =
+            ed["complete-in-strings"].as_bool(defaults.complete_in_strings);
+        editor.auto_insert_single =
+            ed["auto-insert-single"].as_bool(defaults.auto_insert_single);
+        editor.complete_delay_ms = static_cast<int>(
+            ed["complete-delay-ms"].as_number(defaults.complete_delay_ms));
+    }
+
     const json::Value& config = node["configuration"];
     profile.host     = std::string(config["host"].as_string("localhost"));
     profile.database = std::string(config["database"].as_string());
@@ -342,6 +369,53 @@ json::Value profile_to_json(const StoredProfile& stored) {
     }
     if (!profile.folder.empty()) node["folder"] = json::Value(profile.folder);
     node["save-password"] = json::Value(profile.save_password);
+
+    // Preferencias do editor, por conexao. Num objeto proprio com prefixo
+    // "otter-": o DBeaver ignora chaves que nao conhece, e um perfil que
+    // passe pelas duas ferramentas nao perde nem corrompe nada.
+    //
+    // Gravadas so' quando DIFEREM do padrao, para o arquivo nao encher de
+    // linhas que nao dizem nada -- e para um perfil importado do DBeaver
+    // continuar parecendo um perfil do DBeaver.
+    {
+        const EditorOptions defaults;
+        const EditorOptions& editor = profile.editor;
+        json::Object ed;
+
+        if (editor.keyword_case != defaults.keyword_case) {
+            ed["keyword-case"] = json::Value(
+                static_cast<double>(editor.keyword_case));
+        }
+        if (editor.indent_width != defaults.indent_width) {
+            ed["indent-width"] = json::Value(
+                static_cast<double>(editor.indent_width));
+        }
+        if (editor.river_style != defaults.river_style) {
+            ed["river-style"] = json::Value(editor.river_style);
+        }
+        if (editor.wrap_select_after != defaults.wrap_select_after) {
+            ed["wrap-select-after"] = json::Value(
+                static_cast<double>(editor.wrap_select_after));
+        }
+        if (editor.complete_on_typing != defaults.complete_on_typing) {
+            ed["complete-on-typing"] = json::Value(editor.complete_on_typing);
+        }
+        if (editor.complete_in_comments != defaults.complete_in_comments) {
+            ed["complete-in-comments"] = json::Value(editor.complete_in_comments);
+        }
+        if (editor.complete_in_strings != defaults.complete_in_strings) {
+            ed["complete-in-strings"] = json::Value(editor.complete_in_strings);
+        }
+        if (editor.auto_insert_single != defaults.auto_insert_single) {
+            ed["auto-insert-single"] = json::Value(editor.auto_insert_single);
+        }
+        if (editor.complete_delay_ms != defaults.complete_delay_ms) {
+            ed["complete-delay-ms"] = json::Value(
+                static_cast<double>(editor.complete_delay_ms));
+        }
+
+        if (!ed.empty()) node["otter-editor"] = json::Value(std::move(ed));
+    }
     node["configuration"] = json::Value(std::move(config));
 
     return json::Value(std::move(node));

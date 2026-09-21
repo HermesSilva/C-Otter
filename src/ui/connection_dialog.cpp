@@ -459,19 +459,101 @@ void ConnectionDialog::draw_page_body() {
     case Page::sql_editor:
         draw_page_placeholder("SQL editor defaults for this connection");
         break;
-    case Page::sql_completion:
-        draw_page_placeholder("Code completion behaviour for this connection");
-        break;
+    case Page::sql_completion:    draw_page_sql_completion();   break;
     case Page::sql_code_editor:
         draw_page_placeholder("Code editor behaviour for this connection");
         break;
-    case Page::sql_formatting:
-        draw_page_placeholder("SQL formatting style for this connection");
-        break;
+    case Page::sql_formatting:    draw_page_sql_formatting();   break;
     case Page::sql_processing:
         draw_page_placeholder("Statement delimiters and execution options");
         break;
     }
+}
+
+// Formatacao do SQL, por conexao (main.sql.format).
+//
+// As opcoes existiam em sql::FormatOptions, com os valores fixos no codigo:
+// Ctrl+Shift+F sempre formatava em MAIUSCULAS, estilo rio, indentacao 4.
+// Agora sao do PERFIL -- e' o que permite maiusculas no banco legado e
+// minusculas no novo, que e' a razao de o DBeaver as por por conexao.
+void ConnectionDialog::draw_page_sql_formatting() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("Keywords"));
+    ImGui::Separator();
+
+    const char* kCases[] = {TR("As typed"), TR("UPPERCASE"), TR("lowercase")};
+    ImGui::SetNextItemWidth(220);
+    ImGui::Combo(TR("Case"), &editor.keyword_case, kCases, IM_ARRAYSIZE(kCases));
+    help_marker(TR("Applies when formatting (Ctrl+Shift+F). It does not "
+                   "change what you type."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Layout"));
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputInt(TR("Indent width"), &editor.indent_width, 1, 2);
+    editor.indent_width = std::clamp(editor.indent_width, 1, 16);
+
+    ImGui::Checkbox(TR("River style"), &editor.river_style);
+    help_marker(TR("Aligns the main clauses to the right, like psql:\n"
+                   "  SELECT a, b\n"
+                   "    FROM t\n"
+                   "   WHERE x\n\n"
+                   "Off produces the style more common in source code, with "
+                   "every clause at the left margin."));
+
+    int wrap = static_cast<int>(editor.wrap_select_after);
+    ImGui::SetNextItemWidth(120);
+    if (ImGui::InputInt(TR("Wrap the SELECT list after"), &wrap, 1, 2)) {
+        editor.wrap_select_after =
+            static_cast<std::size_t>(std::clamp(wrap, 1, 64));
+    }
+    help_marker(TR("One column per line when the list has more items than "
+                   "this. Short lists fit on one line and read better that "
+                   "way."));
+}
+
+// Completar codigo, por conexao (main.sql.completion).
+//
+// Espelha TextEditor::AutoCompleteConfig, que ja' tinha estas opcoes com os
+// valores fixos em MainShell.
+void ConnectionDialog::draw_page_sql_completion() {
+    db::EditorOptions& editor = profile_.editor;
+
+    ImGui::TextColored(col4(colors().data), TR("When to suggest"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Suggest while typing"), &editor.complete_on_typing);
+    help_marker(TR("Off, completion only opens with Ctrl+Space."));
+
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputInt(TR("Delay (ms)"), &editor.complete_delay_ms, 50, 100);
+    editor.complete_delay_ms = std::clamp(editor.complete_delay_ms, 0, 2000);
+    help_marker(TR("How long to wait after a keystroke before opening the "
+                   "list. Zero opens immediately, which gets in the way when "
+                   "typing fast."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Where to suggest"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Inside comments"), &editor.complete_in_comments);
+    ImGui::Checkbox(TR("Inside strings"), &editor.complete_in_strings);
+    help_marker(TR("Off by default: a table name suggested inside a string "
+                   "literal would be inserted as text, not as an "
+                   "identifier."));
+
+    ImGui::Spacing();
+    ImGui::TextColored(col4(colors().data), TR("Behaviour"));
+    ImGui::Separator();
+
+    ImGui::Checkbox(TR("Insert a single match automatically"),
+                    &editor.auto_insert_single);
+    help_marker(TR("With one candidate only, insert it without showing the "
+                   "list. Saves a keystroke, but surprises when the single "
+                   "match is not what you meant."));
 }
 
 // A pagina existe na arvore porque o DBeaver a tem, mas o C-Otter ainda nao

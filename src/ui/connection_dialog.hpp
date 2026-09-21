@@ -108,6 +108,11 @@ private:
     void draw_page_transactions();
     void draw_page_general();
 
+    // Preferencias do editor, por conexao -- as opcoes existiam com valores
+    // fixos no codigo e agora vem do perfil.
+    void draw_page_sql_formatting();
+    void draw_page_sql_completion();
+
     // Continuam ABAS, dentro de "Connection settings": e' onde o DBeaver as
     // poe (ConnectionPageSettings), nao na raiz da arvore.
     void draw_tab_ssh();

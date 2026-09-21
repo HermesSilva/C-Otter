@@ -799,6 +799,60 @@ const char* const kPtBr[] = {
     "of %zu",                     "de %zu",
     "Count the whole result (one more full scan)",
         "Contar o resultado inteiro (mais uma varredura completa)",
+
+    // --- Pagina Formatação (main.sql.format) ---
+    "Keywords",                   "Palavras-chave",
+    "As typed",                   "Como digitado",
+    "UPPERCASE",                  "MAIÚSCULAS",
+    "lowercase",                  "minúsculas",
+    "Case",                       "Caixa",
+    "Applies when formatting (Ctrl+Shift+F). It does not change what you type.",
+        "Vale ao formatar (Ctrl+Shift+F). Não muda o que você digita.",
+    "Layout",                     "Disposição",
+    "Indent width",               "Largura da indentação",
+    "River style",                "Estilo rio",
+    "Aligns the main clauses to the right, like psql:\n"
+    "  SELECT a, b\n"
+    "    FROM t\n"
+    "   WHERE x\n\n"
+    "Off produces the style more common in source code, with every clause at "
+    "the left margin.",
+        "Alinha as cláusulas principais à direita, como o psql:\n"
+        "  SELECT a, b\n"
+        "    FROM t\n"
+        "   WHERE x\n\n"
+        "Desligado produz o estilo mais comum em código, com cada cláusula na "
+        "margem esquerda.",
+    "Wrap the SELECT list after", "Quebrar a lista do SELECT após",
+    "One column per line when the list has more items than this. Short lists "
+    "fit on one line and read better that way.",
+        "Uma coluna por linha quando a lista passa disso. Listas curtas cabem "
+        "numa linha e ficam melhores assim.",
+
+    // --- Pagina Completar código (main.sql.completion) ---
+    "When to suggest",            "Quando sugerir",
+    "Suggest while typing",       "Sugerir enquanto digita",
+    "Off, completion only opens with Ctrl+Space.",
+        "Desligado, o completar só abre com Ctrl+Espaço.",
+    "Delay (ms)",                 "Atraso (ms)",
+    "How long to wait after a keystroke before opening the list. Zero opens "
+    "immediately, which gets in the way when typing fast.",
+        "Quanto esperar depois de uma tecla antes de abrir a lista. Zero abre "
+        "na hora, o que atrapalha quem digita rápido.",
+    "Where to suggest",           "Onde sugerir",
+    "Inside comments",            "Dentro de comentários",
+    "Inside strings",             "Dentro de strings",
+    "Off by default: a table name suggested inside a string literal would be "
+    "inserted as text, not as an identifier.",
+        "Desligado por padrão: um nome de tabela sugerido dentro de uma "
+        "string entraria como texto, não como identificador.",
+    "Behaviour",                  "Comportamento",
+    "Insert a single match automatically",
+        "Inserir sozinho quando houver um só",
+    "With one candidate only, insert it without showing the list. Saves a "
+    "keystroke, but surprises when the single match is not what you meant.",
+        "Com um candidato só, insere sem mostrar a lista. Economiza uma "
+        "tecla, mas surpreende quando o único achado não era o pretendido.",
 };
 
 } // namespace

@@ -43,7 +43,7 @@ DBeaver. Aqui a granularidade é o *elemento de interface*.
 | Docking de painéis (arrastar abas) | ✅ | |
 | **Layout persistido** | ✅ | `%APPDATA%\C-Otter\layout.ini`, não no diretório de trabalho |
 | **Ícone da janela** | ✅ | Gerado em memória (32x32 RGBA) — decodificar o PNG exigiria trazer um stb_image só para isto |
-| Splash screen | ⬜ | `Midia/Splash.png` existe, não é usado |
+| Splash screen | ➖ | `Midia/Splash.png` existe, mas exibi-lo pede um decodificador de PNG (o projeto só tem `stb_image_write`). O C-Otter abre em ~300 ms — um splash apareceria depois da janela, o que é pior que não ter |
 | Múltiplas janelas | ⬜ | |
 
 ## 2. Barra de menus
@@ -119,7 +119,9 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | **Erros e tempos limite** | — | ⬜ **avisado na tela** |
 | **Transferência de dados** | — | ⬜ **avisado na tela** |
 | **Editor de dados** | Editor binário, Formatos de dados, Grade | ⬜ **avisado na tela** |
-| **Editor SQL** | Editor de código, Completar código, Formatação, Processamento SQL | ⬜ **avisado na tela** |
+| **Editor SQL** → **Formatação** | Caixa das palavras-chave, indentação, estilo rio, quebra do SELECT | ✅ alimenta o Ctrl+Shift+F |
+| **Editor SQL** → **Completar código** | Sugerir ao digitar, atraso, em comentários/strings, inserir único | ✅ alimenta o popup |
+| **Editor SQL** → Editor de código, Processamento SQL | — | ⬜ **avisado na tela** |
 
 As abas de rede continuam existindo, com o mesmo conteúdo de antes:
 
@@ -214,7 +216,7 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Atualizar nó (F5) | ✅ | Descarta o cache e relê o catálogo |
 | **Criar / alterar / excluir objeto** | ✅ | Coluna, tabela, índice, constraint, FK, view, sequence, trigger (ADR 0016) |
 | **Duplo clique abre dados** | ✅ | Distingue de expandir o nó |
-| Arrastar tabela para o editor | ⬜ | |
+| **Arrastar tabela para o editor** | ✅ | Insere o nome qualificado no cursor; a área de transferência é preservada |
 | **Atualizar (F5)** | ✅ | Reexecuta a consulta da aba, na mesma página |
 
 ## 6. Editor SQL
@@ -390,7 +392,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Copiar erro** | ✅ | Desabilitado quando a query não falhou |
 | **Limpar log** | ✅ | Sem confirmação: é só histórico de diagnóstico |
 | Mensagem de erro no tooltip | ✅ | Junto do SQL; antes era preciso achá-la na barra de status |
-| Persistir entre sessões | ⬜ | |
+| Persistir entre sessões | ⬜ | Exige decidir rotação e **privacidade**: uma query carrega dados (`WHERE cpf = '...'`), e gravá-la em disco sem o usuário pedir é diferente de mantê-la em memória. O DBeaver tem um Query Manager com essa opção desligada por padrão |
 
 ## 9. Barra de status
 
@@ -463,19 +465,19 @@ ficam de fora do total.
 
 | Área | ✅ | 🟡 | ⬜ | ❌ | Total |
 |------|-----|-----|-----|-----|-------|
-| Janela e estrutura | 18 | 0 | 2 | 0 | 20 |
+| Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
-| Assistente de conexão | 41 | 1 | 9 | 0 | 51 |
+| Assistente de conexão | 43 | 1 | 9 | 0 | 53 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
-| Navigator | 33 | 0 | 1 | 0 | 34 |
+| Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 55 | 3 | 3 | 0 | 61 |
-| Grade | 55 | 0 | 2 | 0 | 57 |
+| Grade | 55 | 1 | 1 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
-| Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **258** | **6** | **19** | **0** | **283** |
+| Transações | 5 | 0 | 0 | 0 | 5 |
+| **Total** | **261** | **7** | **15** | **0** | **283** |
 
-**258 de 283 elementos existentes funcionam.**
+**261 de 283 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -547,7 +549,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (420, todos verdes):
+Testes automatizados (431, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

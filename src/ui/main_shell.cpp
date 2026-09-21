@@ -407,6 +407,25 @@ SqlDocument* MainShell::active_document() {
 
 // Gera sugestoes de completion (ADR 0004), sobre metadados reais e com o
 // escopo sintatico do otter_sql.
+// Aplica ao editor as preferencias de completar codigo da conexao do
+// documento (pagina "Completar código" do dialogo).
+//
+// A cada quadro, e nao uma vez: a AutoCompleteConfig e' compartilhada por
+// todos os editores, e trocar de aba precisa trocar as opcoes junto -- senao
+// a aba do banco legado herdaria as do novo.
+void MainShell::apply_completion_options(const SqlDocument& document) {
+    const Connection* owner = connection_by_id(document.connection_id());
+    if (owner == nullptr) return;
+
+    const db::EditorOptions& editor = owner->profile.editor;
+    autocomplete_config_->triggerOnTyping   = editor.complete_on_typing;
+    autocomplete_config_->triggerInComments = editor.complete_in_comments;
+    autocomplete_config_->triggerInStrings  = editor.complete_in_strings;
+    autocomplete_config_->autoInsertSingleSuggestions = editor.auto_insert_single;
+    autocomplete_config_->triggerDelay =
+        std::chrono::milliseconds(editor.complete_delay_ms);
+}
+
 void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     struct Candidate {
         std::string text;
@@ -929,8 +948,23 @@ void MainShell::format_current_sql() {
     const std::string before = document->editor().GetText();
     if (before.empty()) return;
 
+    // As opcoes vem do PERFIL da conexao do documento (pagina "Formatação"
+    // do dialogo). Antes eram os valores padrao de FormatOptions, fixos no
+    // codigo -- Ctrl+Shift+F sempre formatava em MAIUSCULAS, estilo rio.
+    sql::FormatOptions options;
+    if (const Connection* owner = connection_by_id(document->connection_id())) {
+        const db::EditorOptions& editor = owner->profile.editor;
+        options.keyword_case =
+            editor.keyword_case == 0 ? sql::KeywordCase::preserve
+            : editor.keyword_case == 2 ? sql::KeywordCase::lower
+                                       : sql::KeywordCase::upper;
+        options.indent_width      = editor.indent_width;
+        options.river_style       = editor.river_style;
+        options.wrap_select_after = editor.wrap_select_after;
+    }
+
     const std::string after =
-        sql::format_sql(before, active_dialect());
+        sql::format_sql(before, active_dialect(), options);
 
     // Texto igual: nao mexe. SetText move o cursor para o inicio e cria um
     // ponto de desfazer -- fazer isso quando nada mudou seria ruido.
@@ -2318,6 +2352,28 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         const bool node_hovered = ImGui::IsItemHovered();
         const bool node_toggled = ImGui::IsItemToggledOpen();
 
+        // Arrastar a relacao para o editor. O DBeaver faz o mesmo -- e' o
+        // caminho mais curto entre "achei a tabela" e "escrevi a consulta".
+        //
+        // SourceNoDisableHover mantem o realce do no' durante o arrasto: sem
+        // ele a linha apaga assim que o arrasto comeca, e nao se sabe mais o
+        // que esta' sendo arrastado.
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+            const std::string qualified =
+                db::qualified_name(schema.name, relation.name);
+
+            // O payload carrega o nome QUALIFICADO: soltar "cliente" num
+            // editor cuja conexao esta' noutro schema produziria SQL que nao
+            // resolve. O '\0' vai junto para o alvo poder ler como C-string.
+            ImGui::SetDragDropPayload("OTTER_RELATION", qualified.c_str(),
+                                      qualified.size() + 1);
+
+            icon_inline(icon, tint);
+            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::TextUnformatted(qualified.c_str());
+            ImGui::EndDragDropSource();
+        }
+
         ImGui::SameLine(0.0f, 0.0f);
         icon_inline(icon, tint);
         ImGui::SameLine(0.0f, 6.0f);
@@ -3445,10 +3501,57 @@ void MainShell::draw_document_body(SqlDocument& document) {
 
     // SQL e' codigo: aqui, e so' aqui, a fonte e' monoespacada. O resto da
     // interface usa a do sistema, como no DBeaver (ver load_ui_font).
+    // Antes de Render(): a config e' lida quando o editor decide abrir o
+    // popup, e aplica-la depois valeria so' no quadro seguinte.
+    apply_completion_options(document);
+
     ImFont* mono = mono_font();
     if (mono != nullptr) ImGui::PushFont(mono);
     document.editor().Render("##sql", ImGui::GetContentRegionAvail());
     if (mono != nullptr) ImGui::PopFont();
+
+    // Soltar uma relacao arrastada da arvore.
+    //
+    // O alvo e' o retangulo do EDITOR, registrado logo apos Render(): o
+    // TextEditor e' um widget de terceiro e nao chama BeginDragDropTarget,
+    // entao quem o faz e' quem o desenha.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload =
+                ImGui::AcceptDragDropPayload("OTTER_RELATION")) {
+            const char* name = static_cast<const char*>(payload->Data);
+
+            // Insere no CURSOR, nao no fim: quem arrasta para o meio de
+            // "SELECT * FROM |" quer o nome ali, e acrescentar no fim
+            // obrigaria a recortar e colar.
+            //
+            // Um espaco antes so' quando ha' texto imediatamente a' esquerda,
+            // para nao colar o nome na palavra anterior nem abrir o arquivo
+            // com um espaco solto.
+            std::string insert(name);
+            const TextEditor::DocPos at =
+                document.editor().GetCurrentCursorPosition();
+            if (at.index > 0) {
+                const std::string line = document.editor().GetLineText(at.line);
+                if (at.index <= line.size() &&
+                    !std::isspace(static_cast<unsigned char>(line[at.index - 1]))) {
+                    insert.insert(insert.begin(), ' ');
+                }
+            }
+
+            // Pela area de transferencia: o TextEditor nao expoe inserir no
+            // cursor, e Paste() e' o unico caminho que respeita o desfazer.
+            //
+            // O conteudo anterior e' restaurado -- arrastar uma tabela nao
+            // deve apagar o que o usuario tinha copiado.
+            const char* previous = ImGui::GetClipboardText();
+            const std::string saved = previous != nullptr ? previous : "";
+
+            ImGui::SetClipboardText(insert.c_str());
+            document.editor().Paste();
+            ImGui::SetClipboardText(saved.c_str());
+        }
+        ImGui::EndDragDropTarget();
+    }
 }
 
 // UMA janela por conexao, com as abas de script dela dentro.

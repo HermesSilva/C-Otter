@@ -41,6 +41,13 @@ public:
     // recupera este objeto via state.userData.
     void suggest(TextEditor::AutoCompleteState& state);
 
+private:
+    // Aplica ao editor as preferencias de completar codigo da conexao do
+    // documento. A config e' compartilhada, entao vale a cada quadro.
+    void apply_completion_options(const SqlDocument& document);
+
+public:
+
     void draw();
 
     [[nodiscard]] bool wants_quit() const noexcept { return wants_quit_; }

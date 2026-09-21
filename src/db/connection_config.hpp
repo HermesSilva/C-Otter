@@ -97,6 +97,33 @@ struct PostgresOptions {
 
 // --- Configuracao completa ---------------------------------------------------
 
+// Preferencias do editor SQL, POR CONEXAO.
+//
+// No DBeaver as paginas "SQL Editor" e "Code Completion" do dialogo de
+// conexao sobrepoem as preferencias globais para aquela conexao -- e' o que
+// permite formatar em maiusculas no banco legado e em minusculas no novo.
+//
+// Aqui elas nascem com o mesmo padrao do global; mudar uma vale so' para a
+// conexao que esta' sendo editada.
+struct EditorOptions {
+    // --- Formatacao (main.sql.format) ---
+    //
+    // Espelham sql::FormatOptions. Duplicados como tipos simples de
+    // proposito: connection_config nao deve depender de sql/, e sao tres
+    // campos -- uma dependencia de cabecalho custaria mais que a copia.
+    int  keyword_case      = 1;     // 0=preservar, 1=MAIUSCULAS, 2=minusculas
+    int  indent_width      = 4;
+    bool river_style       = true;
+    std::size_t wrap_select_after = 3;
+
+    // --- Completar codigo (main.sql.completion) ---
+    bool complete_on_typing      = true;
+    bool complete_in_comments    = false;
+    bool complete_in_strings     = false;
+    bool auto_insert_single      = false;
+    int  complete_delay_ms       = 200;
+};
+
 struct ConnectionProfile {
     // Identificacao
     std::string    id;                 // gerado, estavel
@@ -142,6 +169,10 @@ struct ConnectionProfile {
 
     // Especificas do SGBD
     PostgresOptions postgres;
+
+    // Preferencias do editor para ESTA conexao (paginas SQL Editor e
+    // Code Completion do dialogo).
+    EditorOptions   editor;
 
     // Nome sugerido quando o usuario nao informa um: "banco@host".
     [[nodiscard]] std::string effective_name() const;
