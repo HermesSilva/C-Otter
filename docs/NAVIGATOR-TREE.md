@@ -111,8 +111,31 @@ descobrir que está vazio.
 **Carregamento tardio por nó.** Cada pasta consulta o catálogo só quando expandida. Hoje
 isso vale para colunas; passa a valer para todos.
 
-**Ícone por tipo.** Já temos `Icon::table`, `view`, `column`, `key`. Faltam índice,
-sequence, função, trigger.
+**Ícone próprio por tipo de nó — requisito, não enfeite.**
+
+Cada tipo de objeto precisa de um ícone **sugestivo, elegante e futurista**, distinguível de
+relance. Reaproveitar um desenho genérico para dois tipos diferentes é dívida a pagar.
+
+Estado atual (`src/ui/icons.cpp`):
+
+| Nó | Ícone | Situação |
+|----|-------|----------|
+| Tabela | `table` | ✅ próprio |
+| View | `view` | ✅ próprio |
+| Coluna | `column` | ✅ próprio |
+| Chave primária | `key` | ✅ próprio |
+| Sequence | `refresh` | ⚠️ **compartilhado** com auto-commit |
+| Índice | `filter` | ⚠️ **compartilhado** com filtro |
+| Constraint | `commit` | ⚠️ **compartilhado** com commit |
+| Função/Procedure | `settings` | ⚠️ **compartilhado** com preferências |
+| References | `copy` | ⚠️ **compartilhado** com copiar |
+| Trigger | `clock` | ⚠️ **compartilhado** com histórico |
+| Materialized view | — | ⬜ ausente |
+| Tipo de dado | — | ⬜ ausente |
+| Extensão, role, tablespace | — | ⬜ ausente |
+
+Desenhar os faltantes no mesmo traço fino dos existentes, na caixa normalizada
+−0.5..0.5 de `Canvas`.
 
 **Tooltip com detalhe.** Comentário do objeto, definição da constraint, expressão do
 índice — informação que não cabe no rótulo.

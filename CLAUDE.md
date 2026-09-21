@@ -55,13 +55,23 @@ Medir o produto contra si mesmo produz número que sobe sem o produto se aproxim
 
 Cobertura é sempre contra o DBeaver.
 
-## 5. Nada de campo que finge funcionar
+## 5. Ícone próprio por tipo de objeto
+
+Cada nó da árvore e cada ação da barra precisa de um ícone **sugestivo, elegante e
+futurista**, distinguível de relance. Reaproveitar um desenho genérico para dois tipos
+diferentes é dívida — está mapeada em `docs/NAVIGATOR-TREE.md` §"Ícone próprio por tipo".
+
+Desenhar em `src/ui/icons.cpp`, com o traço fino dos existentes, na caixa normalizada
+−0.5..0.5 de `Canvas`. Nada de fonte de ícones nem atlas: vetorial escala com DPI e herda a
+cor do tema.
+
+## 6. Nada de campo que finge funcionar
 
 Campo de UI sem implementação por trás precisa dizer isso na tela, como as abas SSH/SSL/Proxy
 do diálogo de conexão fazem. Um campo que parece funcionar e não funciona é pior que um campo
 ausente.
 
-## 6. Teste que impede o defeito de voltar
+## 7. Teste que impede o defeito de voltar
 
 Defeito corrigido ganha teste, quando testável. Exemplos no projeto:
 
@@ -69,18 +79,18 @@ Defeito corrigido ganha teste, quando testável. Exemplos no projeto:
 - Registro do catálogo pt-BR — impede o linker descartá-lo de novo
 - Vetores oficiais de SHA-256/HMAC/PBKDF2 — validam a criptografia contra o padrão
 
-## 7. Texto de UI passa por `TR()`
+## 8. Texto de UI passa por `TR()`
 
 Inglês é a chave de tradução e o padrão. Código novo já nasce com `TR()`; nada de literal em
 português na UI. Janelas usam `TRW("Título", "###IdEstável")` — o ImGui identifica janelas
 pelo nome, e traduzir o título as desancoraria do layout.
 
-## 8. Decisão irreversível vira ADR
+## 9. Decisão irreversível vira ADR
 
 `docs/adr/`. Inclui o que foi rejeitado e por quê. ADR revogado é marcado, não apagado — o
 raciocínio continua útil (ver ADR 0003, revogado pelo 0007).
 
-## 9. Comentar o porquê, não o quê
+## 10. Comentar o porquê, não o quê
 
 O código já diz o que faz. O comentário explica a decisão, a armadilha, a restrição do
 protocolo. Exemplo real:
@@ -90,7 +100,8 @@ protocolo. Exemplo real:
 // unique_ptr vazio e consulta-lo seria desreferenciar nulo.
 ```
 
-## 10. Relatar o que não funcionou
+## 11. Relatar o que não funcionou
 
 Se um teste falhou, dizer com a saída. Se um passo foi pulado, dizer. Se a automação de UI
 errou o clique três vezes, dizer — e não apresentar como verificado o que não foi.
+

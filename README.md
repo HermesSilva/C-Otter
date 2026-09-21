@@ -47,8 +47,14 @@ navegação de schema com carregamento tardio, editor SQL com realce e autocompl
 metadados reais, grade virtualizada e inspetor de queries. 144 fps, 1,8 MB em Release, sem
 dependência de DLL redistribuível.
 
-**Cobertura frente ao DBeaver: ~37%** dos itens no escopo da v1 — ver
-[`docs/PARITY.md`](docs/PARITY.md) para o inventário item a item.
+Funciona também: assistente de conexão com catálogo de drivers e 8 abas, múltiplas abas de
+editor com resultado isolado, transações (auto-commit, commit, rollback), árvore de objetos
+com constraints/índices/FKs/referências/triggers/sequences/funções, três temas e i18n
+(EN + pt-BR).
+
+**Cobertura real frente ao DBeaver: ~2,5% dos 281 comandos.** O número é baixo porque o
+denominador é o DBeaver inteiro — ver [`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) para o
+mapa completo e [`docs/ELEMENTS.md`](docs/ELEMENTS.md) para o que já funciona.
 
 ```powershell
 $env:PGPASSWORD="..."; $env:PGDATABASE="..."
@@ -57,11 +63,16 @@ build\win-release\bin\c-otter.exe
 
 ### Documentação
 
+- [`CLAUDE.md`](CLAUDE.md) — **diretivas de trabalho; ler primeiro**
+- [`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) — mapa exaustivo do DBeaver, gerado por `tools/map_dbeaver.py`
+- [`docs/NAVIGATOR-TREE.md`](docs/NAVIGATOR-TREE.md) — árvore de objetos: ~70 nós e o estado de cada
+- [`docs/ELEMENTS.md`](docs/ELEMENTS.md) — guia operacional: cada botão, menu e atalho
+- [`docs/PARITY.md`](docs/PARITY.md) — funcionalidades frente ao DBeaver
+- [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — lacunas estruturais e ordem de implementação
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
-- [`docs/PLAN.md`](docs/PLAN.md) — roteiro de implementação em fases
-- [`docs/EFFORT.md`](docs/EFFORT.md) — carga de trabalho em homem-hora
-- [`docs/PARITY.md`](docs/PARITY.md) — **inventário do que está e do que não está pronto**
-- [`docs/adr/`](docs/adr/) — decisões arquiteturais, com as revogadas marcadas
+- [`docs/PLAN.md`](docs/PLAN.md) — roteiro em fases · [`docs/EFFORT.md`](docs/EFFORT.md) — esforço em homem-hora
+- [`docs/adr/`](docs/adr/) — 10 decisões arquiteturais, com as revogadas marcadas
+- [`lang/README.md`](lang/README.md) — como acrescentar um idioma
 
 ## Licença
 
