@@ -84,7 +84,11 @@ consegue reproduzir. Ou tudo, ou nada.
 - O `RowDescription` passa a ser guardado (`table_oid`, `column_attnum`)
 - `NULL` precisa ser distinguível de string vazia na edição — um botão "definir NULL",
   já que digitar nada significa string vazia
-- Excluir e inserir linha ficam para depois; alterar é o caso dominante
+- Inserir e excluir também funcionam (acrescentado no mesmo dia). Os comandos saem na
+  ordem `INSERT` → `UPDATE` → `DELETE`: uma linha nova pode referenciar algo que a
+  exclusão removeria, e a ordem inversa violaria a chave estrangeira
+- Coluna em branco numa linha nova fica **fora** do `INSERT`, para a tabela aplicar seu
+  `DEFAULT` — é o que se espera ao não preencher um `serial`
 
 ## Alternativas rejeitadas
 

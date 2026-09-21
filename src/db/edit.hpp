@@ -12,6 +12,7 @@
 #include "db/result_set.hpp"
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,22 @@ struct CellEdit {
     bool        is_null = false;
 };
 
+// Linha marcada para exclusao. Guarda os valores da chave, nao o indice: o
+// indice muda se o resultado for relido, e a chave identifica a linha no
+// banco.
+struct RowDeletion {
+    std::size_t row = 0;                    // linha na grade, para desenhar
+    std::vector<std::string> key_values;    // na ordem de EditTarget::key_columns
+};
+
+// Linha nova, ainda nao inserida. As colunas ausentes ficam com o DEFAULT da
+// tabela -- e' por isso que o INSERT lista so' o que foi preenchido.
+struct RowInsertion {
+    // Coluna -> valor. Indices do ResultSet, para casar com o cabecalho.
+    std::map<std::size_t, std::string> values;
+    std::map<std::size_t, bool>        nulls;
+};
+
 // Buffer de alteracoes pendentes de um resultado.
 //
 // Editar em buffer, e nao gravar a cada tecla, e' o que permite desistir --
@@ -83,15 +100,50 @@ public:
     [[nodiscard]] const CellEdit* find(std::size_t row,
                                        std::size_t column) const;
 
-    // Quantas LINHAS distintas foram tocadas -- e' o numero de UPDATEs que
-    // serao gerados, e o que faz sentido mostrar ao usuario.
+    // Quantas LINHAS distintas serao afetadas: alteradas, excluidas ou
+    // inseridas. E' o numero de comandos que a gravacao vai gerar, e o que
+    // faz sentido mostrar ao usuario.
     [[nodiscard]] std::size_t touched_rows() const;
 
     [[nodiscard]] const std::map<std::pair<std::size_t, std::size_t>, CellEdit>&
     edits() const noexcept { return edits_; }
 
+    // --- Exclusao -----------------------------------------------------------
+    void mark_deleted(std::size_t row);
+    void unmark_deleted(std::size_t row);
+    [[nodiscard]] bool is_deleted(std::size_t row) const;
+
+    [[nodiscard]] const std::set<std::size_t>& deleted() const noexcept {
+        return deleted_;
+    }
+
+    // --- Insercao -----------------------------------------------------------
+    //
+    // Devolve o indice da linha nova no vetor de insercoes; a grade a desenha
+    // depois das linhas do resultado.
+    std::size_t add_row();
+    void remove_new_row(std::size_t index);
+    void set_new_value(std::size_t index, std::size_t column,
+                       std::string value);
+    void set_new_null(std::size_t index, std::size_t column);
+
+    [[nodiscard]] const std::vector<RowInsertion>& insertions() const noexcept {
+        return insertions_;
+    }
+
+    // Ha' algo a gravar? Alteracao, exclusao ou insercao.
+    [[nodiscard]] bool has_changes() const noexcept {
+        return !edits_.empty() || !deleted_.empty() || !insertions_.empty();
+    }
+
+    [[nodiscard]] std::size_t change_count() const noexcept {
+        return edits_.size() + deleted_.size() + insertions_.size();
+    }
+
 private:
     std::map<std::pair<std::size_t, std::size_t>, CellEdit> edits_;
+    std::set<std::size_t>      deleted_;
+    std::vector<RowInsertion>  insertions_;
 };
 
 // Gera um UPDATE por linha alterada.
@@ -100,6 +152,14 @@ private:
 // nula na linha -- `WHERE id = NULL` nunca casa, e gerar isso produziria um
 // UPDATE que altera zero linhas em silencio.
 [[nodiscard]] Result<std::vector<std::string>> generate_updates(
+    const ResultSet& rs, const EditTarget& target, const EditBuffer& buffer);
+
+// Gera INSERT, UPDATE e DELETE na ordem em que devem rodar.
+//
+// A ordem importa: INSERT antes de DELETE evita violar chave estrangeira
+// quando a linha nova referencia algo que a exclusao removeria -- e e' a
+// ordem que o usuario espera ao ver o resultado depois.
+[[nodiscard]] Result<std::vector<std::string>> generate_changes(
     const ResultSet& rs, const EditTarget& target, const EditBuffer& buffer);
 
 } // namespace otter::db

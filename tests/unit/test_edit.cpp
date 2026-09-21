@@ -398,3 +398,186 @@ OTTER_TEST(edit_distinguishes_no_key_from_key_not_loaded) {
     OTTER_CHECK_EQ(target.table, std::string{"cliente"});
     OTTER_CHECK_EQ(target.schema, std::string{"otter_test"});
 }
+
+// --- Exclusao ----------------------------------------------------------------
+
+OTTER_TEST(edit_generates_a_delete_with_the_key) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "Lontra"}, {"8", "Rio"}});
+
+    EditBuffer buffer;
+    buffer.mark_deleted(1);
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+    OTTER_CHECK_EQ(changes->size(), std::size_t{1});
+    OTTER_CHECK(has((*changes)[0], "DELETE FROM otter_test.cliente"));
+    OTTER_CHECK(has((*changes)[0], "WHERE cliente_id = 8"));
+}
+
+OTTER_TEST(edit_marking_a_row_deleted_drops_its_pending_edits) {
+    // Alterar e depois excluir a mesma linha: o UPDATE seria executado e
+    // imediatamente descartado pelo DELETE. Melhor nem gerar.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "Lontra"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "novo nome");
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{1});
+
+    buffer.mark_deleted(0);
+    OTTER_CHECK_EQ(buffer.size(), std::size_t{0});
+    OTTER_CHECK(buffer.is_deleted(0));
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+    OTTER_CHECK_EQ(changes->size(), std::size_t{1});
+    OTTER_CHECK(has((*changes)[0], "DELETE"));
+}
+
+OTTER_TEST(edit_refuses_to_delete_a_row_with_a_null_key) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "x"}}, {{0, 0}});
+
+    EditBuffer buffer;
+    buffer.mark_deleted(0);
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(!changes.has_value());
+}
+
+// --- Insercao ----------------------------------------------------------------
+
+OTTER_TEST(edit_generates_an_insert_with_only_the_filled_columns) {
+    // Coluna deixada em branco fica FORA do INSERT, para a tabela aplicar o
+    // DEFAULT -- e' o que o usuario espera ao nao preencher um serial.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400},
+         {"credito",    DataKind::numeric, 16400}},
+        {{"7", "Lontra", "100"}});
+
+    EditBuffer buffer;
+    const std::size_t novo = buffer.add_row();
+    buffer.set_new_value(novo, 1, "Nova Lontra");
+    buffer.set_new_value(novo, 2, "999");
+    // cliente_id nao preenchido: serial cuida.
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+    OTTER_CHECK_EQ(changes->size(), std::size_t{1});
+
+    OTTER_CHECK(has((*changes)[0], "INSERT INTO otter_test.cliente"));
+    OTTER_CHECK(has((*changes)[0], "nome"));
+    OTTER_CHECK(has((*changes)[0], "'Nova Lontra'"));
+    OTTER_CHECK(has((*changes)[0], "999"));
+    OTTER_CHECK(!has((*changes)[0], "cliente_id"));
+}
+
+OTTER_TEST(edit_insert_distinguishes_blank_from_explicit_null) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400},
+         {"email",      DataKind::string,  16400}},
+        {{"7", "x", "y"}});
+
+    EditBuffer buffer;
+    const std::size_t novo = buffer.add_row();
+    buffer.set_new_value(novo, 1, "Lontra");
+    buffer.set_new_null(novo, 2);   // NULL de proposito
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+
+    // email entra como NULL explicito; cliente_id, nao preenchido, fica fora.
+    OTTER_CHECK(has((*changes)[0], "email"));
+    OTTER_CHECK(has((*changes)[0], "NULL"));
+    OTTER_CHECK(!has((*changes)[0], "cliente_id"));
+}
+
+OTTER_TEST(edit_ignores_a_blank_new_row) {
+    // Clicar em "nova linha" e desistir nao deve gerar INSERT vazio.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "x"}});
+
+    EditBuffer buffer;
+    buffer.add_row();
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+    OTTER_CHECK(changes->empty());
+}
+
+OTTER_TEST(edit_orders_insert_before_update_before_delete) {
+    // A ordem importa: uma linha nova pode referenciar algo que a exclusao
+    // removeria, e a ordem inversa violaria a chave estrangeira.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "a"}, {"8", "b"}, {"9", "c"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "alterado");
+    buffer.mark_deleted(1);
+    const std::size_t novo = buffer.add_row();
+    buffer.set_new_value(novo, 1, "inserido");
+
+    const auto changes =
+        generate_changes(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(changes.has_value());
+    OTTER_CHECK_EQ(changes->size(), std::size_t{3});
+
+    OTTER_CHECK(has((*changes)[0], "INSERT"));
+    OTTER_CHECK(has((*changes)[1], "UPDATE"));
+    OTTER_CHECK(has((*changes)[2], "DELETE"));
+}
+
+OTTER_TEST(edit_buffer_counts_every_kind_of_change) {
+    EditBuffer buffer;
+    OTTER_CHECK(!buffer.has_changes());
+
+    buffer.set(0, 1, "x");
+    OTTER_CHECK(buffer.has_changes());
+    OTTER_CHECK_EQ(buffer.change_count(), std::size_t{1});
+
+    buffer.mark_deleted(5);
+    buffer.add_row();
+    OTTER_CHECK_EQ(buffer.change_count(), std::size_t{3});
+
+    buffer.clear();
+    // clear() precisa limpar TUDO, nao so' as alteracoes de celula: um
+    // "Descartar" que deixa exclusoes pendentes seria pior que nenhum.
+    OTTER_CHECK(!buffer.has_changes());
+}
+
+OTTER_TEST(edit_touched_rows_counts_deletes_and_inserts) {
+    // "1 alteracao em 0 linhas" era o que a barra mostrava ao inserir --
+    // touched_rows() so' contava as celulas alteradas.
+    EditBuffer buffer;
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{0});
+
+    buffer.add_row();
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{1});
+
+    buffer.mark_deleted(3);
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{2});
+
+    // Duas celulas da MESMA linha contam como uma linha so'.
+    buffer.set(7, 1, "a");
+    buffer.set(7, 2, "b");
+    OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{3});
+}

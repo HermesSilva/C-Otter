@@ -833,7 +833,7 @@ void MainShell::draw() {
             // Gravacao de edicoes: o buffer so' e' limpo quando os UPDATE
             // passaram. Limpar antes de saber perderia o trabalho se a
             // transacao falhasse -- e o usuario nao teria como refaze-lo.
-            if (!document->edits().empty() && saving_edits_) {
+            if (document->edits().has_changes() && saving_edits_) {
                 saving_edits_ = false;
                 if (!session().last_script_failed()) {
                     document->edits().clear();
@@ -2271,7 +2271,14 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
 
     // Fundo distinto para celula alterada: saber o que mudou ANTES de gravar
     // e' o que torna a edicao em buffer util.
-    if (edit != nullptr) {
+    const bool row_deleted = document.edits().is_deleted(row);
+
+    if (row_deleted) {
+        // Linha inteira em vermelho apagado: marcada para exclusao, ainda
+        // nao excluida.
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                               with_alpha(p.error, 0.20f));
+    } else if (edit != nullptr) {
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
                                with_alpha(p.warn, 0.22f));
     }
@@ -2281,7 +2288,11 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     const ImVec2 cell_origin = ImGui::GetCursorPos();
     const float  cell_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 
-    if (is_null) {
+    if (row_deleted) {
+        // Sem editor: nao faz sentido alterar o que sera' excluido.
+        ImGui::TextColored(col4(p.text_dim), "%s",
+                           is_null ? "[null]" : std::string(value).c_str());
+    } else if (is_null) {
         ImGui::TextColored(col4(p.text_dim), "[null]");
     } else {
         const db::DataKind kind = rs.column(column).info().kind;
@@ -2314,7 +2325,7 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                            ImGuiButtonFlags_MouseButtonRight);
 
     if (ImGui::IsItemHovered()) {
-        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !row_deleted) {
             editing_active_   = true;
             editing_document_ = document.id();
             editing_row_      = row;
@@ -2346,17 +2357,28 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         if (ImGui::MenuItem(TR("Copy value"))) {
             ImGui::SetClipboardText(is_null ? "" : std::string(value).c_str());
         }
+
+        ImGui::Separator();
+
+        const bool deleted = document.edits().is_deleted(row);
+        if (ImGui::MenuItem(deleted ? TR("Undo delete") : TR("Delete row"))) {
+            if (deleted) document.edits().unmark_deleted(row);
+            else         document.edits().mark_deleted(row);
+        }
+        if (ImGui::MenuItem(TR("New row"))) {
+            document.edits().add_row();
+        }
         ImGui::EndPopup();
     }
     ImGui::PopID();
 }
 
 void MainShell::save_pending_edits(SqlDocument& document) {
-    if (document.edits().empty()) return;
+    if (!document.edits().has_changes()) return;
     if (!document.result().has_value()) return;
     if (session().state() != SessionState::connected || session().busy()) return;
 
-    auto updates = db::generate_updates(*document.result(),
+    auto updates = db::generate_changes(*document.result(),
                                         document.edit_target(),
                                         document.edits());
     if (!updates) {
@@ -2761,14 +2783,14 @@ void MainShell::draw_grid_panel() {
         // Alteracoes pendentes: contagem e os dois botoes. Fica acima da
         // grade, nao escondido num menu -- e' estado que o usuario precisa
         // ver sem procurar.
-        if (!document->edits().empty()) {
+        if (document->edits().has_changes()) {
             const std::size_t rows = document->edits().touched_rows();
 
             icon_inline(Icon::warning, p.warn);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(col4(p.warn),
                                TR("%zu change(s) in %zu row(s), not saved"),
-                               document->edits().size(), rows);
+                               document->edits().change_count(), rows);
 
             ImGui::SameLine();
             if (icon_text_button("##saveedits", Icon::commit, TR("Save changes"),
@@ -2934,6 +2956,63 @@ void MainShell::draw_grid_panel() {
                     }
                 }
             }
+
+            // Linhas novas, depois das do resultado. Fundo verde: sao adicao,
+            // nao alteracao -- a distincao importa antes de gravar.
+            for (std::size_t i = 0; i < document->edits().insertions().size();
+                 ++i) {
+                const db::RowInsertion& insertion =
+                    document->edits().insertions()[i];
+
+                ImGui::TableNextRow();
+                ImGui::PushID(static_cast<int>(1000000 + i));
+
+                for (int c = 0; c < columns; ++c) {
+                    const auto ci = static_cast<std::size_t>(c);
+                    ImGui::TableSetColumnIndex(c);
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                                           with_alpha(p.ok, 0.18f));
+
+                    const auto value_it = insertion.values.find(ci);
+                    const auto null_it  = insertion.nulls.find(ci);
+                    const bool cell_null =
+                        null_it != insertion.nulls.end() && null_it->second;
+
+                    const std::string text =
+                        cell_null ? "[null]"
+                        : value_it != insertion.values.end() ? value_it->second
+                                                             : std::string{};
+
+                    ImGui::PushID(c);
+                    // Campo direto, sem duplo clique: a linha nova existe para
+                    // ser preenchida, e exigir um clique extra por celula
+                    // seria atrito sem motivo.
+                    char buffer[512];
+                    std::snprintf(buffer, sizeof buffer, "%s",
+                                  cell_null ? "" : text.c_str());
+
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (ImGui::InputTextWithHint(
+                            "##newcell",
+                            cell_null ? "[null]" : TR("(default)"),
+                            buffer, sizeof buffer)) {
+                        document->edits().set_new_value(i, ci, buffer);
+                    }
+
+                    if (ImGui::BeginPopupContextItem("##newcellmenu")) {
+                        if (ImGui::MenuItem(TR("Set NULL"))) {
+                            document->edits().set_new_null(i, ci);
+                        }
+                        if (ImGui::MenuItem(TR("Remove row"))) {
+                            document->edits().remove_new_row(i);
+                        }
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::PopID();
+            }
+
             ImGui::EndTable();
         }
     }

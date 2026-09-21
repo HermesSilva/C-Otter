@@ -81,6 +81,11 @@ const char* const kPtBr[] = {
     // --- Grade de resultado e paginacao ---
     "First page",                 "Primeira página",
     "Set NULL",                   "Definir NULL",
+    "Delete row",                 "Excluir linha",
+    "Undo delete",                "Desfazer exclusão",
+    "New row",                    "Nova linha",
+    "Remove row",                 "Remover linha",
+    "(default)",                  "(padrão)",
     "Revert cell",                "Desfazer célula",
     "Copy value",                 "Copiar valor",
     "was: %s",                    "antes: %s",

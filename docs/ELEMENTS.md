@@ -293,7 +293,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Definir `NULL` | ✅ | Menu de contexto — digitar nada é string vazia, não `NULL` |
 | Recusa com motivo | ✅ | `JOIN`, sem PK, chave fora do `SELECT`, view |
 | `UPDATE` por linha, em transação | ✅ | Ou tudo, ou nada |
-| Inserir / excluir linha | ⬜ | |
+| **Inserir linha** | ✅ | Linha verde no fim; coluna em branco usa o `DEFAULT` |
+| **Excluir linha** | ✅ | Marcada em vermelho até gravar |
+| Ordem `INSERT` → `UPDATE` → `DELETE` | ✅ | Evita violar FK ao inserir o que a exclusão removeria |
 
 | **Filtro por coluna** | ✅ | Botão direito no cabeçalho; expressão `WHERE` livre |
 | Coluna filtrada marcada | ✅ | Prefixo `*` em âmbar no cabeçalho |
@@ -486,7 +488,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (238, todos verdes):
+Testes automatizados (247, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

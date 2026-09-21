@@ -203,7 +203,14 @@ void EditBuffer::set_null(std::size_t row, std::size_t column) {
     edits_[{row, column}] = std::move(edit);
 }
 
-void EditBuffer::clear() { edits_.clear(); }
+void EditBuffer::clear() {
+    // Limpa TUDO. Um "Descartar" que deixasse exclusoes ou insercoes
+    // pendentes seria pior que nenhum: o usuario acharia que desfez e a
+    // proxima gravacao apagaria linhas.
+    edits_.clear();
+    deleted_.clear();
+    insertions_.clear();
+}
 
 void EditBuffer::revert(std::size_t row, std::size_t column) {
     edits_.erase({row, column});
@@ -217,7 +224,54 @@ const CellEdit* EditBuffer::find(std::size_t row, std::size_t column) const {
 std::size_t EditBuffer::touched_rows() const {
     std::set<std::size_t> rows;
     for (const auto& [key, edit] : edits_) rows.insert(edit.row);
-    return rows.size();
+
+    // Exclusoes e insercoes tambem sao linhas afetadas. Contar so' as
+    // alteracoes fazia a barra dizer "1 alteracao em 0 linhas" ao inserir --
+    // visto na tela.
+    for (const std::size_t row : deleted_) rows.insert(row);
+
+    return rows.size() + insertions_.size();
+}
+
+void EditBuffer::mark_deleted(std::size_t row) {
+    deleted_.insert(row);
+
+    // Alteracoes na linha excluida viram ruido: o UPDATE rodaria antes do
+    // DELETE e o resultado final seria o mesmo.
+    for (auto it = edits_.begin(); it != edits_.end();) {
+        it = it->second.row == row ? edits_.erase(it) : std::next(it);
+    }
+}
+
+void EditBuffer::unmark_deleted(std::size_t row) { deleted_.erase(row); }
+
+bool EditBuffer::is_deleted(std::size_t row) const {
+    return deleted_.contains(row);
+}
+
+std::size_t EditBuffer::add_row() {
+    insertions_.emplace_back();
+    return insertions_.size() - 1;
+}
+
+void EditBuffer::remove_new_row(std::size_t index) {
+    if (index < insertions_.size()) {
+        insertions_.erase(insertions_.begin() +
+                          static_cast<std::ptrdiff_t>(index));
+    }
+}
+
+void EditBuffer::set_new_value(std::size_t index, std::size_t column,
+                               std::string value) {
+    if (index >= insertions_.size()) return;
+    insertions_[index].values[column] = std::move(value);
+    insertions_[index].nulls[column]  = false;
+}
+
+void EditBuffer::set_new_null(std::size_t index, std::size_t column) {
+    if (index >= insertions_.size()) return;
+    insertions_[index].values[column].clear();
+    insertions_[index].nulls[column] = true;
 }
 
 Result<std::vector<std::string>> generate_updates(const ResultSet& rs,
@@ -292,6 +346,89 @@ Result<std::vector<std::string>> generate_updates(const ResultSet& rs,
 
         statements.push_back(std::move(sql));
     }
+    return statements;
+}
+
+Result<std::vector<std::string>> generate_changes(const ResultSet& rs,
+                                                  const EditTarget& target,
+                                                  const EditBuffer& buffer) {
+    if (!target.editable()) {
+        return fail(Errc::not_supported, std::string(to_string(target.refusal)));
+    }
+
+    std::vector<std::string> statements;
+
+    // --- INSERT --------------------------------------------------------------
+    //
+    // Antes do DELETE: uma linha nova pode referenciar algo que a exclusao
+    // removeria, e a ordem inversa violaria a chave estrangeira.
+    for (const RowInsertion& insertion : buffer.insertions()) {
+        if (insertion.values.empty()) continue;   // linha em branco: ignora
+
+        std::string columns;
+        std::string values;
+
+        for (const auto& [column, value] : insertion.values) {
+            if (column >= rs.column_count()) {
+                return fail(Errc::out_of_range, "new row column is out of range");
+            }
+            const ColumnInfo& info = rs.column(column).info();
+
+            const auto null_it = insertion.nulls.find(column);
+            const bool is_null = null_it != insertion.nulls.end() &&
+                                 null_it->second;
+
+            // Coluna vazia e nao marcada como NULL fica de fora: assim a
+            // tabela aplica o DEFAULT, que e' o que o usuario espera ao nao
+            // preencher um serial ou um timestamp.
+            if (value.empty() && !is_null) continue;
+
+            if (!columns.empty()) { columns += ", "; values += ", "; }
+            columns += quote_if_needed(info.name);
+            values  += literal_for(info, value, is_null);
+        }
+
+        if (columns.empty()) continue;
+
+        statements.push_back(
+            "INSERT INTO " + qualified_name(target.schema, target.table) +
+            " (" + columns + ")\nVALUES (" + values + ");");
+    }
+
+    // --- UPDATE --------------------------------------------------------------
+    OTTER_ASSIGN_OR_RETURN(auto updates, generate_updates(rs, target, buffer));
+    for (std::string& update : updates) statements.push_back(std::move(update));
+
+    // --- DELETE --------------------------------------------------------------
+    for (const std::size_t row : buffer.deleted()) {
+        if (row >= rs.row_count()) {
+            return fail(Errc::out_of_range, "deleted row is out of range");
+        }
+
+        std::string sql = "DELETE FROM " +
+                          qualified_name(target.schema, target.table) +
+                          "\n WHERE ";
+
+        for (std::size_t i = 0; i < target.key_columns.size(); ++i) {
+            const std::size_t column = target.key_columns[i];
+            const ColumnInfo& info = rs.column(column).info();
+
+            // Chave nula nao identifica linha -- o DELETE apagaria zero
+            // linhas, ou (sem WHERE) todas.
+            if (rs.is_null(row, column)) {
+                return fail(Errc::invalid_argument,
+                            "the key column '" + info.name + "' is NULL in "
+                            "this row; it cannot be identified");
+            }
+
+            if (i > 0) sql += "\n   AND ";
+            sql += quote_if_needed(info.name) + " = " +
+                   literal_for(info, rs.text(row, column), false);
+        }
+        sql += ";";
+        statements.push_back(std::move(sql));
+    }
+
     return statements;
 }
 
