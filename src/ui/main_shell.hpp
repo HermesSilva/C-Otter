@@ -57,9 +57,18 @@ private:
     void draw_toolbar();
     void draw_dockspace();
     void draw_raft_panel();
-    // Devolve quantas linhas desenhou: o painel precisa do total para saber
-    // se mostra "nenhuma conexao".
-    std::size_t draw_saved_profiles();
+    // As conexoes de UMA pasta ("" = raiz). Devolve quantas linhas desenhou:
+    // o painel precisa do total para saber se mostra "nenhuma conexao".
+    std::size_t draw_raft_entries(const std::string& folder,
+                                  std::size_t& close_requested);
+    std::size_t draw_saved_profiles(const std::string& folder);
+
+    // Conta sem desenhar, para a pasta recolhida ainda contar no total.
+    [[nodiscard]] std::size_t count_raft_entries(const std::string& folder) const;
+
+    // O perfil salvo ja' esta' aberto como conexao?
+    [[nodiscard]] bool raft_profile_is_open(
+        const db::ConnectionProfile& profile) const;
 
     // Nome do SGBD para exibicao, a partir do driver_id do perfil.
     static std::string dbms_name(const std::string& driver_id);

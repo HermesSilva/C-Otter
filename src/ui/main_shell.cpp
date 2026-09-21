@@ -1555,11 +1555,125 @@ void MainShell::draw_raft_panel() {
         std::size_t close_requested = connections_.size();
         std::size_t drawn = 0;
 
-        // Primeiro as conexoes com sessao (abertas ou com falha), depois os
-        // perfis salvos que ainda nao foram abertos. Sem separador entre os
-        // dois grupos: para quem olha, e' uma lista so'.
+        // As pastas que aparecem, em ordem. O campo `folder` do perfil ja'
+        // existia e era editavel no dialogo, mas a arvore nunca agrupava --
+        // preencher a pasta nao mudava nada na tela.
+        //
+        // Ordem estavel, nao alfabetica: a primeira pasta a aparecer fica em
+        // cima. Reordenar a lista a cada conexao nova moveria as de baixo.
+        std::vector<std::string> folders;
+        auto note_folder = [&folders](const std::string& name) {
+            if (name.empty()) return;
+            if (std::find(folders.begin(), folders.end(), name) == folders.end()) {
+                folders.push_back(name);
+            }
+        };
+        for (const Connection& connection : connections_) {
+            note_folder(connection.profile.folder);
+        }
+        for (const db::StoredProfile& stored : saved_profiles_) {
+            note_folder(stored.profile.folder);
+        }
+
+        // Cada pasta e' um no' que contem as conexoes dela; as SEM pasta
+        // ficam na raiz, depois -- como no DBeaver, onde arrastar para fora
+        // de uma pasta devolve a conexao ao nivel de cima.
+        for (const std::string& folder : folders) {
+            ImGui::PushID(folder.c_str());
+
+            const bool open = ImGui::TreeNodeEx(
+                "##folder", ImGuiTreeNodeFlags_DefaultOpen |
+                                ImGuiTreeNodeFlags_SpanAvailWidth);
+            ImGui::SameLine(0.0f, 0.0f);
+            icon_inline(Icon::folder, p.accent_light);
+            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::TextUnformatted(folder.c_str());
+
+            if (open) {
+                drawn += draw_raft_entries(folder, close_requested);
+                ImGui::TreePop();
+            } else {
+                // Contadas mesmo fechadas: senao um painel so' com pastas
+                // recolhidas diria "nenhuma conexao".
+                drawn += count_raft_entries(folder);
+            }
+            ImGui::PopID();
+        }
+
+        drawn += draw_raft_entries(std::string{}, close_requested);
+
+        if (close_requested < connections_.size()) {
+            close_connection(close_requested);
+        }
+
+        if (drawn == 0) {
+            ImGui::TextColored(col4(p.text_dim), TR("no connection"));
+        }
+
+        // Menu do painel vazio: e' por onde se cria conexao agora que os
+        // botoes sairam do topo. O DBeaver faz igual -- botao direito na area
+        // vazia da arvore oferece "Create New Connection".
+        if (ImGui::BeginPopupContextWindow(
+                "##raftmenu", ImGuiPopupFlags_MouseButtonRight |
+                              ImGuiPopupFlags_NoOpenOverItems)) {
+            if (ImGui::MenuItem(TR("New connection..."))) {
+                connection_dialog_.open_new();
+            }
+            ImGui::EndPopup();
+        }
+    }
+    ImGui::End();
+}
+
+// Um perfil salvo ja' esta' aberto como conexao?
+//
+// Sem isto ele apareceria duas vezes na mesma lista: uma como conexao viva e
+// outra como atalho para ela mesma.
+bool MainShell::raft_profile_is_open(const db::ConnectionProfile& profile) const {
+    for (const Connection& connection : connections_) {
+        if (connection.profile.host == profile.host &&
+            connection.profile.port == profile.port &&
+            connection.profile.database == profile.database &&
+            connection.profile.user == profile.user) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Quantas entradas a pasta tem, sem desenhar. Serve para a pasta recolhida
+// ainda contar para o "nenhuma conexao".
+std::size_t MainShell::count_raft_entries(const std::string& folder) const {
+    std::size_t total = 0;
+    for (const Connection& connection : connections_) {
+        if (connection.profile.folder != folder) continue;
+        const SessionState state = connection.session->state();
+        if (state == SessionState::disconnected &&
+            connection.profile.host.empty()) {
+            continue;
+        }
+        ++total;
+    }
+    for (const db::StoredProfile& stored : saved_profiles_) {
+        if (stored.profile.folder != folder) continue;
+        if (!raft_profile_is_open(stored.profile)) ++total;
+    }
+    return total;
+}
+
+// As conexoes de UMA pasta ("" = raiz): primeiro as que tem sessao, depois os
+// perfis salvos que ainda nao foram abertos. Sem separador entre os dois
+// grupos -- para quem olha, e' uma lista so'.
+std::size_t MainShell::draw_raft_entries(const std::string& folder,
+                                         std::size_t& close_requested) {
+    const Palette& p = colors();
+    std::size_t drawn = 0;
+
+    {
         for (std::size_t i = 0; i < connections_.size(); ++i) {
             const Connection& connection = connections_[i];
+            if (connection.profile.folder != folder) continue;
+
             const SessionState state = connection.session->state();
             if (state == SessionState::disconnected &&
                 connection.profile.host.empty()) {
@@ -1648,32 +1762,12 @@ void MainShell::draw_raft_panel() {
             }
             ImGui::PopID();
         }
-
-        // Fora do laco: apagar do vector enquanto se itera invalidaria o
-        // iterador e a referencia devolvida por session().
-        if (close_requested < connections_.size()) {
-            close_connection(close_requested);
-        }
-
-        drawn += draw_saved_profiles();
-
-        if (drawn == 0) {
-            ImGui::TextColored(col4(p.text_dim), TR("no connection"));
-        }
-
-        // Menu do painel vazio: e' por onde se cria conexao agora que os
-        // botoes sairam do topo. O DBeaver faz igual -- botao direito na area
-        // vazia da arvore oferece "Create New Connection".
-        if (ImGui::BeginPopupContextWindow(
-                "##raftmenu", ImGuiPopupFlags_MouseButtonRight |
-                              ImGuiPopupFlags_NoOpenOverItems)) {
-            if (ImGui::MenuItem(TR("New connection..."))) {
-                connection_dialog_.open_new();
-            }
-            ImGui::EndPopup();
-        }
     }
-    ImGui::End();
+
+    // A remocao em si fica no chamador: apagar do vector aqui invalidaria o
+    // iterador e a referencia devolvida por session().
+    drawn += draw_saved_profiles(folder);
+    return drawn;
 }
 
 // Perfis salvos que ainda nao foram abertos.
@@ -1686,28 +1780,15 @@ void MainShell::draw_raft_panel() {
 //
 // Nao ha' cabecalho separando-as das de cima: continuam a MESMA lista, como
 // no DBeaver. O que distingue e' o ponto de estado a' esquerda.
-std::size_t MainShell::draw_saved_profiles() {
+std::size_t MainShell::draw_saved_profiles(const std::string& folder) {
     const Palette& p = colors();
-
-    // Um perfil ja' aberto nao se repete aqui: apareceria duas vezes na mesma
-    // lista, uma como conexao e outra como atalho para ela mesma.
-    auto already_open = [this](const db::ConnectionProfile& profile) {
-        for (const Connection& connection : connections_) {
-            if (connection.profile.host == profile.host &&
-                connection.profile.port == profile.port &&
-                connection.profile.database == profile.database &&
-                connection.profile.user == profile.user) {
-                return true;
-            }
-        }
-        return false;
-    };
 
     std::size_t drawn = 0;
 
     for (std::size_t i = 0; i < saved_profiles_.size(); ++i) {
         const db::StoredProfile& stored = saved_profiles_[i];
-        if (already_open(stored.profile)) continue;
+        if (stored.profile.folder != folder) continue;
+        if (raft_profile_is_open(stored.profile)) continue;
         ++drawn;
 
         ImGui::PushID(static_cast<int>(1000 + i));

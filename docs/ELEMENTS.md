@@ -175,7 +175,7 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Tipo de conexão colorido | ✅ | No tooltip; a faixa colorida fica no diálogo |
 | Botão "Nova conexão" no topo | ➖ | Removido: o DBeaver usa barra e menu de contexto |
 | Botão "Editar" no topo | ➖ | Removido: menu de contexto da conexão |
-| Pastas de organização | ⬜ | Campo existe, árvore não agrupa |
+| **Pastas de organização** | ✅ | O campo Pasta do diálogo agrupa a lista; conexões sem pasta ficam na raiz |
 | **Ícone do SGBD por conexão** | ✅ | Elefante (PostgreSQL), golfinho (MySQL/MariaDB), torre (demais) — desenhos próprios, não logos |
 
 ## 5. Painel Navigator
@@ -465,16 +465,16 @@ ficam de fora do total.
 | Janela e estrutura | 17 | 0 | 3 | 0 | 20 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
 | Assistente de conexão | 41 | 1 | 9 | 0 | 51 |
-| Painel Raft | 11 | 0 | 1 | 0 | 12 |
+| Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 33 | 0 | 1 | 0 | 34 |
 | Editor SQL | 53 | 3 | 4 | 0 | 60 |
 | Grade | 55 | 0 | 2 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **254** | **6** | **22** | **0** | **282** |
+| **Total** | **255** | **6** | **21** | **0** | **282** |
 
-**254 de 282 elementos existentes funcionam.**
+**255 de 282 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
