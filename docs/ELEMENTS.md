@@ -84,7 +84,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Drivers indisponíveis esmaecidos | ✅ | Com o motivo: "protocolo em desenvolvimento", "fase 3", "fora do escopo" |
 | Duplo clique avança | ✅ | |
 | Botão Avançar / Cancelar | ✅ | Avançar desabilitado sem driver disponível |
-| Ícones dos SGBDs | ⬜ | O DBeaver mostra o logo de cada banco |
+| **Ícones dos SGBDs** | 🟡 | Existem 3 (`pg_server`, `my_server`, `generic_server`); o catálogo lista 18 drivers, mas só 3 têm protocolo |
 
 ### Etapa 2 — configuração (árvore de categorias)
 
@@ -176,12 +176,13 @@ sessão, e "salvas" em caixa baixa parecia item da lista, não cabeçalho.
 | Botão "Nova conexão" no topo | ➖ | Removido: o DBeaver usa barra e menu de contexto |
 | Botão "Editar" no topo | ➖ | Removido: menu de contexto da conexão |
 | Pastas de organização | ⬜ | Campo existe, árvore não agrupa |
-| Ícone do SGBD por conexão | ⬜ | O DBeaver mostra o logo do banco |
+| **Ícone do SGBD por conexão** | ✅ | Elefante (PostgreSQL), golfinho (MySQL/MariaDB), torre (demais) — desenhos próprios, não logos |
 
 ## 5. Painel Navigator
 
 | Elemento | Estado | Observação |
 |----------|--------|------------|
+| **Ordem seta → ícone → nome** | ✅ | Como no DBeaver. Era ícone → seta, e as setas de um mesmo nível ficavam desalinhadas entre si |
 | Árvore de schemas | ✅ | Ícone próprio, um nó por schema |
 | **Pasta Tabelas** | ✅ | Com contagem: `Tabelas (32)` |
 | **Pasta Views** | ✅ | Separada das tabelas, como no DBeaver |
@@ -463,17 +464,17 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 17 | 0 | 3 | 0 | 20 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
-| Assistente de conexão | 41 | 0 | 10 | 0 | 51 |
-| Painel Raft | 10 | 0 | 2 | 0 | 12 |
-| Navigator | 32 | 0 | 1 | 0 | 33 |
+| Assistente de conexão | 41 | 1 | 9 | 0 | 51 |
+| Painel Raft | 11 | 0 | 1 | 0 | 12 |
+| Navigator | 33 | 0 | 1 | 0 | 34 |
 | Editor SQL | 53 | 3 | 4 | 0 | 60 |
 | Grade | 55 | 0 | 2 | 0 | 57 |
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 1 | 0 | 6 |
-| **Total** | **252** | **5** | **24** | **0** | **281** |
+| **Total** | **254** | **6** | **22** | **0** | **282** |
 
-**252 de 281 elementos existentes funcionam.**
+**254 de 282 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >

@@ -616,6 +616,86 @@ void draw_grant(const Canvas& c) {
     c.circle_filled(0.22f, 0.22f, 0.10f);
 }
 
+// --- Um icone por SGBD -----------------------------------------------------
+//
+// O que precisa ser lido em 16 px nao e' a especie do animal, e' a SILHUETA:
+// redonda para PostgreSQL, angulosa para MySQL. Desenhar um elefante
+// reconhecivel neste tamanho produziria uma mancha; desenhar a cabeca com a
+// tromba descendo produz uma forma distinguivel de relance, que e' o
+// criterio da diretriz 5.
+
+void draw_pg_server(const Canvas& c) {
+    // Cabeca arredondada -- o contorno que da' o "elefante" a' distancia.
+    c.dl->PathLineTo(c.at(-0.30f, 0.10f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.34f, -0.22f), c.at(-0.12f, -0.34f),
+                                 c.at(0.04f, -0.30f), 14);
+    c.dl->PathBezierCubicCurveTo(c.at(0.24f, -0.26f), c.at(0.30f, -0.06f),
+                                 c.at(0.26f, 0.10f), 14);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // A tromba, descendo e curvando: e' o traço que ninguem confunde.
+    c.dl->PathLineTo(c.at(0.02f, -0.02f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.02f, 0.18f), c.at(-0.06f, 0.26f),
+                                 c.at(-0.16f, 0.30f), 12);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // As duas orelhas, como arcos laterais.
+    c.arc(-0.24f, 0.02f, 0.13f, 40.0f, 200.0f);
+    c.arc( 0.20f, 0.02f, 0.13f, -20.0f, 140.0f);
+
+    // O olho.
+    c.circle_filled(-0.10f, -0.10f, 0.035f);
+}
+
+void draw_my_server(const Canvas& c) {
+    // Golfinho mergulhando, focinho a' ESQUERDA e cauda a' direita.
+    //
+    // A primeira versao saiu de cabeca para baixo: a nadadeira apontava para
+    // fora do dorso errado e a cauda ficava sob o corpo. So' apareceu ao
+    // ampliar a captura -- no tamanho da arvore era uma mancha alongada, que
+    // e' exatamente o que a diretriz 5 chama de icone indistinguivel.
+    //
+    // A convencao aqui: y NEGATIVO e' para CIMA. O dorso e' a curva de cima,
+    // o ventre a de baixo.
+
+    // Dorso: sobe do focinho, passa pelo alto do corpo e desce para a cauda.
+    c.dl->PathLineTo(c.at(-0.36f, 0.02f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.16f, -0.20f), c.at(0.08f, -0.22f),
+                                 c.at(0.26f, -0.06f), 16);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // Ventre: volta do focinho por baixo, fechando a forma.
+    c.dl->PathLineTo(c.at(-0.36f, 0.02f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.16f, 0.18f), c.at(0.08f, 0.20f),
+                                 c.at(0.26f, -0.06f), 16);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // Nadadeira dorsal: triangulo para CIMA, saindo do dorso.
+    c.line(-0.04f, -0.19f, 0.06f, -0.36f);
+    c.line( 0.06f, -0.36f, 0.12f, -0.17f);
+
+    // Cauda bifurcada na ponta direita, abrindo em V.
+    c.line(0.26f, -0.06f, 0.38f, -0.20f);
+    c.line(0.26f, -0.06f, 0.38f,  0.04f);
+    c.line(0.38f, -0.20f, 0.38f,  0.04f);
+
+    // Olho, perto do focinho.
+    c.circle_filled(-0.22f, -0.02f, 0.030f);
+}
+
+void draw_generic_server(const Canvas& c) {
+    // Torre de servidor: tres modulos empilhados, cada um com seu LED.
+    //
+    // Deliberadamente SEM animal: e' o desenho de "driver que ainda nao tem
+    // icone proprio", e precisa parecer uma categoria, nao um SGBD.
+    for (int i = 0; i < 3; ++i) {
+        const float y = -0.30f + static_cast<float>(i) * 0.21f;
+        c.rect(-0.26f, y, 0.26f, y + 0.16f, 0.03f);
+        c.circle_filled(-0.17f, y + 0.08f, 0.035f);
+        c.line(-0.04f, y + 0.08f, 0.18f, y + 0.08f);
+    }
+}
+
 // Halo suave atras do icone. Varias circunferencias concentricas com alfa
 // decrescente aproximam um blur gaussiano sem shader nem textura.
 void draw_glow(ImDrawList* dl, const ImVec2& center, float radius,
@@ -653,6 +733,9 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::stop:          draw_stop(c);          break;
         case Icon::commit:        draw_commit(c);        break;
         case Icon::rollback:      draw_rollback(c);      break;
+        case Icon::pg_server:      draw_pg_server(c);      break;
+        case Icon::my_server:      draw_my_server(c);      break;
+        case Icon::generic_server: draw_generic_server(c); break;
         case Icon::database:      draw_database(c);      break;
         case Icon::table:         draw_table(c);         break;
         case Icon::view:          draw_view(c);          break;

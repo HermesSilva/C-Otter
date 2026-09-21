@@ -93,6 +93,7 @@ constexpr const char* kIconNames[] = {
     "references", "sequence",  "function",  "procedure",  "trigger",
     "data_type", "extension",  "role",      "tablespace", "schema",
     "pivot",       "partition",  "event",      "user",       "grant",
+    "pg_server",   "my_server",  "generic_server",
 };
 static_assert(IM_ARRAYSIZE(kIconNames) == kIconCount,
               "kIconNames ficou fora de sincronia com o enum Icon");

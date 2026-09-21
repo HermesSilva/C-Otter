@@ -1525,6 +1525,17 @@ std::string MainShell::dbms_name(const std::string& driver_id) {
     return driver != nullptr ? std::string(driver->display_name()) : driver_id;
 }
 
+// Icone do SGBD, como o logo que o DBeaver poe em cada conexao.
+//
+// Driver sem desenho proprio cai na torre generica, em vez de reusar o de
+// outro banco: dois SGBDs com o mesmo icone e' o tipo de divida que a
+// diretriz 5 nomeia.
+Icon MainShell::dbms_icon(const std::string& driver_id) {
+    if (driver_id == "postgresql") return Icon::pg_server;
+    if (driver_id == "mysql" || driver_id == "mariadb") return Icon::my_server;
+    return Icon::generic_server;
+}
+
 // Lista UNICA de conexoes, como a do DBeaver.
 //
 // Eram tres blocos: os botoes "Nova conexao"/"Editar", as conexoes ABERTAS, e
@@ -1568,6 +1579,11 @@ void MainShell::draw_raft_panel() {
                                                     : p.text_dim;
 
             ImGui::TextColored(col4(status_color), "●");
+            ImGui::SameLine(0.0f, 6.0f);
+
+            // Icone do SGBD, na cor do estado: identifica o banco sem ler o
+            // nome, que e' o que o logo faz no DBeaver.
+            icon_inline(dbms_icon(connection.profile.driver_id), status_color);
             ImGui::SameLine(0.0f, 6.0f);
 
             // Selecionavel de largura total: trocar de conexao e' um clique
@@ -1702,6 +1718,11 @@ std::size_t MainShell::draw_saved_profiles() {
         ImGui::TextColored(col4(p.text_dim), "○");
         ImGui::SameLine(0.0f, 6.0f);
 
+        // Mesmo icone da conexao aberta, esmaecido: a linha tem a mesma
+        // forma, e o que muda e' a cor -- continua sendo uma lista so'.
+        icon_inline(dbms_icon(stored.profile.driver_id), p.text_dim);
+        ImGui::SameLine(0.0f, 6.0f);
+
         ImGui::BeginDisabled(!stored.supported);
 
         // Duplo clique conecta; clique simples so' seleciona. Conectar no
@@ -1774,12 +1795,15 @@ void MainShell::draw_navigator_panel() {
         for (const db::SchemaMeta& schema : schemas) {
             ImGui::PushID(schema.name.c_str());
 
-            icon_inline(Icon::schema, colors().accent_light);
-            ImGui::SameLine(0.0f, 4.0f);
+            // Seta, icone, nome -- a ordem do DBeaver. Ver draw_folder_node.
+            const bool schema_open = ImGui::TreeNodeEx(
+                "##schema", ImGuiTreeNodeFlags_DefaultOpen |
+                                ImGuiTreeNodeFlags_SpanAvailWidth);
 
-            const bool schema_open =
-                ImGui::TreeNodeEx(schema.name.c_str(),
-                                  ImGuiTreeNodeFlags_DefaultOpen);
+            ImGui::SameLine(0.0f, 0.0f);
+            icon_inline(Icon::schema, colors().accent_light);
+            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::TextUnformatted(schema.name.c_str());
 
             // Criar objeto pertence ao SCHEMA: é ele que os contém. No nó da
             // tabela ficaria ambíguo -- "nova tabela" a partir de uma tabela
@@ -2015,16 +2039,31 @@ void MainShell::draw_server_info_folder() {
 // está vazio -- é o padrão do DBeaver (docs/NAVIGATOR-TREE.md).
 bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count,
                                  bool loaded) {
-    icon_inline(icon, colors().accent_light);
-    ImGui::SameLine(0.0f, 4.0f);
-
     // OTTER_EXPAND_TREE abre todas as pastas na captura de tela. Conferir os
     // icones de constraint, indice, FK e trigger exige chegar ate' o quarto
     // nivel da arvore, e clicar la' por automacao erra o alvo.
     static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
     if (expand_all) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 
-    const bool open = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth);
+    // SETA primeiro, ICONE depois -- a ordem do DBeaver, e de qualquer arvore
+    // de sistema de arquivos.
+    //
+    // Era o inverso: o icone vinha antes do TreeNodeEx, e as setas de todos
+    // os nos ficavam desalinhadas entre si, recuadas pela largura do icone.
+    // Com a seta primeiro, todas as setas de um mesmo nivel se alinham, que
+    // e' o que permite percorrer a arvore com o olho.
+    //
+    // O rotulo do no' e' vazio ("##id"): o texto e' desenhado depois do
+    // icone, na mesma linha. Passar o label ao TreeNodeEx o poria ANTES do
+    // icone, que e' justamente o que se quer evitar.
+    const std::string node_id = std::string("##") + label;
+    const bool open = ImGui::TreeNodeEx(
+        node_id.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
+
+    ImGui::SameLine(0.0f, 0.0f);
+    icon_inline(icon, colors().accent_light);
+    ImGui::SameLine(0.0f, 6.0f);
+    ImGui::TextUnformatted(label);
 
     if (loaded) {
         ImGui::SameLine();
@@ -2061,20 +2100,32 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         if (!matches_filter(relation.name)) continue;
 
         ImGui::PushID(relation.name.c_str());
+        ImGui::BeginGroup();
 
-        icon_inline(icon, tint);
-        ImGui::SameLine(0.0f, 4.0f);
-
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              col(kind == db::ObjKind::table ? p.text : p.data));
         // So' a primeira de cada pasta: abrir as 32 encheria a arvore de ruido
         // e dispararia 32 consultas de catalogo de uma vez.
         static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
         if (expand_all && first) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
         first = false;
 
-        const bool open = ImGui::TreeNode(relation.name.c_str());
-        ImGui::PopStyleColor();
+        // Seta, icone, nome -- a ordem do DBeaver. Ver draw_folder_node.
+        //
+        // SpanAvailWidth faz o no' ocupar a linha inteira, para o duplo
+        // clique e o menu de contexto pegarem tambem sobre o icone e o nome,
+        // que sao desenhados DEPOIS dele.
+        const bool open = ImGui::TreeNodeEx("##rel",
+                                            ImGuiTreeNodeFlags_SpanAvailWidth);
+
+        // Estado do NO' capturado aqui: o icone e o nome vem depois, e
+        // IsItemHovered passaria a falar deles em vez do no'.
+        const bool node_hovered = ImGui::IsItemHovered();
+        const bool node_toggled = ImGui::IsItemToggledOpen();
+
+        ImGui::SameLine(0.0f, 0.0f);
+        icon_inline(icon, tint);
+        ImGui::SameLine(0.0f, 6.0f);
+        ImGui::TextColored(col4(kind == db::ObjKind::table ? p.text : p.data),
+                           "%s", relation.name.c_str());
 
         // Duplo clique abre os dados -- e' o gesto que todo cliente de banco
         // tem, e sem ele o usuario precisa do menu de contexto para a acao
@@ -2082,9 +2133,9 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         //
         // O TreeNode ja' consome o duplo clique para expandir; IsItemToggled
         // distingue os dois casos.
-        if (ImGui::IsItemHovered() &&
+        if (node_hovered &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-            !ImGui::IsItemToggledOpen()) {
+            !node_toggled) {
 
             // Sem as colunas o SELECT sai com '*' e um comentario pedindo
             // para expandir -- o usuario pediu os dados, nao um recado. Se
@@ -2097,15 +2148,21 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
                          /*run=*/true);
         }
 
-        // Logo apos o TreeNode: BeginPopupContextItem usa o ultimo item, e
-        // qualquer TextColored entre os dois roubaria o alvo do menu.
-        draw_relation_context_menu(schema, relation);
-
         if (!relation.size_pretty.empty()) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "  %s",
                                relation.size_pretty.c_str());
         }
+
+        // Fecha o grupo ANTES do menu: BeginPopupContextItem usa o ultimo
+        // item, e o grupo faz esse "ultimo item" ser a linha inteira --
+        // seta, icone, nome e tamanho.
+        //
+        // Sem o grupo, o menu se ligaria ao texto do tamanho, e clicar com o
+        // direito sobre o nome da tabela nao abriria nada.
+        ImGui::EndGroup();
+
+        draw_relation_context_menu(schema, relation);
 
         if (ImGui::IsItemHovered() && !relation.comment.empty()) {
             ImGui::SetTooltip("%s", relation.comment.c_str());
@@ -6567,6 +6624,12 @@ void MainShell::draw_icon_gallery() {
         {Icon::info, "info"},             {Icon::clock, "clock"},
         {Icon::lock, "lock"},           {Icon::record, "record"},
         {Icon::filter, "filter"},
+        // Faltavam na galeria: os desenhos existiam e nao eram conferiveis
+        // aqui, que e' o unico lugar onde se ve' todos lado a lado.
+        {Icon::partition, "partition"},   {Icon::event, "event"},
+        {Icon::user, "user"},             {Icon::grant, "grant"},
+        {Icon::pg_server, "pg_server"},   {Icon::my_server, "my_server"},
+        {Icon::generic_server, "generic_server"},
     };
 
     ImGui::SetNextWindowSize(ImVec2(1180, 900), ImGuiCond_Appearing);

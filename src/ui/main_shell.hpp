@@ -64,6 +64,9 @@ private:
     // Nome do SGBD para exibicao, a partir do driver_id do perfil.
     static std::string dbms_name(const std::string& driver_id);
 
+    // Icone do SGBD. Driver sem desenho proprio cai na torre generica.
+    static Icon dbms_icon(const std::string& driver_id);
+
     // Dialeto SQL da conexao ativa, para lexer, formatador e reescrita.
     [[nodiscard]] const sql::Dialect& active_dialect() const;
     void draw_navigator_panel();

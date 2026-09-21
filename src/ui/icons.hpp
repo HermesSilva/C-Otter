@@ -72,11 +72,31 @@ enum class Icon : std::uint8_t {
     event,              // relogio com marca de repeticao
     user,               // silhueta
     grant,              // pergaminho com selo
+
+    // Um por SGBD. O DBeaver mostra o logo de cada banco na lista de
+    // conexoes; aqui sao desenhos proprios, pelo mesmo motivo do resto
+    // (diretriz 5): vetorial escala com DPI e herda a cor do tema.
+    //
+    // Distinguiveis no tamanho da arvore, que e' o criterio: o do PostgreSQL
+    // e' redondo com a gota do elefante, o do MySQL e' anguloso com o
+    // perfil do golfinho.
+    pg_server,          // elefante estilizado -- PostgreSQL
+    my_server,          // golfinho estilizado -- MySQL/MariaDB
+    generic_server,     // torre -- driver sem desenho proprio
 };
 
 // Numero de icones; serve para iterar sobre todos (galeria, testes).
+// Ancorado no ULTIMO enumerador, que e' o que ele precisa contar.
+//
+// Ficou preso em `Icon::grant` quando os icones de SGBD entraram depois
+// dele: a galeria passou a desenhar 47 de 50, e os tres novos nao apareciam
+// em lugar nenhum -- nem no teste que exige desenho distinto por tipo.
+// Apontar para generic_server so' adia o mesmo defeito; o comentario abaixo
+// e' o aviso para quem acrescentar o proximo.
+//
+// AO ACRESCENTAR UM ICONE: poe antes desta linha e atualiza a ancora.
 inline constexpr std::size_t kIconCount =
-    static_cast<std::size_t>(Icon::grant) + 1;
+    static_cast<std::size_t>(Icon::generic_server) + 1;
 
 // Desenha o icone centrado em `center`, com `size` de lado.
 void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,
