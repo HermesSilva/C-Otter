@@ -260,6 +260,25 @@ std::size_t EditBuffer::touched_rows() const {
     return rows.size() + insertions_.size();
 }
 
+void EditBuffer::copy_cell_from(const ResultSet& rs, std::size_t from_row,
+                                std::size_t to_row, std::size_t column) {
+    if (from_row >= rs.row_count() || to_row >= rs.row_count()) return;
+    if (column >= rs.column_count()) return;
+    if (from_row == to_row) return;
+
+    // O buffer tem precedencia sobre o resultado: se a origem ja' foi
+    // editada, e' o valor EDITADO que o usuario ve' -- e copiar o valor do
+    // banco faria aparecer na tela um numero que nao esta' em lugar nenhum.
+    if (const CellEdit* pending = find(from_row, column); pending != nullptr) {
+        if (pending->is_null) set_null(to_row, column);
+        else                  set(to_row, column, pending->value);
+        return;
+    }
+
+    if (rs.is_null(from_row, column)) set_null(to_row, column);
+    else set(to_row, column, std::string(rs.text(from_row, column)));
+}
+
 void EditBuffer::mark_deleted(std::size_t row) {
     deleted_.insert(row);
 

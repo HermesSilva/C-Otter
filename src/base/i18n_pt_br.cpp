@@ -550,6 +550,11 @@ const char* const kPtBr[] = {
         "Os arquivos de certificado são salvos, mas ainda não são usados; a "
         "validação usa o repositório de certificados do sistema.",
     "Encrypted connection",       "Conexão criptografada",
+
+    // Comandos de linha da grade. "de cima"/"de baixo" e nao "acima"/"abaixo":
+    // o comando copia DAQUELA linha, nao para uma direcao.
+    "Copy from row above",        "Copiar da linha de cima",
+    "Copy from row below",        "Copiar da linha de baixo",
     "SSH host",                   "Host SSH",
     "Authentication##ssh",        "Autenticação##ssh",
     "Public key",                 "Chave pública",

@@ -122,7 +122,7 @@ Distribuição dos 275 comandos por área:
 | `[null]` distinto de string vazia | ✅ | ✅ |
 | Ordenar clicando no cabeçalho | ✅ | ✅ no servidor (ADR 0011) |
 | Editar célula | ✅ | ✅ ADR 0014 |
-| Inserir/duplicar/excluir linha | ✅ | ✅ |
+| Inserir/duplicar/excluir linha | ✅ | ✅ 5 de 7 comandos — ver abaixo |
 | Salvar alterações | ✅ | ✅ em transação |
 | Filtro por coluna | ✅ | ✅ no servidor |
 | Visão de registro único | ✅ | ⬜ |
@@ -204,8 +204,26 @@ esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 1. **TLS no Linux** — `lib/net/tls_openssl.cpp` ainda é esboço, e
    `tls_available()` responde `false` lá: a caixa "usar SSL" aparece desligada
    em vez de falhar na conexão
-2. **Inserir e duplicar linha na grade** — excluir já funciona; o buffer de
-   edição já comporta os três
+2. **Atalhos de teclado da grade** — os cinco comandos de linha existem no
+   menu de contexto, nenhum tem atalho. O DBeaver usa `Alt+Insert`,
+   `Ctrl+Alt+Insert`, `Alt+Delete`, `Ctrl+D` e `Ctrl+Alt+D`.
+
+3. **Comandos de linha que faltam** — o DBeaver tem **sete**, extraídos de
+   `plugin.xml:1073-1079` do `ui.editors.data`; o C-Otter tem três:
+
+   | Comando | Atalho | Estado |
+   |---|---|:---:|
+   | Add row | `Alt+Insert` | ✅ como "Nova linha", sem atalho |
+   | Duplicate row | `Ctrl+Alt+Insert` | ✅ sem atalho |
+   | Delete current row | `Alt+Delete` | ✅ sem atalho |
+   | Add row (insert before) | `Shift+Alt+Insert` | ⬜ |
+   | Duplicate row (insert before) | `Ctrl+Shift+Alt+Insert` | ⬜ |
+   | Copy from row above | `Ctrl+D` | ✅ sem atalho |
+   | Copy from row below | `Ctrl+Alt+D` | ✅ sem atalho |
+
+   As variantes "insert before" dependem de a linha nova ter POSIÇÃO. Hoje as
+   inserções vão sempre para o fim, num vetor separado — mudá-las exige
+   decidir como a grade ordena linha nova no meio de uma página paginada.
 4. **Editar no painel de valor** — hoje ele só mostra; JSON e texto longo
    mereciam edição multilinha, que a célula não comporta
 5. **Savepoints na UI** — o driver já os implementa

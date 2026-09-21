@@ -662,3 +662,73 @@ OTTER_TEST(edit_touched_rows_counts_deletes_and_inserts) {
     buffer.set(7, 2, "b");
     OTTER_CHECK_EQ(buffer.touched_rows(), std::size_t{3});
 }
+
+// --- Copiar de uma linha vizinha ------------------------------------------
+
+OTTER_TEST(edit_copies_cell_from_another_row) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"cidade",     DataKind::string,  16400}},
+        {{"1", "Curitiba"}, {"2", "Londrina"}, {"3", "Maringá"}});
+
+    EditBuffer buffer;
+    buffer.copy_cell_from(rs, 0, 1, 1);   // "de cima" para a linha do meio
+
+    const CellEdit* edit = buffer.find(1, 1);
+    OTTER_CHECK(edit != nullptr);
+    OTTER_CHECK(edit->value == "Curitiba");
+    OTTER_CHECK(!edit->is_null);
+}
+
+OTTER_TEST(edit_copy_from_row_prefers_the_pending_edit) {
+    // A origem foi editada e ainda nao gravada. Copiar o valor do BANCO faria
+    // aparecer na tela um valor que nao esta' em lugar nenhum -- nem no banco,
+    // porque a edicao esta' pendente, nem na origem, que mostra outro.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"cidade",     DataKind::string,  16400}},
+        {{"1", "Curitiba"}, {"2", "Londrina"}});
+
+    EditBuffer buffer;
+    buffer.set(0, 1, "Ponta Grossa");
+    buffer.copy_cell_from(rs, 0, 1, 1);
+
+    const CellEdit* edit = buffer.find(1, 1);
+    OTTER_CHECK(edit != nullptr);
+    OTTER_CHECK(edit->value == "Ponta Grossa");
+}
+
+OTTER_TEST(edit_copy_from_row_carries_null_as_null) {
+    // Um NULL copiado como string vazia seria outro valor: no banco os dois
+    // sao distintos, e a diferenca aparece em qualquer WHERE.
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"cidade",     DataKind::string,  16400}},
+        {{"1", ""}, {"2", "Londrina"}}, /*nulls=*/{{0, 1}});
+
+    EditBuffer buffer;
+    buffer.copy_cell_from(rs, 0, 1, 1);
+
+    const CellEdit* edit = buffer.find(1, 1);
+    OTTER_CHECK(edit != nullptr);
+    OTTER_CHECK(edit->is_null);
+}
+
+OTTER_TEST(edit_copy_from_row_ignores_out_of_range_and_self) {
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"cidade",     DataKind::string,  16400}},
+        {{"1", "Curitiba"}, {"2", "Londrina"}});
+
+    EditBuffer buffer;
+
+    // Fora do resultado: a linha acima da primeira da PAGINA existe no banco,
+    // mas nao esta' carregada. Inventar um valor dela seria pior que nao fazer
+    // nada.
+    buffer.copy_cell_from(rs, 99, 0, 1);
+    buffer.copy_cell_from(rs, 0, 99, 1);
+    buffer.copy_cell_from(rs, 0, 1, 99);   // coluna inexistente
+    buffer.copy_cell_from(rs, 1, 1, 1);    // de si mesma
+
+    OTTER_CHECK(buffer.empty());
+}

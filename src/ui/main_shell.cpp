@@ -3111,6 +3111,30 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                 }
             }
         }
+
+        // Copiar da linha de cima / de baixo (Ctrl+D e Ctrl+Alt+D no DBeaver).
+        //
+        // Preenche ESTA célula com o valor da vizinha -- não insere linha
+        // nenhuma. É o atalho de quem digita uma coluna repetitiva para baixo,
+        // e por isso opera na célula sob o cursor, não na linha inteira.
+        ImGui::Separator();
+
+        // Desabilitado na primeira e na última linha da PÁGINA, não do
+        // resultado: a linha acima da primeira desta página existe no banco,
+        // mas não está carregada -- e copiar de uma linha que não se vê seria
+        // um valor surgindo do nada.
+        ImGui::BeginDisabled(row == 0);
+        if (ImGui::MenuItem(TR("Copy from row above"))) {
+            document.edits().copy_cell_from(rs, row - 1, row, column);
+        }
+        ImGui::EndDisabled();
+
+        ImGui::BeginDisabled(row + 1 >= rs.row_count());
+        if (ImGui::MenuItem(TR("Copy from row below"))) {
+            document.edits().copy_cell_from(rs, row + 1, row, column);
+        }
+        ImGui::EndDisabled();
+
         ImGui::EndPopup();
     }
     ImGui::PopID();

@@ -294,6 +294,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Recusa com motivo | ✅ | `JOIN`, sem PK, chave fora do `SELECT`, view |
 | `UPDATE` por linha, em transação | ✅ | Ou tudo, ou nada |
 | **Inserir linha** | ✅ | Linha verde no fim; coluna em branco usa o `DEFAULT` |
+| **Copiar da linha de cima/de baixo** | ✅ | `Ctrl+D`/`Ctrl+Alt+D` no DBeaver; aqui só no menu. Preenche a célula, não insere linha |
 | **Excluir linha** | ✅ | Marcada em vermelho até gravar |
 | Ordem `INSERT` → `UPDATE` → `DELETE` | ✅ | Evita violar FK ao inserir o que a exclusão removeria |
 

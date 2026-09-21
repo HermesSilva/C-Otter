@@ -117,6 +117,16 @@ public:
         return deleted_;
     }
 
+    // Copia o valor de uma celula para outra, DENTRO da mesma coluna.
+    //
+    // E' o "Copy from row above/below" do DBeaver (Ctrl+D e Ctrl+Alt+D).
+    // Vive aqui, e nao na UI, porque a regra que importa -- a origem e' o que
+    // esta' NA TELA, ou seja o buffer tem precedencia sobre o resultado -- e'
+    // a mesma da duplicacao de linha, e repeti-la na UI seria repetir o lugar
+    // onde ela pode divergir.
+    void copy_cell_from(const ResultSet& rs, std::size_t from_row,
+                        std::size_t to_row, std::size_t column);
+
     // --- Insercao -----------------------------------------------------------
     //
     // Devolve o indice da linha nova no vetor de insercoes; a grade a desenha
