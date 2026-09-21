@@ -496,7 +496,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (261, todos verdes):
+Testes automatizados (416, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

@@ -14,12 +14,16 @@ Extraído do próprio repositório do DBeaver (`D:\Tootega\Source\dbeaver`), nã
 
 | Métrica | Valor | Como foi obtido |
 |---------|-------|-----------------|
-| Comandos declarados | **275** | `<command id="org.jkiss.dbeaver.*">` em `plugin.xml` |
-| Atalhos de teclado | **157** | `sequence="..."` em `plugin.xml` |
+| Comandos declarados | **281** | `tools/map_dbeaver.py`, ver `docs/DBEAVER-MAP.md` |
+| Atalhos de teclado | **147** | `tools/map_dbeaver.py`, ver `docs/DBEAVER-MAP.md` |
 | Plugins | 156 | contagem de diretórios |
 | Linhas de Java | 916.759 | ver `docs/ANALYSIS.md` |
 
-Distribuição dos 275 comandos por área:
+Os números anteriores (275 e 157) vinham de um `grep` direto no `plugin.xml`, que
+contava `<command>` sem `defaultHandler` e sequências únicas em vez de bindings.
+`map_dbeaver.py` é a fonte canônica; os três documentos agora usam a mesma conta.
+
+Distribuição dos comandos por área:
 
 | Plugin | Comandos |
 |--------|----------|
@@ -31,7 +35,7 @@ Distribuição dos 275 comandos por área:
 | `ui.app.devtools` | 10 |
 | `tasks.ui.view` | 9 |
 | `ui.editors.erd` | 8 |
-| demais (git, transfer, drivers, AI) | 36 |
+| demais (git, transfer, drivers, AI) | 42 |
 
 **Legenda de estado:** ✅ pronto · 🟡 parcial · ⬜ não iniciado · ➖ fora do escopo da v1
 
@@ -179,26 +183,38 @@ Office/Excel, e ~45 dos 50 SGBDs. Ver `docs/PLAN.md` §1.
 | Diagnóstico | 8 | 5 | 1 | 2 |
 | **Total (sem os itens ➖)** | **90** | **66** | **7** | **17** |
 
-**Cobertura atual: 82% dos itens de escopo da v1** (62 de 76 comparáveis, contando parciais
-como meio).
+**62 de 76 itens comparáveis** desta tabela estão prontos (contando parciais como
+meio). Contado em 2026-09-21 varrendo as tabelas acima, e **cada ✅ novo foi
+verificado no código** — não de memória.
 
-Contado em 2026-09-21 varrendo as tabelas acima, e **cada ✅ novo foi
-verificado no código** — não de memória. O número anterior (41%) estava
-desatualizado por vários commits: paginação, grade editável, agrupamento,
-exportação, formatação e plano de execução já funcionavam e ainda constavam
-como ⬜. Inventário atrasado dá falsa confiança, que é o que esta seção
-existe para evitar.
+> ### ⚠️ Isso não é 82% de paridade
+>
+> O denominador acima são os **90 itens que este documento escolheu listar**, não
+> os que o DBeaver tem. Medido assim, o número sobe sempre que se conclui um item
+> da própria lista — e sobe também se a lista encolher. É o defeito que a
+> diretriz 4 do `CLAUDE.md` nomeia, e que já fez `ELEMENTS.md` reportar 63%
+> quando a cobertura real era 2,5%.
+>
+> Contra o denominador do DBeaver, extraído por `tools/map_dbeaver.py` dos
+> `plugin.xml` de `D:\Tootega\Source\dbeaver` (ver `docs/DBEAVER-MAP.md`):
+>
+> | | DBeaver | C-Otter | |
+> |---|---|---|---|
+> | Comandos | 281 | 7 | **2,5%** |
+> | Atalhos | 147 | 6 | **4,1%** |
+> | Nós da árvore (PostgreSQL) | ~70 | 21 | **30%** |
+> | SGBDs | ~50 | 2 | **4%** |
+>
+> Os 62/76 respondem *"o que esta lista promete está feito?"*. Não respondem
+> *"quanto falta para o DBeaver?"* — para isso valem os números do quadro.
+
+Este inventário lista *funcionalidades*, não *comandos* — "copiar célula como
+Markdown" é uma variação de "copiar", e aqui elas contam como uma. Isso explica
+a distância entre 76 itens e 270 comandos, mas não a elimina: os 270 são o alvo.
 
 Para o inventário elemento a elemento — cada botão, menu e atalho, com estado verificado na
-aplicação rodando — ver [`ELEMENTS.md`](ELEMENTS.md).
-
-Contra os **275 comandos** do DBeaver o número é bem menor, e a diferença não é
-contradição: este inventário lista *funcionalidades*, não *comandos* — "copiar
-célula como Markdown" é uma variação de "copiar", e aqui elas contam como uma.
-
-**A cobertura de SGBD é outra conta, e muito menor:** 2 de ~50, contra os quais
-esses 82% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
-`docs/NAVIGATOR-TREE.md` (21 de ~70 no PostgreSQL).
+aplicação rodando — ver [`ELEMENTS.md`](ELEMENTS.md), `docs/MYSQL-MAP.md`
+(21 de 27 nós da árvore MySQL) e `docs/NAVIGATOR-TREE.md` (21 de ~70 no PostgreSQL).
 
 ## Próximos passos, por impacto
 
