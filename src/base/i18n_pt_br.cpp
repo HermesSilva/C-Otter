@@ -166,6 +166,14 @@ const char* const kPtBr[] = {
 
     // --- Particoes e eventos (arvore MySQL) ---
     "Partitions",                 "Partições",
+    "System info",                "Informação do servidor",
+    "Session status",             "Status da sessão",
+    "Global status",              "Status global",
+    "Session variables",          "Variáveis da sessão",
+    "Global variables",           "Variáveis globais",
+    "Engines",                    "Engines",
+    "Charsets",                   "Charsets",
+    "... and more; use the filter", "... e mais; use o filtro",
     "not partitioned",            "não particionada",
     "View data",                  "Ver dados",
     "Events",                     "Eventos",

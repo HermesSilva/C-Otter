@@ -1538,8 +1538,102 @@ void MainShell::draw_navigator_panel() {
             }
             ImGui::PopID();
         }
+
+        // --- System Info ------------------------------------------------------
+        //
+        // No NÍVEL DA CONEXÃO, depois dos bancos -- como no `<tree>` do
+        // DBeaver, onde "System Info" é irmão de "Databases", não filho.
+        // Colocá-lo dentro de um banco sugeriria que os números são daquele
+        // banco, e são do SERVIDOR.
+        if (session().state() == SessionState::connected &&
+            session().has_server_info()) {
+            draw_server_info_folder();
+        }
     }
     ImGui::End();
+}
+
+// As quatro pastas de estatísticas do servidor, mais engines e charsets.
+//
+// Os valores são carregados sob demanda e NÃO são recarregados sozinhos: um
+// status que muda a cada segundo, redesenhado a 60 fps, seria ilegível. O
+// usuário pede a atualização quando quiser.
+void MainShell::draw_server_info_folder() {
+    const Palette& p = colors();
+
+    icon_inline(Icon::info, p.accent_light);
+    ImGui::SameLine(0.0f, 4.0f);
+
+    if (!ImGui::TreeNodeEx(TR("System info"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        return;
+    }
+
+    // Uma lista de pares nome/valor, com filtro. Sem filtro, "SHOW GLOBAL
+    // STATUS" devolve ~500 linhas e achar uma é rolar a árvore inteira.
+    const auto draw_variables = [&](const char* label, Icon icon,
+                                    const std::vector<db::ServerVariable>& values,
+                                    bool loaded, auto&& request) {
+        if (!draw_folder_node(icon, label, values.size(), loaded)) return;
+
+        if (!loaded && !session().busy()) request();
+
+        // O filtro do Navigator vale aqui também: é o mesmo campo, e quem
+        // digitou "innodb" quer ver as variáveis de InnoDB.
+        std::size_t shown = 0;
+        for (const db::ServerVariable& variable : values) {
+            if (!matches_filter(variable.name)) continue;
+            if (++shown > 200) {
+                ImGui::TextColored(col4(p.text_dim),
+                                   TR("... and more; use the filter"));
+                break;
+            }
+
+            ImGui::BeginGroup();
+            ImGui::TextColored(col4(p.text), "%s", variable.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.data), "%s", variable.value.c_str());
+            ImGui::EndGroup();
+
+            if (!variable.detail.empty() && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", variable.detail.c_str());
+            }
+        }
+        ImGui::TreePop();
+    };
+
+    draw_variables(TR("Session status"), Icon::info,
+                   session().session_status(), session().session_status_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::session_status); });
+
+    draw_variables(TR("Global status"), Icon::info,
+                   session().global_status(), session().global_status_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::global_status); });
+
+    draw_variables(TR("Session variables"), Icon::settings,
+                   session().session_variables(),
+                   session().session_variables_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::session_variables); });
+
+    draw_variables(TR("Global variables"), Icon::settings,
+                   session().global_variables(),
+                   session().global_variables_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::global_variables); });
+
+    draw_variables(TR("Engines"), Icon::database,
+                   session().engines(), session().engines_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::engines); });
+
+    draw_variables(TR("Charsets"), Icon::data_type,
+                   session().charsets(), session().charsets_loaded(),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::charsets); });
+
+    ImGui::TreePop();
 }
 
 // Pasta com contagem e um ícone. O número evita expandir só para descobrir que

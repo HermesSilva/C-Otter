@@ -79,6 +79,9 @@ public:
     [[nodiscard]] bool has_sequences() const noexcept override;
     [[nodiscard]] bool has_user_types() const noexcept override;
     [[nodiscard]] bool has_events() const noexcept override;
+    [[nodiscard]] bool has_server_info() const noexcept override;
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_server_info(
+        ServerInfoKind kind) override;
 
 private:
     Catalog catalog_;
@@ -99,6 +102,20 @@ bool ReaderFor<PostgresCatalog>::has_sequences() const noexcept { return true; }
 
 template <>
 bool ReaderFor<PostgresCatalog>::has_user_types() const noexcept { return true; }
+
+template <>
+bool ReaderFor<PostgresCatalog>::has_server_info() const noexcept {
+    // O PostgreSQL tem pg_stat_* e pg_settings, mas com forma e significado
+    // diferentes -- nao sao pares nome/valor equivalentes. Oferecer a pasta
+    // com os dados errados seria pior que nao oferecer.
+    return false;
+}
+
+template <>
+Result<std::vector<ServerVariable>>
+ReaderFor<PostgresCatalog>::load_server_info(ServerInfoKind) {
+    return std::vector<ServerVariable>{};
+}
 
 template <>
 bool ReaderFor<PostgresCatalog>::has_events() const noexcept {
@@ -125,6 +142,23 @@ bool ReaderFor<MysqlCatalog>::has_sequences() const noexcept {
     // Sequences so' existem no MariaDB 10.3+. Perguntar ao catalogo, e nao
     // cravar false: num MariaDB a pasta precisa aparecer.
     return catalog_.is_mariadb() && catalog_.version().at_least(10, 3);
+}
+
+template <>
+bool ReaderFor<MysqlCatalog>::has_server_info() const noexcept { return true; }
+
+template <>
+Result<std::vector<ServerVariable>>
+ReaderFor<MysqlCatalog>::load_server_info(ServerInfoKind kind) {
+    switch (kind) {
+        case ServerInfoKind::session_status:    return catalog_.load_status(false);
+        case ServerInfoKind::global_status:     return catalog_.load_status(true);
+        case ServerInfoKind::session_variables: return catalog_.load_variables(false);
+        case ServerInfoKind::global_variables:  return catalog_.load_variables(true);
+        case ServerInfoKind::engines:           return catalog_.load_engines();
+        case ServerInfoKind::charsets:          return catalog_.load_charsets();
+    }
+    return std::vector<ServerVariable>{};
 }
 
 template <>

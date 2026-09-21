@@ -88,10 +88,12 @@ O valor `0xFB` **dentro de uma linha** é NULL; fora dela, na primeira posição
 
 ## 2. Árvore de objetos
 
-Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **15 implementados** e
-4 lidos sem tela.
+Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **20 implementados**.
 
-Cobertura contra o DBeaver (diretiva 4): **15 / 27 = 56%** da árvore MySQL.
+Cobertura contra o DBeaver (diretiva 4): **20 / 27 = 74%** da árvore MySQL.
+
+Faltam: Packages (só MariaDB), Users → Grants, Administer, User privileges,
+Plugins, e os dois nós "virtuais" de índice e trigger no nível do banco.
 
 | Nó | Caminho | Estado |
 |---|---|:---:|
@@ -115,11 +117,11 @@ Cobertura contra o DBeaver (diretiva 4): **15 / 27 = 56%** da árvore MySQL.
 | ⠀⠀└ Events | `events` | ✅ |
 | Users → Grants | `users` | ⬜ |
 | Administer | — | ⬜ |
-| System Info | — | ⬜ |
-| ├ Session status / Global status | `sessionStatus` | 🟡 lido, sem tela |
-| ├ Session variables / Global variables | `sessionVariables` | 🟡 lido, sem tela |
-| ├ Engines | `engines` | 🟡 lido, sem tela |
-| ├ Charsets → Collations | `charsets` | 🟡 lido, sem tela |
+| System Info | — | ✅ |
+| ├ Session status / Global status | `sessionStatus` | ✅ |
+| ├ Session variables / Global variables | `sessionVariables` | ✅ |
+| ├ Engines | `engines` | ✅ |
+| ├ Charsets → Collations | `charsets` | ✅ |
 | ├ User privileges | `privileges` | ⬜ |
 | └ Plugins | `plugins` | ⬜ |
 
@@ -168,7 +170,7 @@ armadilhas:
 | Dialeto de identificador (crase) no SQL gerado | ✅ |
 | Importação do DBeaver com senha | ✅ 6 de 6 conexões |
 | **Particionamento e eventos** | ✅ |
-| System Info (lido pelo catálogo, sem tela) | 🟡 |
+| **System Info**, com filtro sobre 633 variáveis | ✅ |
 | Usuários e privilégios | ⬜ |
 | TLS | ⬜ |
 | Protocolo preparado (`COM_STMT_*`) | ⬜ |

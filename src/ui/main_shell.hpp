@@ -91,6 +91,10 @@ private:
     void draw_routines_folder(const db::SchemaMeta& schema);
     void draw_types_folder(const db::SchemaMeta& schema);
     void draw_events_folder(const db::SchemaMeta& schema);
+
+    // As pastas de System Info, no nivel da CONEXAO -- como no DBeaver, onde
+    // "System Info" e' irmao de "Databases", nao filho.
+    void draw_server_info_folder();
     void draw_editor_panel();
     void draw_grid_panel();
 

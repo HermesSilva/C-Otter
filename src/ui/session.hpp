@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <array>
 #include <optional>
 #include <string>
 #include <thread>
@@ -99,6 +100,40 @@ public:
     [[nodiscard]] bool has_sequences() const noexcept { return has_sequences_; }
     [[nodiscard]] bool has_user_types() const noexcept { return has_user_types_; }
     [[nodiscard]] bool has_events() const noexcept { return has_events_; }
+
+    // --- Informacao do servidor (System Info) --------------------------------
+    //
+    // Seis conjuntos com a MESMA forma -- pares nome/valor --, mas de origens
+    // diferentes. Um enum em vez de seis metodos: o laco da arvore fica com
+    // um chamador so', e acrescentar o setimo nao muda a assinatura de nada.
+    enum class ServerInfo {
+        session_status,
+        global_status,
+        session_variables,
+        global_variables,
+        engines,
+        charsets,
+    };
+
+    // O SGBD tem essas informacoes? So' o MySQL, por enquanto -- no
+    // PostgreSQL o equivalente sao as views pg_stat_*, com outra forma.
+    [[nodiscard]] bool has_server_info() const noexcept { return has_server_info_; }
+
+    void load_server_info_async(ServerInfo what);
+
+    [[nodiscard]] std::vector<db::ServerVariable> session_status() const;
+    [[nodiscard]] std::vector<db::ServerVariable> global_status() const;
+    [[nodiscard]] std::vector<db::ServerVariable> session_variables() const;
+    [[nodiscard]] std::vector<db::ServerVariable> global_variables() const;
+    [[nodiscard]] std::vector<db::ServerVariable> engines() const;
+    [[nodiscard]] std::vector<db::ServerVariable> charsets() const;
+
+    [[nodiscard]] bool session_status_loaded() const noexcept;
+    [[nodiscard]] bool global_status_loaded() const noexcept;
+    [[nodiscard]] bool session_variables_loaded() const noexcept;
+    [[nodiscard]] bool global_variables_loaded() const noexcept;
+    [[nodiscard]] bool engines_loaded() const noexcept;
+    [[nodiscard]] bool charsets_loaded() const noexcept;
 
     // O que o driver suporta. Vazio enquanto nao ha' conexao.
     //
@@ -196,6 +231,14 @@ private:
     bool has_sequences_  = true;
     bool has_user_types_ = true;
     bool has_events_     = false;
+    bool has_server_info_ = false;
+
+    // Os seis conjuntos, indexados pelo enum. Array em vez de seis membros:
+    // o codigo que carrega e o que le' ficam com um indice, nao com um
+    // switch de seis casos em cada ponto.
+    static constexpr std::size_t kServerInfoCount = 6;
+    std::array<std::vector<db::ServerVariable>, kServerInfoCount> server_info_;
+    std::array<bool, kServerInfoCount> server_info_loaded_{};
 
     std::optional<db::Capabilities> capabilities_;
 

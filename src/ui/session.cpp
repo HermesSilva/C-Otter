@@ -85,7 +85,8 @@ void Session::connect_async(const db::ConnConfig& config) {
 
         const bool sequences  = catalog->has_sequences();
         const bool user_types = catalog->has_user_types();
-        const bool events     = catalog->has_events();
+        const bool events      = catalog->has_events();
+        const bool server_info = catalog->has_server_info();
         const db::Capabilities caps = holt->capabilities();
 
         std::vector<db::SchemaMeta>     schemas;
@@ -133,6 +134,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         has_sequences_   = sequences;
         has_user_types_  = user_types;
         has_events_      = events;
+        has_server_info_ = server_info;
         capabilities_    = caps;
         state_.store(SessionState::connected, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
@@ -679,5 +681,64 @@ std::vector<db::QueryLog> Session::query_log() const {
     return holt_ ? holt_->query_log() : std::vector<db::QueryLog>{};
 }
 
-} // namespace otter::ui
+// --- Informacao do servidor (System Info) ----------------------------------------
 
+void Session::load_server_info_async(ServerInfo what) {
+    const auto index = static_cast<std::size_t>(what);
+    if (index >= kServerInfoCount) return;
+
+    run_catalog_async([this, what, index](db::CatalogReader& catalog) {
+        auto values = catalog.load_server_info(
+            static_cast<db::ServerInfoKind>(what));
+        if (!values) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        server_info_[index] = std::move(*values);
+        server_info_loaded_[index] = true;
+    });
+}
+
+namespace {
+
+// O corpo dos doze acessores e' o mesmo: pegar o mutex e copiar. Escrever
+// doze vezes convidaria a esquecer o lock num deles -- e uma corrida de
+// leitura num vector sendo substituido pelo worker e' o tipo de defeito que
+// aparece uma vez por semana e nunca no depurador.
+template <typename T>
+T locked_copy(std::mutex& mutex, const T& value) {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return value;
+}
+
+} // namespace
+
+std::vector<db::ServerVariable> Session::session_status() const {
+    return locked_copy(mutex_, server_info_[0]);
+}
+std::vector<db::ServerVariable> Session::global_status() const {
+    return locked_copy(mutex_, server_info_[1]);
+}
+std::vector<db::ServerVariable> Session::session_variables() const {
+    return locked_copy(mutex_, server_info_[2]);
+}
+std::vector<db::ServerVariable> Session::global_variables() const {
+    return locked_copy(mutex_, server_info_[3]);
+}
+std::vector<db::ServerVariable> Session::engines() const {
+    return locked_copy(mutex_, server_info_[4]);
+}
+std::vector<db::ServerVariable> Session::charsets() const {
+    return locked_copy(mutex_, server_info_[5]);
+}
+
+// As marcas de "carregado" sao bool: ler um bool que o worker escreve nao
+// precisa de lock (nao ha' estado intermediario), e o pior caso e' desenhar
+// um quadro a mais com a pasta vazia.
+bool Session::session_status_loaded() const noexcept    { return server_info_loaded_[0]; }
+bool Session::global_status_loaded() const noexcept     { return server_info_loaded_[1]; }
+bool Session::session_variables_loaded() const noexcept { return server_info_loaded_[2]; }
+bool Session::global_variables_loaded() const noexcept  { return server_info_loaded_[3]; }
+bool Session::engines_loaded() const noexcept           { return server_info_loaded_[4]; }
+bool Session::charsets_loaded() const noexcept          { return server_info_loaded_[5]; }
+
+} // namespace otter::ui

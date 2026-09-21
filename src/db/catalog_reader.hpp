@@ -14,9 +14,22 @@
 
 #include "db/catalog.hpp"
 
+#include <cstdint>
+
 #include <memory>
 
 namespace otter::db {
+
+// Os conjuntos de informacao do servidor. Todos tem a MESMA forma -- pares
+// nome/valor --, e por isso um metodo so' com um seletor, em vez de seis.
+enum class ServerInfoKind : std::uint8_t {
+    session_status,
+    global_status,
+    session_variables,
+    global_variables,
+    engines,
+    charsets,
+};
 
 class CatalogReader {
 public:
@@ -86,6 +99,14 @@ public:
     [[nodiscard]] virtual bool has_sequences() const noexcept = 0;
     [[nodiscard]] virtual bool has_user_types() const noexcept = 0;
     [[nodiscard]] virtual bool has_events() const noexcept = 0;
+
+    // O SGBD oferece as pastas de System Info? So' o MySQL, por enquanto --
+    // no PostgreSQL o equivalente sao as views pg_stat_*, com outra forma e
+    // outro significado.
+    [[nodiscard]] virtual bool has_server_info() const noexcept = 0;
+
+    [[nodiscard]] virtual Result<std::vector<ServerVariable>> load_server_info(
+        ServerInfoKind kind) = 0;
 
 protected:
     CatalogReader() = default;
