@@ -259,6 +259,37 @@ public:
     // para um schema que nao existe.
     [[nodiscard]] std::string current_schema() const override { return database_; }
 
+    // Propriedades do driver como variaveis de sessao.
+    //
+    // O handshake do MySQL nao carrega parametros arbitrarios, ao contrario
+    // da StartupMessage do PostgreSQL -- entao sao aplicadas logo apos
+    // conectar, antes de qualquer consulta do usuario.
+    //
+    // Um nome invalido FALHA a conexao: aplicar metade e seguir daria ao
+    // usuario uma sessao que ele acha configurada e nao esta'.
+    Status apply_driver_properties(
+        const std::map<std::string, std::string>& properties) {
+        for (const auto& [name, value] : properties) {
+            if (name.empty()) continue;
+
+            // Nome como identificador, valor como literal. Nao ha' elevacao
+            // de privilegio a impedir -- e' a propria sessao do usuario --,
+            // mas citar evita que um valor com aspas quebre a sintaxe.
+            std::string quoted_value;
+            quoted_value.reserve(value.size() + 2);
+            quoted_value.push_back('\'');
+            for (const char c : value) {
+                if (c == '\'' || c == '\\') quoted_value.push_back('\\');
+                quoted_value.push_back(c);
+            }
+            quoted_value.push_back('\'');
+
+            OTTER_RETURN_IF_ERROR(run_silent(
+                "SET @@" + quote_identifier(name) + " = " + quoted_value));
+        }
+        return {};
+    }
+
 private:
     Status run_silent(std::string_view sql) {
         auto result = run(sql, /*internal=*/true);
@@ -389,6 +420,19 @@ public:
 
         auto holt = std::unique_ptr<MysqlHolt>(new MysqlHolt(std::move(conn)));
         holt->database_ = config.database;
+
+        // Propriedades do driver: no MySQL viram `SET @@nome = valor`.
+        //
+        // Nao ha' equivalente a' StartupMessage do PostgreSQL -- o handshake
+        // do MySQL nao carrega parametros arbitrarios --, entao sao aplicadas
+        // logo apos conectar, antes de qualquer consulta do usuario.
+        //
+        // Um nome invalido FALHA a conexao, em vez de ser ignorado: aplicar
+        // metade das propriedades e seguir daria ao usuario uma sessao que
+        // ele acha configurada e nao esta'.
+        OTTER_RETURN_IF_ERROR(
+            holt->apply_driver_properties(config.driver_properties));
+
         return std::unique_ptr<Holt>(std::move(holt));
     }
 };

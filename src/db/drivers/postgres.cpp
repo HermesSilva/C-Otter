@@ -350,6 +350,14 @@ public:
 
         // `require` implica exigir: se o servidor nao oferecer TLS, a conexao
         // falha em vez de cair em claro sem avisar.
+        // As propriedades do perfil viram parametros de runtime da
+        // StartupMessage -- search_path, statement_timeout, TimeZone e
+        // qualquer outro GUC alteravel na conexao.
+        params.runtime_params.reserve(config.driver_properties.size());
+        for (const auto& [name, value] : config.driver_properties) {
+            params.runtime_params.emplace_back(name, value);
+        }
+
         params.use_tls     = config.ssl_enabled();
         params.require_tls = config.ssl_enabled();
         params.allow_invalid_certificate = !config.ssl_verifies_certificate();

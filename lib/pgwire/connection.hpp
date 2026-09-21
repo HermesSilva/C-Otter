@@ -15,6 +15,7 @@
 #include <map>
 #include <span>
 #include <string>
+#include <utility>   // pair, para os parametros de runtime
 #include <vector>
 
 namespace otter::pgwire {
@@ -27,6 +28,15 @@ struct ConnectParams {
     std::string   password;
     std::string   application_name = "C-Otter";
     std::chrono::milliseconds timeout{10000};
+
+    // Parametros de runtime extras, da aba "Parâmetros internos" do dialogo.
+    //
+    // Vao na StartupMessage, que e' onde o PostgreSQL os aceita: qualquer
+    // GUC marcado como alteravel na conexao (search_path, statement_timeout,
+    // TimeZone, options). Um nome que o servidor nao conhece faz a conexao
+    // FALHAR com uma mensagem nomeando o parametro -- e' o comportamento
+    // certo: silenciar o erro deixaria o usuario achar que aplicou.
+    std::vector<std::pair<std::string, std::string>> runtime_params;
 
     // TLS. `require` faz a conexao FALHAR quando o servidor recusa -- o
     // contrario daria ao usuario a impressao de estar protegido sem estar.

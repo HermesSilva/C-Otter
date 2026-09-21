@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -38,7 +39,13 @@ struct ConnConfig {
     std::string database;
     std::string user;
     std::string password;
-    std::string options;                              // parametros extras do driver
+    // Parametros extras do driver, da aba "Parâmetros internos" do dialogo.
+    //
+    // Era uma string solta `options` que NINGUEM preenchia e NINGUEM lia: o
+    // usuario digitava as propriedades, elas iam para disco, e a conexao
+    // ignorava todas. Um campo que parece funcionar e nao funciona e' o que
+    // a diretriz 6 proibe.
+    std::map<std::string, std::string> driver_properties;
     std::chrono::seconds connect_timeout{10};
 
     // Modo TLS. O enum vem de `connection_config.hpp`, que ja' o define para

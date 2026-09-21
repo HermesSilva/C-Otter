@@ -873,6 +873,18 @@ const char* const kPtBr[] = {
         "dobra de blocos, que depende dele.",
     "Show whitespace",            "Mostrar espaços",
     "(not working yet)",          "(ainda não funciona)",
+
+    // --- Propriedades do driver ---
+    "PostgreSQL: runtime parameters of the startup message (search_path, "
+    "statement_timeout, TimeZone...).",
+        "PostgreSQL: parâmetros de runtime da mensagem de startup "
+        "(search_path, statement_timeout, TimeZone...).",
+    "MySQL: SET @@name = value, right after connecting.",
+        "MySQL: SET @@nome = valor, logo após conectar.",
+    "A name the server does not accept fails the connection, naming the "
+    "parameter.",
+        "Um nome que o servidor não aceita faz a conexão falhar, nomeando o "
+        "parâmetro.",
     "Draws spaces and tabs. The option reaches the editor but nothing is "
     "drawn -- a defect in the text widget, not in the setting.",
         "Desenha espaços e tabulações. A opção chega ao editor mas nada é "

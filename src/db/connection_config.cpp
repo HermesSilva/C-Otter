@@ -44,6 +44,11 @@ ConnConfig ConnectionProfile::to_conn_config() const {
     // quando ela esta' marcada. Sem esse teste, um perfil com a caixa
     // desmarcada mas modo `require` gravado exigiria TLS sem a UI dizer.
     config.ssl_mode = ssl.enabled ? ssl.mode : SslMode::disable;
+
+    // Propriedades do driver, da aba "Parâmetros internos". Iam para disco e
+    // paravam ali: o ConnConfig tinha um campo `options` que ninguem
+    // preenchia nem lia.
+    config.driver_properties = driver_properties;
     return config;
 }
 

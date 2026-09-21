@@ -157,6 +157,20 @@ Result<Connection> Connection::connect(const ConnectParams& params) {
     startup.put_string(params.application_name);
     startup.put_string("client_encoding");
     startup.put_string("UTF8");
+
+    // Parametros extras, do perfil. Depois dos nossos de proposito: assim um
+    // "client_encoding" digitado pelo usuario SOBREPOE o nosso -- o
+    // PostgreSQL usa a ultima ocorrencia. Quem escreve isso sabe o que quer.
+    //
+    // Nome vazio e' pulado: a lista termina com uma string vazia, e um nome
+    // em branco encerraria a mensagem no meio, deixando o resto dos
+    // parametros como lixo depois do terminador.
+    for (const auto& [name, value] : params.runtime_params) {
+        if (name.empty()) continue;
+        startup.put_string(name);
+        startup.put_string(value);
+    }
+
     startup.put_string("");   // terminador da lista de parametros
 
     OTTER_RETURN_IF_ERROR(conn.send(startup.finish()));

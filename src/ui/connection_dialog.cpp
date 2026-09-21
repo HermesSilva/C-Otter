@@ -765,6 +765,20 @@ void ConnectionDialog::draw_page_driver_properties() {
     ImGui::TextColored(col4(colors().data), TR("Driver properties"));
     ImGui::TextColored(col4(colors().text_dim),
                        TR("Parameters passed directly to the driver on connect."));
+
+    // Diz ONDE eles entram, que e' o que decide se um nome vai funcionar.
+    // O texto anterior prometia "passados ao driver" e nada acontecia: os
+    // valores iam para disco e a conexao os ignorava.
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       profile_.driver_id == "postgresql"
+                           ? TR("PostgreSQL: runtime parameters of the startup "
+                                "message (search_path, statement_timeout, "
+                                "TimeZone...).")
+                           : TR("MySQL: SET @@name = value, right after "
+                                "connecting."));
+    ImGui::TextColored(col4(colors().warn), "%s",
+                       TR("A name the server does not accept fails the "
+                          "connection, naming the parameter."));
     ImGui::Separator();
 
     if (ImGui::BeginTable("##props", 3,

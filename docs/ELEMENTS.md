@@ -106,7 +106,7 @@ Rótulos oficiais, vindos do `bundle.properties`.
 | | Nível de isolamento | ⬜ **avisado na tela** (exige conexão viva) |
 | → **Parâmetros internos** | Tabela de propriedades editável | ✅ |
 | | Adicionar / remover propriedade | ✅ |
-| | Propriedades aplicadas na conexão | ⬜ |
+| | **Propriedades aplicadas na conexão** | ✅ PostgreSQL: parâmetros de runtime da StartupMessage. MySQL: SET @@nome. Verificado contra o servidor com pg_stat_activity |
 | **Geral** | Nome, descrição, pasta | ✅ |
 | | Tipo: Desenvolvimento / Teste / Produção | ✅ |
 | | Cor por tipo e resumo do comportamento | ✅ |
@@ -470,7 +470,7 @@ ficam de fora do total.
 |------|-----|-----|-----|-----|-------|
 | Janela e estrutura | 18 | 0 | 1 | 0 | 19 |
 | Barra de menus | 16 | 2 | 0 | 0 | 18 |
-| Assistente de conexão | 44 | 1 | 9 | 1 | 55 |
+| Assistente de conexão | 45 | 1 | 8 | 1 | 55 |
 | Painel Raft | 12 | 0 | 0 | 0 | 12 |
 | Navigator | 34 | 0 | 0 | 0 | 34 |
 | Editor SQL | 55 | 3 | 3 | 0 | 61 |
@@ -478,9 +478,9 @@ ficam de fora do total.
 | Inspetor de queries | 15 | 0 | 1 | 0 | 16 |
 | Barra de status | 8 | 0 | 0 | 0 | 8 |
 | Transações | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **262** | **7** | **15** | **1** | **285** |
+| **Total** | **263** | **7** | **14** | **1** | **285** |
 
-**262 de 285 elementos existentes funcionam.**
+**263 de 285 elementos existentes funcionam.**
 
 > ### ⚠️ Este número NÃO é indicador de progresso
 >
@@ -552,7 +552,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (431, todos verdes):
+Testes automatizados (433, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

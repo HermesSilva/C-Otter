@@ -514,3 +514,52 @@ OTTER_TEST(store_uses_editor_defaults_when_the_key_is_absent) {
     OTTER_CHECK_EQ(e.show_line_numbers, defaults.show_line_numbers);
     OTTER_CHECK_EQ(e.auto_indent, defaults.auto_indent);
 }
+
+// --- Propriedades do driver chegam ao ConnConfig ----------------------------
+//
+// Por que existe: elas iam para disco e paravam ali. O ConnConfig tinha um
+// campo `options` que NINGUEM preenchia e NINGUEM lia -- o usuario digitava
+// "search_path=vendas", conectava, e a sessao abria com o search_path
+// padrao. O sintoma nao aparece em lugar nenhum: a conexao funciona, so' que
+// sem o que foi pedido.
+
+OTTER_TEST(profile_carries_driver_properties_to_the_connection) {
+    ConnectionProfile profile;
+    profile.driver_id = "postgresql";
+    profile.host      = "localhost";
+    profile.driver_properties["search_path"]       = "vendas,public";
+    profile.driver_properties["statement_timeout"] = "5000";
+
+    const ConnConfig config = profile.to_conn_config();
+
+    OTTER_CHECK_EQ(config.driver_properties.size(), std::size_t{2});
+    OTTER_CHECK_EQ(config.driver_properties.at("search_path"),
+                   std::string{"vendas,public"});
+    OTTER_CHECK_EQ(config.driver_properties.at("statement_timeout"),
+                   std::string{"5000"});
+}
+
+OTTER_TEST(store_round_trips_driver_properties) {
+    // Ja' eram gravadas; o teste fixa isso agora que elas TEM efeito --
+    // perde-las no disco passou a ser um defeito visivel.
+    const TempDir dir("driver-props");
+
+    StoredProfile stored;
+    stored.id        = "postgres-props";
+    stored.provider  = "postgresql";
+    stored.driver    = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host = "localhost";
+    stored.profile.driver_properties["search_path"] = "vendas";
+    stored.profile.driver_properties["TimeZone"]    = "America/Sao_Paulo";
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+
+    const auto& props = back->front().profile.driver_properties;
+    OTTER_CHECK_EQ(props.size(), std::size_t{2});
+    OTTER_CHECK_EQ(props.at("search_path"), std::string{"vendas"});
+    OTTER_CHECK_EQ(props.at("TimeZone"), std::string{"America/Sao_Paulo"});
+}
