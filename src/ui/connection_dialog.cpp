@@ -260,9 +260,18 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
             draw_tab_main();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("PostgreSQL")) {
-            draw_tab_postgres();
-            ImGui::EndTabItem();
+        // A aba do SGBD so' aparece para o driver a que ela pertence.
+        //
+        // Era um literal fixo "PostgreSQL", e numa conexao MySQL mentia duas
+        // vezes: o rotulo dizia PostgreSQL, e o conteudo oferecia template0 e
+        // template1 -- bancos que o MySQL nao tem. Quem editasse um perfil
+        // MySQL via a aba PostgreSQL e concluia, com razao, que o dialogo
+        // estava confuso sobre qual banco estava configurando.
+        if (profile_.driver_id == "postgresql") {
+            if (ImGui::BeginTabItem("PostgreSQL")) {
+                draw_tab_postgres();
+                ImGui::EndTabItem();
+            }
         }
         if (ImGui::BeginTabItem("Driver")) {
             draw_tab_driver_properties();

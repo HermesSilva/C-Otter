@@ -335,3 +335,97 @@ OTTER_TEST(store_reports_a_malformed_data_sources_file) {
     OTTER_CHECK(profiles.error().message().find("data-sources") !=
                 std::string::npos);
 }
+
+// --- O provider precisa acompanhar o driver --------------------------------
+
+OTTER_TEST(store_maps_the_mysql_driver_back_to_the_mysql_provider) {
+    // A conversao inversa de apply_driver. Sem ela, `remember_profile`
+    // cravava "postgresql" em todo perfil novo -- e um perfil MySQL criado na
+    // tela voltava da releitura como PostgreSQL.
+    OTTER_CHECK_EQ(std::string(provider_for_driver("mysql").provider),
+                   std::string{"mysql"});
+    OTTER_CHECK_EQ(std::string(provider_for_driver("postgresql").provider),
+                   std::string{"postgresql"});
+
+    // Os nomes de driver sao os do DBeaver, para que um perfil criado aqui
+    // abra la'.
+    OTTER_CHECK_EQ(std::string(provider_for_driver("mysql").driver),
+                   std::string{"mysql8"});
+}
+
+OTTER_TEST(store_falls_back_to_postgresql_for_an_unknown_driver) {
+    // Provider vazio nao casaria com nada em apply_driver, e o perfil
+    // voltaria marcado como "nao suportado" -- pior que um padrao errado.
+    OTTER_CHECK_EQ(std::string(provider_for_driver("").provider),
+                   std::string{"postgresql"});
+    OTTER_CHECK_EQ(std::string(provider_for_driver("cassandra").provider),
+                   std::string{"postgresql"});
+}
+
+OTTER_TEST(store_round_trips_a_mysql_profile_as_mysql) {
+    // O defeito completo, de ponta a ponta: gravar um perfil MySQL e ler de
+    // volta tem de devolver driver_id "mysql". Com o provider cravado em
+    // "postgresql", a releitura devolvia "postgresql" -- e a conexao falava o
+    // protocolo errado, terminando em "reading packet header: tempo esgotado".
+    const TempDir dir("mysql-round-trip");
+
+    const ProviderNames names = provider_for_driver("mysql");
+
+    StoredProfile stored;
+    stored.provider  = std::string(names.provider);
+    stored.driver    = std::string(names.driver);
+    stored.supported = true;
+
+    stored.profile.driver_id = "mysql";
+    stored.profile.host      = "localhost";
+    stored.profile.port      = 3306;
+    stored.profile.user      = "root";
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+    OTTER_CHECK_EQ(back->front().profile.driver_id, std::string{"mysql"});
+    OTTER_CHECK_EQ(back->front().profile.port, std::uint16_t{3306});
+}
+
+OTTER_TEST(store_keeps_two_profiles_that_differ_only_by_driver) {
+    // Um PostgreSQL e um MySQL no mesmo host podem ter porta, banco e usuario
+    // iguais. Casar perfis sem olhar o DRIVER fazia um sobrescrever o outro --
+    // e o sobrevivente ficava com provider e driver do protocolo errado.
+    const TempDir dir("two-drivers");
+
+    StoredProfile pg;
+    pg.provider  = "postgresql";
+    pg.driver    = "postgres-jdbc";
+    pg.supported = true;
+    pg.profile.driver_id = "postgresql";
+    pg.profile.host      = "localhost";
+    pg.profile.port      = 5432;
+    pg.profile.user      = "root";
+
+    StoredProfile my;
+    my.provider  = "mysql";
+    my.driver    = "mysql8";
+    my.supported = true;
+    my.profile.driver_id = "mysql";
+    my.profile.host      = "localhost";
+    my.profile.port      = 5432;   // de proposito: so' o driver os distingue
+    my.profile.user      = "root";
+
+    OTTER_CHECK(save_profiles(dir.location(), {pg, my}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{2});
+
+    bool found_pg = false;
+    bool found_my = false;
+    for (const StoredProfile& s : *back) {
+        if (s.profile.driver_id == "postgresql") found_pg = true;
+        if (s.profile.driver_id == "mysql")      found_my = true;
+    }
+    OTTER_CHECK(found_pg);
+    OTTER_CHECK(found_my);
+}

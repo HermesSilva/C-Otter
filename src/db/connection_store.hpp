@@ -73,6 +73,20 @@ struct StoredProfile {
 //
 // `save_passwords` falso omite o arquivo de credenciais por completo -- e' o
 // que acontece com conexoes marcadas como Producao.
+// O par (provider, driver) do formato do DBeaver para um driver nosso.
+//
+// A conversao inversa de `apply_driver`, e ela precisa existir: gravar um
+// perfil novo exige escolher o provider a partir do `driver_id`, e cravar
+// "postgresql" ali fazia todo perfil MySQL criado na tela ser gravado como
+// PostgreSQL -- que so' aparecia na RELEITURA, conectando com o protocolo
+// errado e terminando em timeout.
+struct ProviderNames {
+    std::string_view provider;
+    std::string_view driver;
+};
+
+[[nodiscard]] ProviderNames provider_for_driver(std::string_view driver_id) noexcept;
+
 [[nodiscard]] Status save_profiles(const StoreLocation& location,
                                    const std::vector<StoredProfile>& profiles);
 

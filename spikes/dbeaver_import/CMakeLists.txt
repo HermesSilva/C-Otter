@@ -36,3 +36,8 @@ set_target_properties(spike_alter_live PROPERTIES FOLDER "spikes")
 add_executable(spike_tls_live tls_live.cpp)
 target_link_libraries(spike_tls_live PRIVATE otter_flags otter::otter_base otter::otter_db)
 set_target_properties(spike_tls_live PROPERTIES FOLDER "spikes")
+
+# Qual driver cada perfil usaria, sem conectar nem pedir senha.
+add_executable(spike_which_driver which_driver.cpp)
+target_link_libraries(spike_which_driver PRIVATE otter_flags otter::otter_base otter::otter_db)
+set_target_properties(spike_which_driver PROPERTIES FOLDER "spikes")

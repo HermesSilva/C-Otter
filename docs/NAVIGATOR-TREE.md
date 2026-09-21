@@ -7,11 +7,28 @@ das 90 classes `Postgre*.java` do modelo.
 
 ---
 
+## O que a árvore do C-Otter ainda não faz (observado pelo usuário, 2026-09-21)
+
+Comparando com uma captura da árvore do DBeaver, três diferenças estruturais
+além dos nós faltantes:
+
+| Diferença | DBeaver | C-Otter hoje |
+|---|---|---|
+| **Nó raiz da conexão** | `postgres  localhost:5432` no topo, com os bancos dentro | os schemas penduram na raiz do painel; o host só aparece no painel de cima |
+| **Pasta `Databases`** | agrupa os bancos do servidor | ausente — não há onde listar outros bancos |
+| **Tamanho da tabela** | coluna à direita de cada tabela (`72K`, `112K`, `128K`) | ausente |
+
+O tamanho à direita é o que mais muda o uso: permite achar a tabela grande de
+relance, sem consultar `pg_total_relation_size` à mão.
+
+**Nada disso está implementado.** Está registrado aqui para não ser esquecido,
+e nenhuma das três aparece como ✅ em lugar nenhum.
+
 ## A árvore completa do DBeaver (PostgreSQL)
 
 ```
-Connection
-└── Databases                         ⬜
+Connection                            🟡 sem o nó raiz nomeado
+└── Databases                         ⬜ pasta ausente: os schemas penduram direto
     └── Database                      🟡 (só o conectado)
         ├── Schemas                   ✅
         │   └── Schema                ✅

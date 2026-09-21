@@ -479,6 +479,18 @@ Result<std::vector<StoredProfile>> load_profiles(const StoreLocation& location) 
     return profiles;
 }
 
+ProviderNames provider_for_driver(std::string_view driver_id) noexcept {
+    // Os nomes de driver sao os que o DBeaver grava -- "mysql8" e
+    // "postgres-jdbc" --, para que um perfil criado aqui abra la'.
+    if (driver_id == "mysql") return {"mysql", "mysql8"};
+
+    // O padrao e' PostgreSQL, que e' o driver padrao do ConnConfig. Um
+    // driver desconhecido gravado como PostgreSQL e' melhor que um provider
+    // vazio: o vazio nao casa com nada em apply_driver e o perfil voltaria
+    // como "nao suportado".
+    return {"postgresql", "postgres-jdbc"};
+}
+
 Status save_profiles(const StoreLocation& location,
                      const std::vector<StoredProfile>& profiles) {
     // O id gerado precisa ser o MESMO nos dois arquivos: `data-sources.json`

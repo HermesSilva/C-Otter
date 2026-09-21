@@ -5710,29 +5710,50 @@ void MainShell::persist_profiles() {
 }
 
 void MainShell::remember_profile(const db::ConnectionProfile& profile) {
-    // Mesmo host+porta+banco+usuario e' a MESMA conexao, mesmo que o nome
-    // tenha mudado: senao, editar o rotulo criaria uma entrada duplicada.
+    // Mesmo DRIVER + host + porta + banco + usuario e' a MESMA conexao, mesmo
+    // que o nome tenha mudado: senao, editar o rotulo criaria uma entrada
+    // duplicada.
+    //
+    // O driver entra na comparacao porque um PostgreSQL e um MySQL no mesmo
+    // host podem ter porta, banco e usuario iguais -- e sem ele, trocar o
+    // driver na aba do dialogo SOBRESCREVIA o perfil do outro banco, deixando
+    // provider e driver apontando para o protocolo errado. O sintoma era um
+    // timeout em "reading packet header" (mensagem do driver MySQL) ao
+    // conectar num PostgreSQL.
     const auto same_target = [&profile](const db::StoredProfile& stored) {
-        return stored.profile.host == profile.host &&
+        return stored.profile.driver_id == profile.driver_id &&
+               stored.profile.host == profile.host &&
                stored.profile.port == profile.port &&
                stored.profile.database == profile.database &&
                stored.profile.user == profile.user;
     };
 
+    const db::ProviderNames names = db::provider_for_driver(profile.driver_id);
+
     for (db::StoredProfile& stored : saved_profiles_) {
         if (!same_target(stored)) continue;
 
         const std::string id = stored.id;   // preserva o id e o raw_json
-        stored.profile = profile;
-        stored.id      = id;
+        stored.profile  = profile;
+        stored.id       = id;
+
+        // O provider acompanha o driver mesmo num perfil existente: um perfil
+        // gravado antes desta correcao pode ter os dois divergindo.
+        stored.provider = std::string(names.provider);
+        stored.driver   = std::string(names.driver);
+
         persist_profiles();
         return;
     }
 
     db::StoredProfile fresh;
     fresh.profile   = profile;
-    fresh.provider  = "postgresql";
-    fresh.driver    = "postgres-jdbc";
+
+    // Vem do DRIVER do perfil, e nao cravado em "postgresql": com o literal,
+    // todo perfil MySQL criado na tela era gravado como PostgreSQL, e so' a
+    // releitura revelava -- conectando com o protocolo errado.
+    fresh.provider  = std::string(names.provider);
+    fresh.driver    = std::string(names.driver);
     fresh.supported = true;
 
     // O nome fica VAZIO quando o usuario nao deu um. effective_name() deriva
