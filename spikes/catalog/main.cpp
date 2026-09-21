@@ -3,7 +3,7 @@
 // Mais barato que verificar pela UI: se uma query esta' errada, o erro aparece
 // aqui com a mensagem do servidor.
 //
-//   spike_catalog <host> <port> <database> <user> <password> [tabela]
+//   spike_catalog <host> <port> <database> <user> <password> [tabela] [schema]
 #include "db/catalog.hpp"
 #include "db/drivers/postgres.hpp"
 
@@ -32,7 +32,8 @@ int main(int argc, char** argv) {
     config.user     = argv[4];
     config.password = argv[5];
 
-    const std::string table = argc > 6 ? argv[6] : "";
+    const std::string table  = argc > 6 ? argv[6] : "";
+    const std::string schema = argc > 7 ? argv[7] : "public";
 
     auto holt = otter::db::postgres_driver().connect(config);
     if (!holt) {
@@ -47,7 +48,7 @@ int main(int argc, char** argv) {
 
     // --- Sequences -----------------------------------------------------------
     section("Sequences");
-    if (auto sequences = catalog.load_sequences("public")) {
+    if (auto sequences = catalog.load_sequences(schema)) {
         std::printf("%zu encontrada(s)\n", sequences->size());
         for (std::size_t i = 0; i < std::min<std::size_t>(sequences->size(), 5); ++i) {
             const auto& s = (*sequences)[i];
@@ -60,9 +61,54 @@ int main(int argc, char** argv) {
         std::printf("FALHOU: %s\n", sequences.error().to_string().c_str());
     }
 
+    // --- Tabelas, views e materialized views ---------------------------------
+    //
+    // A arvore separa as tres em pastas distintas, com filhos diferentes: a
+    // view nao tem constraints, a materialized view nao tem triggers. Conferir
+    // a classificacao aqui e' mais barato que descobrir na UI.
+    section("Relacoes por tipo");
+    if (auto relations = catalog.load_tables(schema)) {
+        std::size_t tables_n = 0, views_n = 0, mviews_n = 0, other_n = 0;
+        for (const auto& t : *relations) {
+            switch (t.kind) {
+                case otter::db::ObjKind::view:              ++views_n;  break;
+                case otter::db::ObjKind::materialized_view: ++mviews_n; break;
+                case otter::db::ObjKind::table:             ++tables_n; break;
+                default:                                    ++other_n;  break;
+            }
+        }
+        std::printf("%zu tabela(s), %zu view(s), %zu materialized view(s), "
+                    "%zu outra(s)\n", tables_n, views_n, mviews_n, other_n);
+
+        for (const auto& t : *relations) {
+            if (!t.is_view()) continue;
+
+            std::printf("  [%-17s] %-28s constraints=%s indices=%s triggers=%s\n",
+                        std::string(otter::db::to_string(t.kind)).c_str(),
+                        t.name.c_str(),
+                        t.has_constraints() ? "sim" : "nao",
+                        t.has_indexes()     ? "sim" : "nao",
+                        t.has_triggers()    ? "sim" : "nao");
+
+            if (auto def = catalog.load_view_definition(schema, t.name)) {
+                // So' a primeira linha: o corpo inteiro polui a saida.
+                const std::string& body = *def;
+                const std::size_t eol = body.find('\n');
+                std::printf("      def: %s%s\n",
+                            body.substr(0, std::min(eol, std::size_t{68})).c_str(),
+                            body.size() > 68 ? " ..." : "");
+            } else {
+                std::printf("      def FALHOU: %s\n",
+                            def.error().to_string().c_str());
+            }
+        }
+    } else {
+        std::printf("FALHOU: %s\n", relations.error().to_string().c_str());
+    }
+
     // --- Rotinas -------------------------------------------------------------
     section("Functions / Procedures");
-    if (auto routines = catalog.load_routines("public")) {
+    if (auto routines = catalog.load_routines(schema)) {
         std::printf("%zu encontrada(s)\n", routines->size());
         for (std::size_t i = 0; i < std::min<std::size_t>(routines->size(), 5); ++i) {
             const auto& r = (*routines)[i];
@@ -78,7 +124,7 @@ int main(int argc, char** argv) {
     // --- Por tabela ----------------------------------------------------------
     std::string target = table;
     if (target.empty()) {
-        auto tables = catalog.load_tables("public");
+        auto tables = catalog.load_tables(schema);
         if (tables && !tables->empty()) target = tables->front().name;
     }
     if (target.empty()) {
@@ -89,7 +135,7 @@ int main(int argc, char** argv) {
     std::printf("\n--- tabela: %s ---\n", target.c_str());
 
     section("Constraints");
-    if (auto constraints = catalog.load_constraints("public", target)) {
+    if (auto constraints = catalog.load_constraints(schema, target)) {
         std::printf("%zu encontrada(s)\n", constraints->size());
         for (const auto& c : *constraints) {
             std::printf("  [%-11s] %-30s %s\n",
@@ -101,7 +147,7 @@ int main(int argc, char** argv) {
     }
 
     section("Indexes");
-    if (auto indexes = catalog.load_indexes("public", target)) {
+    if (auto indexes = catalog.load_indexes(schema, target)) {
         std::printf("%zu encontrado(s)\n", indexes->size());
         for (const auto& i : *indexes) {
             std::printf("  %-34s %-6s %-8s %s%s\n", i.name.c_str(),
@@ -114,7 +160,7 @@ int main(int argc, char** argv) {
     }
 
     section("Foreign keys desta tabela");
-    if (auto keys = catalog.load_table_foreign_keys("public", target)) {
+    if (auto keys = catalog.load_table_foreign_keys(schema, target)) {
         std::printf("%zu encontrada(s)\n", keys->size());
         for (const auto& k : *keys) {
             std::printf("  %s.%s -> %s.%s  ON DELETE %s\n",
@@ -127,7 +173,7 @@ int main(int argc, char** argv) {
     }
 
     section("References (quem aponta para esta tabela)");
-    if (auto refs = catalog.load_references("public", target)) {
+    if (auto refs = catalog.load_references(schema, target)) {
         std::printf("%zu encontrada(s)\n", refs->size());
         for (const auto& r : *refs) {
             std::printf("  %s.%s -> %s.%s\n",
@@ -139,7 +185,7 @@ int main(int argc, char** argv) {
     }
 
     section("Triggers");
-    if (auto triggers = catalog.load_triggers("public", target)) {
+    if (auto triggers = catalog.load_triggers(schema, target)) {
         std::printf("%zu encontrado(s)\n", triggers->size());
         for (const auto& t : *triggers) {
             std::printf("  %-30s %s %s%s\n", t.name.c_str(),

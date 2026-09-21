@@ -49,7 +49,8 @@ dependência de DLL redistribuível.
 
 Funciona também: assistente de conexão com catálogo de drivers e 8 abas, múltiplas abas de
 editor com resultado isolado, transações (auto-commit, commit, rollback), árvore de objetos
-com constraints/índices/FKs/referências/triggers/sequences/funções, três temas e i18n
+com tabelas, views e materialized views em pastas separadas — constraints, índices,
+FKs, referências, triggers, sequences, funções e o corpo da view — três temas e i18n
 (EN + pt-BR).
 
 **Cobertura real frente ao DBeaver: ~2,5% dos 281 comandos.** O número é baixo porque o

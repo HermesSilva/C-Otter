@@ -20,6 +20,23 @@ std::string quote_literal(std::string_view text) {
     return out;
 }
 
+// Escapa um IDENTIFICADOR entre aspas duplas, dobrando as que houver dentro.
+//
+// Diferente de quote_literal: sem as aspas duplas o PostgreSQL rebaixa o nome
+// para minusculas, e uma tabela criada como "TIDxAcaoSensivel" deixa de ser
+// encontrada. O ERP_TID usa esse estilo em todas as tabelas.
+std::string quote_ident(std::string_view name) {
+    std::string out;
+    out.reserve(name.size() + 2);
+    out.push_back('"');
+    for (char c : name) {
+        if (c == '"') out.push_back('"');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
 std::int64_t to_int64(std::string_view text) {
     std::int64_t value = 0;
     std::from_chars(text.data(), text.data() + text.size(), value);
@@ -554,6 +571,25 @@ Result<std::string> PostgresCatalog::load_routine_definition(
 
     const std::string sql =
         "SELECT pg_get_functiondef(" + quote_literal(signature) + "::regprocedure)";
+
+    OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));
+    if (rs.row_count() == 0) return std::string{};
+    return std::string(rs.text(0, 0));
+}
+
+Result<std::string> PostgresCatalog::load_view_definition(
+    std::string_view schema, std::string_view name) {
+    // O segundo argumento pede a versao "pretty": quebras de linha e recuo.
+    // Sem ele, pg_get_viewdef devolve tudo numa linha so', o que torna uma
+    // view de relatorio ilegivel.
+    //
+    // O cast para ::regclass resolve o nome ja' qualificado pelo schema e
+    // falha alto se o objeto sumiu entre listar e abrir.
+    const std::string qualified =
+        quote_ident(schema) + "." + quote_ident(name);
+
+    const std::string sql =
+        "SELECT pg_get_viewdef(" + quote_literal(qualified) + "::regclass, true)";
 
     OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));
     if (rs.row_count() == 0) return std::string{};

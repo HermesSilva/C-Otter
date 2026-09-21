@@ -748,7 +748,15 @@ void MainShell::draw_navigator_panel() {
                                   ImGuiTreeNodeFlags_DefaultOpen);
 
             if (schema_open) {
-                draw_tables_folder(schema);
+                // Ordem do DBeaver: tabelas, views, materialized views,
+                // sequences, rotinas.
+                draw_relations_folder(schema, db::ObjKind::table,
+                                      Icon::table, TR("Tables"));
+                draw_relations_folder(schema, db::ObjKind::view,
+                                      Icon::view, TR("Views"));
+                draw_relations_folder(schema, db::ObjKind::materialized_view,
+                                      Icon::materialized_view,
+                                      TR("Materialized views"));
                 draw_sequences_folder(schema);
                 draw_routines_folder(schema);
                 ImGui::TreePop();
@@ -781,47 +789,58 @@ bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count
     return open;
 }
 
-void MainShell::draw_tables_folder(const db::SchemaMeta& schema) {
-    if (!draw_folder_node(Icon::table, TR("Tables"), schema.tables.size(),
-                          schema.tables_loaded)) {
-        return;
+void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
+                                      db::ObjKind kind, Icon icon,
+                                      const char* label) {
+    // Uma unica consulta traz tabelas, views e materialized views (pg_class
+    // com relkind r/v/m/p); as pastas apenas filtram o resultado. Consultar
+    // tres vezes o mesmo pg_class seria desperdicio.
+    std::size_t count = 0;
+    for (const db::TableMeta& relation : schema.tables) {
+        if (relation.kind == kind) ++count;
     }
 
-    for (const db::TableMeta& table : schema.tables) {
-        ImGui::PushID(table.name.c_str());
+    // Pasta vazia fica escondida, como no DBeaver: um schema sem views nao
+    // precisa de um no "Views (0)" ocupando espaco.
+    if (count == 0 && schema.tables_loaded) return;
 
-        const bool is_view = table.kind == db::ObjKind::view ||
-                             table.kind == db::ObjKind::materialized_view;
+    if (!draw_folder_node(icon, label, count, schema.tables_loaded)) return;
 
-        icon_inline(is_view ? (table.kind == db::ObjKind::materialized_view
-                                   ? Icon::materialized_view : Icon::view)
-                            : Icon::table,
-                    is_view ? colors().data : colors().accent);
+    const Palette& p = colors();
+    const std::uint32_t tint = kind == db::ObjKind::table ? p.accent : p.data;
+
+    bool first = true;
+    for (const db::TableMeta& relation : schema.tables) {
+        if (relation.kind != kind) continue;
+
+        ImGui::PushID(relation.name.c_str());
+
+        icon_inline(icon, tint);
         ImGui::SameLine(0.0f, 4.0f);
 
         ImGui::PushStyleColor(ImGuiCol_Text,
-                              col(is_view ? colors().data : colors().text));
-        // So' a primeira tabela: abrir as 32 encheria a arvore de ruido e
-        // dispararia 32 consultas de catalogo de uma vez.
+                              col(kind == db::ObjKind::table ? p.text : p.data));
+        // So' a primeira de cada pasta: abrir as 32 encheria a arvore de ruido
+        // e dispararia 32 consultas de catalogo de uma vez.
         static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
-        if (expand_all && &table == &schema.tables.front()) {
-            ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-        }
-        const bool open = ImGui::TreeNode(table.name.c_str());
+        if (expand_all && first) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        first = false;
+
+        const bool open = ImGui::TreeNode(relation.name.c_str());
         ImGui::PopStyleColor();
 
-        if (!table.size_pretty.empty()) {
+        if (!relation.size_pretty.empty()) {
             ImGui::SameLine();
-            ImGui::TextColored(col4(colors().text_dim), "  %s",
-                               table.size_pretty.c_str());
+            ImGui::TextColored(col4(p.text_dim), "  %s",
+                               relation.size_pretty.c_str());
         }
 
-        if (ImGui::IsItemHovered() && !table.comment.empty()) {
-            ImGui::SetTooltip("%s", table.comment.c_str());
+        if (ImGui::IsItemHovered() && !relation.comment.empty()) {
+            ImGui::SetTooltip("%s", relation.comment.c_str());
         }
 
         if (open) {
-            draw_table_children(schema, table);
+            draw_table_children(schema, relation);
             ImGui::TreePop();
         }
         ImGui::PopID();
@@ -869,7 +888,12 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Constraints ---------------------------------------------------------
-    if (draw_folder_node(Icon::constraint, TR("Constraints"),
+    //
+    // Uma view nao tem constraints nem chaves estrangeiras. O DBeaver nem
+    // mostra as pastas nesse caso, e mostrar "(0)" sugeriria que a view
+    // poderia ter uma.
+    if (table.has_constraints() &&
+        draw_folder_node(Icon::constraint, TR("Constraints"),
                          table.constraints.size(), table.constraints_loaded)) {
         if (!table.constraints_loaded && !session_.busy()) {
             session_.load_constraints_async(schema.name, table.name);
@@ -894,7 +918,11 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Índices -------------------------------------------------------------
-    if (draw_folder_node(Icon::index, TR("Indexes"), table.indexes.size(),
+    //
+    // A view comum nao tem indices, mas a materializada tem -- e' justamente
+    // o que permite indexa-la como uma tabela.
+    if (table.has_indexes() &&
+        draw_folder_node(Icon::index, TR("Indexes"), table.indexes.size(),
                          table.indexes_loaded)) {
         if (!table.indexes_loaded && !session_.busy()) {
             session_.load_indexes_async(schema.name, table.name);
@@ -925,7 +953,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Chaves estrangeiras -------------------------------------------------
-    if (draw_folder_node(Icon::foreign_key, TR("Foreign keys"),
+    if (table.has_constraints() &&
+        draw_folder_node(Icon::foreign_key, TR("Foreign keys"),
                          table.foreign_keys.size(), table.keys_loaded)) {
         if (!table.keys_loaded && !session_.busy()) {
             session_.load_keys_async(schema.name, table.name);
@@ -951,7 +980,8 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     //
     // Quem aponta para esta tabela. Responder "o que depende disto?" é o que
     // mais falta num cliente SQL.
-    if (draw_folder_node(Icon::references, TR("References"),
+    if (table.has_constraints() &&
+        draw_folder_node(Icon::references, TR("References"),
                          table.references.size(), table.keys_loaded)) {
         if (!table.keys_loaded && !session_.busy()) {
             session_.load_keys_async(schema.name, table.name);
@@ -970,7 +1000,11 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     }
 
     // --- Triggers ------------------------------------------------------------
-    if (draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
+    //
+    // A materialized view nao aceita trigger: ela e' atualizada por REFRESH,
+    // nao por DML. A view comum aceita INSTEAD OF.
+    if (table.has_triggers() &&
+        draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
                          table.triggers_loaded)) {
         if (!table.triggers_loaded && !session_.busy()) {
             session_.load_triggers_async(schema.name, table.name);
@@ -991,6 +1025,56 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
         ImGui::TreePop();
     }
+
+    // --- Corpo da view -------------------------------------------------------
+    if (table.is_view()) draw_view_definition(schema, table);
+}
+
+void MainShell::draw_view_definition(const db::SchemaMeta& schema,
+                                     const db::TableMeta& view) {
+    const Palette& p = colors();
+
+    // `false` no lugar de `loaded`: o corpo nao tem contagem para mostrar, e
+    // "(1)" ao lado de "Definição" nao diria nada.
+    if (!draw_folder_node(Icon::view, TR("Definition"), 0, false)) return;
+
+    if (!view.definition_loaded && !session_.busy()) {
+        session_.load_view_definition_async(schema.name, view.name);
+    }
+
+    if (view.definition.empty()) {
+        ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+        ImGui::TreePop();
+        return;
+    }
+
+    // Caixa rolavel com o SQL. Altura limitada: uma view de relatorio tem
+    // dezenas de linhas e empurraria o resto da arvore para fora da tela.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, col(p.bg_darkest));
+    if (ImGui::BeginChild("##viewdef",
+                          ImVec2(0.0f, ImGui::GetFontSize() * 9.0f),
+                          ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_HorizontalScrollbar)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, col(p.syntax_string));
+        ImGui::TextUnformatted(view.definition.c_str());
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+
+    if (icon_text_button("##copydef", Icon::copy, TR("Copy"),
+                         TR("Copy the definition to the clipboard"))) {
+        ImGui::SetClipboardText(view.definition.c_str());
+    }
+    ImGui::SameLine();
+    if (icon_text_button("##opendef", Icon::open, TR("Open in editor"),
+                         TR("Open the definition in a new SQL tab"))) {
+        // Abre como script: a view vira ponto de partida para uma consulta,
+        // que e' o uso mais comum de olhar a definicao.
+        new_document().editor().SetText(view.definition);
+    }
+
+    ImGui::TreePop();
 }
 
 void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {

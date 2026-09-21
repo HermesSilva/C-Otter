@@ -69,6 +69,10 @@ public:
     void load_indexes_async(std::string schema, std::string table);
     void load_keys_async(std::string schema, std::string table);
     void load_triggers_async(std::string schema, std::string table);
+
+    // Corpo da view (`pg_get_viewdef`). Carregado so' quando o no "Definicao"
+    // e' expandido: uma view de relatorio pode ter varios KB de SQL.
+    void load_view_definition_async(std::string schema, std::string view);
     void load_sequences_async(std::string schema);
     void load_routines_async(std::string schema);
 

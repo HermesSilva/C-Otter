@@ -51,6 +51,15 @@ const char* const kPtBr[] = {
 
     // --- Arvore de objetos ---
     "Tables",                     "Tabelas",
+    "Views",                      "Views",
+    "Materialized views",         "Views materializadas",
+    "Definition",                 "Definição",
+    "Copy",                       "Copiar",
+    "Copy the definition to the clipboard",
+    "Copia a definição para a área de transferência",
+    "Open in editor",             "Abrir no editor",
+    "Open the definition in a new SQL tab",
+    "Abre a definição numa nova aba de SQL",
     "Columns",                    "Colunas",
     "Constraints",                "Constraints",
     "Indexes",                    "Índices",

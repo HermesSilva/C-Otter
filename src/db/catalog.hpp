@@ -116,11 +116,30 @@ struct TableMeta {
     std::vector<ForeignKeyMeta> references;   // FKs que apontam para ca'
     std::vector<TriggerMeta>    triggers;
 
+    // Corpo da view (`pg_get_viewdef`). Vazio para tabelas; carregado sob
+    // demanda, porque uma view de relatorio pode ter varios KB de SQL.
+    std::string definition;
+
     bool columns_loaded     = false;
     bool constraints_loaded = false;
     bool indexes_loaded     = false;
     bool keys_loaded        = false;
     bool triggers_loaded    = false;
+    bool definition_loaded  = false;
+
+    [[nodiscard]] bool is_view() const noexcept {
+        return kind == ObjKind::view || kind == ObjKind::materialized_view;
+    }
+
+    // Uma view nao tem constraints nem chaves estrangeiras -- o DBeaver nem
+    // mostra as pastas. Uma materialized view tem indices, mas nao triggers.
+    [[nodiscard]] bool has_constraints() const noexcept { return !is_view(); }
+    [[nodiscard]] bool has_indexes() const noexcept {
+        return kind != ObjKind::view;
+    }
+    [[nodiscard]] bool has_triggers() const noexcept {
+        return kind != ObjKind::materialized_view;
+    }
 };
 
 struct SchemaMeta {
@@ -194,6 +213,11 @@ public:
     [[nodiscard]] Result<std::string> load_routine_definition(
         std::string_view schema, std::string_view name,
         std::string_view arguments);
+
+    // Corpo de uma view (`pg_get_viewdef`), pelo mesmo motivo: uma view de
+    // relatorio pode ter varios KB de SQL.
+    [[nodiscard]] Result<std::string> load_view_definition(
+        std::string_view schema, std::string_view name);
 
     [[nodiscard]] ServerVersion version() const noexcept { return version_; }
 

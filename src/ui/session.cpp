@@ -228,6 +228,19 @@ void Session::load_keys_async(std::string schema, std::string table) {
     });
 }
 
+void Session::load_view_definition_async(std::string schema, std::string view) {
+    run_catalog_async([this, schema, view](db::PostgresCatalog& catalog) {
+        auto definition = catalog.load_view_definition(schema, view);
+        if (!definition) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (db::TableMeta* t = find_table(schema, view)) {
+            t->definition = std::move(*definition);
+            t->definition_loaded = true;
+        }
+    });
+}
+
 void Session::load_triggers_async(std::string schema, std::string table) {
     run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
         auto triggers = catalog.load_triggers(schema, table);

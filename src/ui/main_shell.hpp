@@ -48,9 +48,15 @@ private:
     // (ver docs/NAVIGATOR-TREE.md).
     bool draw_folder_node(Icon icon, const char* label,
                           std::size_t count, bool loaded);
-    void draw_tables_folder(const db::SchemaMeta& schema);
+    // Tabelas, views e materialized views vao em pastas separadas, como no
+    // DBeaver: os filhos de cada uma sao diferentes (uma view nao tem
+    // constraints; uma materialized view nao tem triggers).
+    void draw_relations_folder(const db::SchemaMeta& schema, db::ObjKind kind,
+                               Icon icon, const char* label);
     void draw_table_children(const db::SchemaMeta& schema,
                              const db::TableMeta& table);
+    void draw_view_definition(const db::SchemaMeta& schema,
+                              const db::TableMeta& view);
     void draw_sequences_folder(const db::SchemaMeta& schema);
     void draw_routines_folder(const db::SchemaMeta& schema);
     void draw_editor_panel();

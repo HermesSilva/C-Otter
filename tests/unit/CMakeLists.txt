@@ -1,6 +1,7 @@
 add_executable(otter_tests
     main.cpp
     test_arena.cpp
+    test_catalog.cpp
     test_error.cpp
     test_i18n.cpp
     test_icons.cpp

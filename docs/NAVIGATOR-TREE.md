@@ -32,13 +32,19 @@ Connection
         │       │       ├── Rules             ⬜
         │       │       └── Policies          ⬜  RLS
         │       ├── Foreign Tables    ⬜
-        │       ├── Views             🟡 (aparecem junto das tabelas)
+        │       ├── Views             ✅  pasta propria
         │       │   └── View
-        │       │       ├── Columns
-        │       │       ├── Dependencies
-        │       │       ├── Triggers
-        │       │       └── Rules
-        │       ├── Materialized Views ⬜
+        │       │       ├── Columns          ✅
+        │       │       ├── Definition       ✅  pg_get_viewdef, copiar/abrir
+        │       │       ├── Dependencies     ⬜
+        │       │       ├── Triggers         ✅
+        │       │       └── Rules            ⬜
+        │       ├── Materialized Views ✅  pasta propria
+        │       │   └── Materialized View
+        │       │       ├── Columns          ✅
+        │       │       ├── Indexes          ✅
+        │       │       ├── Definition       ✅
+        │       │       └── Dependencies     ⬜
         │       ├── Indexes (do schema) ⬜
         │       ├── Sequences         ✅  last_value, owned_by
         │       ├── Procedures/Functions ✅  assinatura, retorno, linguagem
@@ -70,7 +76,7 @@ Connection
 
 | | DBeaver | C-Otter |
 |---|---|---|
-| Tipos de nó na árvore | **~70** | **13** |
+| Tipos de nó na árvore | **~70** | **17** |
 | Classes de modelo `Postgre*` | **90** | 5 structs |
 
 ## Ordem de implementação
@@ -93,15 +99,13 @@ Por valor de uso, não por ordem na árvore.
 
 | # | Item | Por quê |
 |---|------|---------|
-| 1 | **Views separadas de tabelas** | Hoje se misturam na mesma pasta |
-| 2 | **Materialized Views** | |
-| 3 | **Data Types** (enum, domain, composto) | |
-| 4 | **Corpo de função** | `load_routine_definition()` pronto, sem UI |
-| 5 | **Partições e herança** | |
-| 6 | **Dependencies** | Grafo de dependências |
-| 7 | **Rules e Policies (RLS)** | |
-| 8 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
-| 9 | Encodings, Collations, Languages | Referência |
+| 1 | **Data Types** (enum, domain, composto) | Ícone pronto, falta o loader |
+| 2 | **Corpo de função** | `load_routine_definition()` pronto, sem UI |
+| 3 | **Partições e herança** | |
+| 4 | **Dependencies** | Grafo de dependências |
+| 5 | **Rules e Policies (RLS)** | |
+| 6 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
+| 7 | Encodings, Collations, Languages | Referência |
 
 ## Decisões de design
 
@@ -162,4 +166,33 @@ Quatro desenhos foram refeitos depois de olhar a captura, não o código:
 
 **Tooltip com detalhe.** Comentário do objeto, definição da constraint, expressão do
 índice — informação que não cabe no rótulo.
+
+**Pasta vazia fica escondida.** Um schema sem views não mostra `Views (0)`. O zero
+ocuparia uma linha para dizer que não há nada.
+
+**Cada tipo de relação tem as pastas que faz sentido ter.** Extraído do `<tree>` do
+`plugin.xml` do DBeaver, não estimado:
+
+| | Columns | Constraints | Indexes | FK / References | Triggers | Definition |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Tabela | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| View | ✅ | — | — | — | ✅ `INSTEAD OF` | ✅ |
+| Materialized view | ✅ | — | ✅ | — | — | ✅ |
+
+Uma view não tem linhas próprias para restringir, então não tem constraint nem FK.
+A materialized view tem linhas gravadas — por isso aceita índice — mas é atualizada por
+`REFRESH`, não por DML, então não há evento para disparar trigger.
+
+Mostrar `Constraints (0)` numa view seria pior que omitir: sugeriria que ela
+*poderia* ter uma. As regras estão em `TableMeta::has_constraints()`,
+`has_indexes()` e `has_triggers()`, com teste em `tests/unit/test_catalog.cpp`.
+
+**Fixture do banco de teste.** `tests/integration/fixtures.sql` cria o schema
+`otter_test` com views, materialized view, trigger, tipos próprios, função e
+procedure. Existe porque o ERP_TID só tem tabelas: implementar o nó de "Views"
+sem ter uma view no banco significaria entregar código que nunca rodou.
+
+```powershell
+psql -h localhost -U postgres -d ERP_TID -f tests/integration/fixtures.sql
+```
 

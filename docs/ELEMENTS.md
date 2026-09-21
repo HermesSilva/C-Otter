@@ -146,18 +146,28 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 
 | Elemento | Estado | Observação |
 |----------|--------|------------|
-| Árvore de schemas | ✅ | Com contagem: `public (32)` |
-| Lista de tabelas | ✅ | |
-| Tamanho da tabela | ✅ | `112 kB` em tom apagado |
+| Árvore de schemas | ✅ | Ícone próprio, um nó por schema |
+| **Pasta Tabelas** | ✅ | Com contagem: `Tabelas (32)` |
+| **Pasta Views** | ✅ | Separada das tabelas, como no DBeaver |
+| **Pasta Views materializadas** | ✅ | Separada, com Índices e sem Triggers |
+| Pasta vazia fica oculta | ✅ | Schema sem views não mostra `Views (0)` |
+| Tamanho da relação | ✅ | `112 kB` em tom apagado |
 | Views em cor distinta | ✅ | Teal |
-| Expandir tabela → colunas | ✅ | **Carregamento tardio** — só consulta ao expandir |
+| Expandir → colunas | ✅ | **Carregamento tardio** — só consulta ao expandir |
 | Tipo da coluna | ✅ | Via `format_type`: `character varying(80)` |
-| Marca `PK` | ✅ | |
-| Marca `NOT NULL` | ✅ | |
+| Marca `PK` e `NOT NULL` | ✅ | |
 | Indicador "carregando..." | ✅ | |
-| Índices, constraints, triggers | ⬜ | |
-| Funções e procedures | ⬜ | |
-| Sequences | ⬜ | |
+| Constraints | ✅ | PK, UNIQUE, CHECK, EXCLUDE, com definição no tooltip |
+| Índices | ✅ | Método, tamanho, UNIQUE, **INVALID** em vermelho |
+| Chaves estrangeiras | ✅ | Com `ON UPDATE` / `ON DELETE` |
+| Referências | ✅ | Quem aponta para esta tabela |
+| Triggers | ✅ | Timing, eventos, estado habilitado |
+| Sequences | ✅ | `last_value`, incremento, `owned_by` |
+| Funções e procedures | ✅ | Assinatura, retorno, linguagem; ícones distintos |
+| **Corpo da view** | ✅ | `pg_get_viewdef` formatado, com Copiar / Abrir no editor |
+| Ícone próprio por tipo | ✅ | 18 tipos, nenhum compartilhado |
+| Corpo da função | 🟡 | `load_routine_definition()` pronto, sem UI |
+| Tipos de dados (enum, domain) | ⬜ | Ícone pronto, falta o loader |
 | Campo de filtro/busca | ⬜ | |
 | Menu de contexto | ⬜ | Sem "ver dados", "gerar DDL", "renomear" |
 | Duplo clique abre dados | ⬜ | |
@@ -432,7 +442,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (107, todos verdes):
+Testes automatizados (111, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe
