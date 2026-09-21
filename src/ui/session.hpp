@@ -6,7 +6,7 @@
 // Toda operacao de banco roda num worker; o thread de render nunca bloqueia.
 #pragma once
 
-#include "db/catalog.hpp"
+#include "db/catalog_reader.hpp"
 #include "db/plan.hpp"
 #include "db/holt.hpp"
 
@@ -92,6 +92,12 @@ public:
     [[nodiscard]] std::string status_message() const;
     [[nodiscard]] std::string server_version() const;
     [[nodiscard]] std::string database_name() const;
+
+    // Pastas que o SGBD conectado oferece. Uma pasta que ele NAO tem nao deve
+    // aparecer vazia: "Sequences (0)" num MySQL sugere que ele poderia ter
+    // uma, e manda o usuario procurar o que nao existe.
+    [[nodiscard]] bool has_sequences() const noexcept { return has_sequences_; }
+    [[nodiscard]] bool has_user_types() const noexcept { return has_user_types_; }
     [[nodiscard]] std::vector<db::SchemaMeta> schemas() const;
     [[nodiscard]] std::vector<db::ForeignKeyMeta> foreign_keys() const;
     [[nodiscard]] std::optional<db::ResultSet> take_result();
@@ -147,7 +153,7 @@ private:
 
     // Fator comum dos carregadores de catalogo: abre um worker que recebe o
     // catalogo pronto e escreve no modelo sob lock.
-    void run_catalog_async(std::function<void(db::PostgresCatalog&)> loader);
+    void run_catalog_async(std::function<void(db::CatalogReader&)> loader);
 
     // Localiza uma tabela no modelo. O chamador deve ja' segurar o mutex.
     [[nodiscard]] db::TableMeta* find_table(std::string_view schema,
@@ -168,6 +174,16 @@ private:
 
     std::string status_message_;
     std::string database_name_;
+
+    // Qual SGBD esta' do outro lado. Guardado porque o leitor de catalogo e'
+    // criado a cada expansao da arvore, e cada uma precisa do leitor certo.
+    std::string driver_id_ = "postgresql";
+
+    // Quais pastas este SGBD oferece, decidido na conexao. Guardado em vez de
+    // consultado a cada quadro: o Navigator desenha 60 vezes por segundo, e
+    // criar um leitor de catalogo em cada um seria desperdicio.
+    bool has_sequences_  = true;
+    bool has_user_types_ = true;
 
     std::vector<db::SchemaMeta>     schemas_;
     std::vector<db::ForeignKeyMeta> foreign_keys_;

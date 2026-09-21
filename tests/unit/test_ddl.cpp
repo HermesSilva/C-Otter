@@ -281,3 +281,67 @@ OTTER_TEST(ddl_count_is_trivial_but_qualified) {
     OTTER_CHECK_EQ(sql,
                    std::string{"SELECT count(*) FROM otter_test.cliente;\n"});
 }
+
+// --- Dialeto: delimitador de identificador ------------------------------------
+
+OTTER_TEST(ddl_quotes_identifiers_with_the_dialect_of_the_connection) {
+    // Aspas duplas num MySQL sao STRING, nao identificador: o UPDATE gerado
+    // compararia a coluna com um texto literal em vez de referencia-la -- e
+    // um WHERE "id" = 1 nunca casa com linha nenhuma.
+    struct Restore {
+        QuoteStyle previous = sql_dialect();
+        ~Restore() { set_sql_dialect(previous); }
+    } restore;
+
+    set_sql_dialect(QuoteStyle::double_quotes);
+    OTTER_CHECK_EQ(quote_if_needed("Cliente"), std::string{"\"Cliente\""});
+    OTTER_CHECK_EQ(quote_if_needed("select"),  std::string{"\"select\""});
+
+    set_sql_dialect(QuoteStyle::backticks);
+    OTTER_CHECK_EQ(quote_if_needed("Cliente"), std::string{"`Cliente`"});
+    OTTER_CHECK_EQ(quote_if_needed("select"),  std::string{"`select`"});
+
+    set_sql_dialect(QuoteStyle::brackets);
+    OTTER_CHECK_EQ(quote_if_needed("Cliente"), std::string{"[Cliente]"});
+
+    // Nome simples nao ganha delimitador em dialeto nenhum: "SELECT `id` FROM
+    // `cliente`" e' ruido visual em 99% dos casos, e o SQL gerado e' para o
+    // usuario ler.
+    set_sql_dialect(QuoteStyle::backticks);
+    OTTER_CHECK_EQ(quote_if_needed("cliente_id"), std::string{"cliente_id"});
+}
+
+OTTER_TEST(ddl_doubles_the_closing_delimiter_inside_a_name) {
+    struct Restore {
+        QuoteStyle previous = sql_dialect();
+        ~Restore() { set_sql_dialect(previous); }
+    } restore;
+
+    // Um nome hostil nao pode fechar o delimitador e emendar SQL.
+    set_sql_dialect(QuoteStyle::backticks);
+    OTTER_CHECK_EQ(quote_if_needed("a`b"), std::string{"`a``b`"});
+
+    set_sql_dialect(QuoteStyle::double_quotes);
+    OTTER_CHECK_EQ(quote_if_needed("a\"b"), std::string{"\"a\"\"b\""});
+}
+
+OTTER_TEST(ddl_picks_the_dialect_from_the_driver_id) {
+    struct Restore {
+        QuoteStyle previous = sql_dialect();
+        ~Restore() { set_sql_dialect(previous); }
+    } restore;
+
+    set_sql_dialect_for("mysql");
+    OTTER_CHECK(sql_dialect() == QuoteStyle::backticks);
+
+    // MariaDB fala o mesmo SQL do MySQL.
+    set_sql_dialect_for("mariadb");
+    OTTER_CHECK(sql_dialect() == QuoteStyle::backticks);
+
+    set_sql_dialect_for("postgresql");
+    OTTER_CHECK(sql_dialect() == QuoteStyle::double_quotes);
+
+    // Driver desconhecido cai no padrao SQL, que e' o menos surpreendente.
+    set_sql_dialect_for("algo-novo");
+    OTTER_CHECK(sql_dialect() == QuoteStyle::double_quotes);
+}

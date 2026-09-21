@@ -1,6 +1,7 @@
 #include "ui/main_shell.hpp"
 
 #include "base/i18n.hpp"
+#include "db/registry.hpp"
 #include "db/aggregate.hpp"
 #include "db/ddl.hpp"
 #include "db/export.hpp"
@@ -337,7 +338,7 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     }
 
     const sql::ScopeInfo scope =
-        sql::analyze_scope(script, sql::postgres_dialect(), offset);
+        sql::analyze_scope(script, active_dialect(), offset);
 
     const bool want_tables =
         scope.context == sql::CompletionContext::table_expected ||
@@ -428,6 +429,21 @@ void MainShell::suggest(TextEditor::AutoCompleteState& state) {
     state.suggestions.clear();
     state.suggestions.reserve(candidates.size());
     for (Candidate& c : candidates) state.suggestions.push_back(std::move(c.text));
+}
+
+// Dialeto SQL da conexao ATIVA.
+//
+// Existe porque `postgres_dialect()` estava cravado em cinco pontos: o lexer
+// do realce, o formatador, o divisor de script, a reescrita de paginacao e o
+// plano. Num MySQL isso significava nao reconhecer a crase como delimitador,
+// tratar # como operador em vez de comentario, e nao entender o DELIMITER --
+// o script seria dividido no lugar errado.
+const sql::Dialect& MainShell::active_dialect() const {
+    const std::string& driver_id =
+        active_connection_ < connections_.size()
+            ? connections_[active_connection_].profile.driver_id
+            : active_profile_.driver_id;
+    return sql::dialect_for(driver_id);
 }
 
 void MainShell::execute_current_sql() {
@@ -731,7 +747,7 @@ void MainShell::format_current_sql() {
     if (before.empty()) return;
 
     const std::string after =
-        sql::format_sql(before, sql::postgres_dialect());
+        sql::format_sql(before, active_dialect());
 
     // Texto igual: nao mexe. SetText move o cursor para o inicio e cria um
     // ponto de desfazer -- fazer isso quando nada mudou seria ruido.
@@ -752,7 +768,7 @@ void MainShell::execute_script() {
     // O splitter respeita strings, comentarios, $$ ... $$ e blocos BEGIN/END.
     // Um split por ';' quebraria em qualquer funcao armazenada.
     const std::vector<sql::Statement> found =
-        sql::split_script(text, sql::postgres_dialect());
+        sql::split_script(text, active_dialect());
 
     std::vector<std::string> statements;
     statements.reserve(found.size());
@@ -790,7 +806,7 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     // reescrever, executa o original: rodar algo diferente do que o usuario
     // escreveu seria pior que a espera.
     const sql::PagedQuery paged = sql::make_paged_query(
-        document.paged_sql(), sql::postgres_dialect(), page,
+        document.paged_sql(), active_dialect(), page,
         sql::kDefaultPageSize, document.sort(), document.filter());
 
     document.set_page(page);
@@ -838,9 +854,29 @@ void MainShell::draw() {
                 saving_edits_ = false;
                 if (!session().last_script_failed()) {
                     document->edits().clear();
-                    // Relê para mostrar o que o banco realmente gravou:
+
+                    // Relê para mostrar o que o banco REALMENTE gravou:
                     // trigger e DEFAULT podem ter mudado o valor.
-                    if (document->paged()) execute_page(*document, document->page());
+                    //
+                    // Vale tambem para resultado NAO paginado. Com o `if
+                    // (paged())` sozinho, um SELECT curto salvava no banco e
+                    // continuava exibindo o valor ANTIGO na grade -- o
+                    // usuario concluia que a gravacao nao funcionou. Foi o
+                    // que a captura mostrou: 8888.50 no MySQL, 5000.00 na
+                    // tela.
+                    if (!document->paged_sql().empty()) {
+                        execute_page(*document, document->page());
+
+                        // execute_page ja' armou executing_document_id_ para a
+                        // releitura em curso. Sair do laco SEM passar pelo
+                        // `executing_document_id_ = 0` logo abaixo, que
+                        // apagaria a marca e faria a UI nunca colher o
+                        // resultado novo -- a grade ficava com o valor ANTIGO
+                        // enquanto o banco ja' tinha o novo. O sintoma: salvar
+                        // 1234.56 e a grade continuar mostrando 8888.50.
+                        document->set_executing(true);
+                        rereading_after_save_ = true;
+                    }
                 }
             }
 
@@ -899,7 +935,12 @@ void MainShell::draw() {
             document->set_executing(false);
             break;
         }
-        executing_document_id_ = 0;
+
+        // Nao zera quando uma RELEITURA acabou de ser disparada: ela reusa
+        // executing_document_id_, e apaga-lo aqui faria o resultado novo
+        // chegar sem ninguem para colher.
+        if (rereading_after_save_) rereading_after_save_ = false;
+        else                       executing_document_id_ = 0;
     }
 
     // Atalhos globais. Registrados aqui, e nao so' rotulados no menu: um
@@ -1188,6 +1229,16 @@ void MainShell::draw_menu_bar() {
     ImGui::EndMainMenuBar();
 }
 
+// Nome do SGBD para exibicao, a partir do driver.
+//
+// Existe porque "PostgreSQL" estava cravado em dois pontos da tela, e uma
+// conexao MySQL exibia "PostgreSQL 8.0.46" na barra de status e no Raft --
+// dois campos mentindo sobre o que esta' do outro lado.
+std::string MainShell::dbms_name(const std::string& driver_id) {
+    const db::Driver* driver = db::find_driver(driver_id);
+    return driver != nullptr ? std::string(driver->display_name()) : driver_id;
+}
+
 void MainShell::draw_raft_panel() {
     if (ImGui::Begin(TRW("Raft", "###RaftPanel"))) {
         const Palette& p = colors();
@@ -1270,8 +1321,10 @@ void MainShell::draw_raft_panel() {
                 ImGui::TextColored(col4(type.color), "%s", type.name);
 
                 if (connected) {
-                    ImGui::TextColored(col4(p.text_dim), "PostgreSQL %s",
-                                       connection.session->server_version().c_str());
+                    ImGui::TextColored(
+                        col4(p.text_dim), "%s %s",
+                        dbms_name(connection.profile.driver_id).c_str(),
+                        connection.session->server_version().c_str());
                     ImGui::TextColored(col4(p.text_dim), "%s:%u",
                                        connection.profile.host.c_str(),
                                        connection.profile.port);
@@ -1307,8 +1360,83 @@ void MainShell::draw_raft_panel() {
         if (drawn == 0) {
             ImGui::TextColored(col4(p.text_dim), TR("no connection"));
         }
+
+        draw_saved_profiles();
     }
     ImGui::End();
+}
+
+// Perfis salvos que ainda nao foram abertos.
+//
+// Sem esta secao, importar do DBeaver gravava o perfil e nao mudava nada na
+// tela: a lista acima so' mostra conexoes ABERTAS, e o unico caminho ate' o
+// que foi importado era reabrir o dialogo de conexao. Foi o que a captura de
+// tela mostrou depois de importar -- "1 conexao importada" e nenhuma linha
+// nova.
+void MainShell::draw_saved_profiles() {
+    const Palette& p = colors();
+
+    // Um perfil ja' aberto nao se repete aqui: apareceria duas vezes na mesma
+    // lista, uma como conexao e outra como atalho para ela mesma.
+    auto already_open = [this](const db::ConnectionProfile& profile) {
+        for (const Connection& connection : connections_) {
+            if (connection.profile.host == profile.host &&
+                connection.profile.port == profile.port &&
+                connection.profile.database == profile.database &&
+                connection.profile.user == profile.user) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::size_t pending = 0;
+    for (const db::StoredProfile& stored : saved_profiles_) {
+        if (!already_open(stored.profile)) ++pending;
+    }
+    if (pending == 0) return;
+
+    ImGui::Separator();
+    ImGui::TextColored(col4(p.text_dim), TR("saved"));
+
+    for (std::size_t i = 0; i < saved_profiles_.size(); ++i) {
+        const db::StoredProfile& stored = saved_profiles_[i];
+        if (already_open(stored.profile)) continue;
+
+        ImGui::PushID(static_cast<int>(1000 + i));
+
+        ImGui::BeginDisabled(!stored.supported);
+
+        // Duplo clique conecta; clique simples so' seleciona. Conectar no
+        // primeiro clique abriria conexao a cada roçada do mouse na lista.
+        if (ImGui::Selectable(stored.profile.effective_name().c_str(), false,
+                              ImGuiSelectableFlags_SpanAllColumns |
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                open_connection(stored.profile);
+            }
+        }
+        ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s@%s:%u\n%s", stored.profile.user.c_str(),
+                              stored.profile.host.c_str(), stored.profile.port,
+                              stored.supported
+                                  ? TR("double-click to connect")
+                                  : TR(stored.unsupported_reason.c_str()));
+        }
+
+        if (ImGui::BeginPopupContextItem("##savedmenu")) {
+            if (ImGui::MenuItem(TR("Connect"), nullptr, false, stored.supported)) {
+                open_connection(stored.profile);
+            }
+            if (ImGui::MenuItem(TR("Edit connection..."))) {
+                connection_dialog_.open_edit(stored.profile);
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
 }
 
 bool MainShell::matches_filter(std::string_view name) const {
@@ -1364,9 +1492,15 @@ void MainShell::draw_navigator_panel() {
                 draw_relations_folder(schema, db::ObjKind::materialized_view,
                                       Icon::materialized_view,
                                       TR("Materialized views"));
-                draw_sequences_folder(schema);
+                // Pastas que o SGBD nao tem ficam FORA, em vez de aparecerem
+                // com (0): "Sequences (0)" num MySQL sugere que ele poderia
+                // ter uma, e manda o usuario procurar o que nao existe. E' o
+                // mesmo criterio que ja' esconde "Constraints" de uma view.
+                if (session().has_sequences())  draw_sequences_folder(schema);
+
                 draw_routines_folder(schema);
-                draw_types_folder(schema);
+
+                if (session().has_user_types()) draw_types_folder(schema);
                 ImGui::TreePop();
             }
             ImGui::PopID();
@@ -3018,7 +3152,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
     // por que evita a pergunta "cade' os botoes de pagina?".
     if (!document.paged_sql().empty()) {
         const sql::PagedQuery probe = sql::make_paged_query(
-            document.paged_sql(), sql::postgres_dialect(), 0);
+            document.paged_sql(), active_dialect(), 0);
         if (probe.refusal == sql::PagingRefusal::already_limited) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), TR("  |  your LIMIT"));
@@ -3378,10 +3512,23 @@ void MainShell::draw_status_bar() {
         ImGui::SameLine();
 
         if (state == SessionState::connected) {
+            // session() garante que connections_ nao esta' vazio; o indice e'
+            // checado mesmo assim, porque fechar a ultima conexao o deixa
+            // apontando para fora por um quadro.
+            const std::string driver_id =
+                active_connection_ < connections_.size()
+                    ? connections_[active_connection_].profile.driver_id
+                    : active_profile_.driver_id;
+
             ImGui::TextColored(col4(colors().data), "%s",
                                session().database_name().c_str());
             ImGui::SameLine();
-            ImGui::TextColored(col4(colors().text_dim), "| PostgreSQL %s |",
+            // O perfil vem da conexao ATIVA, nao de active_profile_: este
+            // ultimo so' e' atualizado pelo dialogo, e conectar por duplo
+            // clique num perfil salvo o deixava para tras -- a barra exibia
+            // "PostgreSQL 8.0.46" numa conexao MySQL.
+            ImGui::TextColored(col4(colors().text_dim), "| %s %s |",
+                               dbms_name(driver_id).c_str(),
                                session().server_version().c_str());
             ImGui::SameLine();
         }
@@ -3428,8 +3575,9 @@ void MainShell::draw_about_window() {
 
         ImGui::Separator();
         ImGui::TextColored(col4(colors().text_dim),
-                           "Dear ImGui %s  |  protocolo PostgreSQL v3 nativo",
-                           IMGUI_VERSION);
+                           "Dear ImGui %s  |  %s",
+                           IMGUI_VERSION,
+                           TR("native PostgreSQL and MySQL protocols"));
     }
     ImGui::End();
 }
@@ -3470,6 +3618,12 @@ Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
         connections_.push_back({std::make_unique<Session>(), profile});
         active_connection_ = connections_.size() - 1;
     }
+
+    // A conexao recem-aberta passa a ser a ativa tambem para o perfil: sem
+    // isto, conectar por duplo clique num perfil salvo deixava
+    // active_profile_ apontando para a conexao ANTERIOR, e "Editar" abria o
+    // perfil errado.
+    active_profile_ = profile;
 
     Session& target = *connections_[active_connection_].session;
     target.connect_async(profile.to_conn_config());

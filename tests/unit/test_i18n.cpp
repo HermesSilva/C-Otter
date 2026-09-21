@@ -2,6 +2,10 @@
 
 #include "base/i18n.hpp"
 
+#include <cstdio>
+#include <map>
+#include <span>
+
 #include <string>
 
 using namespace otter;
@@ -115,6 +119,29 @@ OTTER_TEST(i18n_lists_available_languages) {
     // Ingles sempre presente, mesmo sem catalogo.
     OTTER_CHECK(languages.size() >= 2);
     OTTER_CHECK_EQ(languages.front().code, std::string{"en"});
+}
+
+OTTER_TEST(i18n_pt_br_has_no_duplicate_keys) {
+    // Uma chave repetida com traducoes DIFERENTES e' defeito de verdade: qual
+    // delas vence depende da ordem de insercao no mapa, e o texto da tela
+    // muda sem ninguem ter mexido nele. Repetida com a MESMA traducao e' so'
+    // lixo, mas e' o sintoma de que alguem acrescentou sem procurar antes --
+    // foi o que aconteceu ao traduzir a lista de conexoes salvas.
+    const std::span<const char* const> entries = i18n::pt_br_entries();
+    OTTER_CHECK(entries.size() % 2 == 0);   // sempre pares
+
+    std::map<std::string, std::string> seen;
+    for (std::size_t i = 0; i + 1 < entries.size(); i += 2) {
+        const std::string key(entries[i]);
+        const std::string value(entries[i + 1]);
+
+        const auto [it, inserted] = seen.emplace(key, value);
+        if (!inserted) {
+            std::printf("    chave repetida: \"%s\" -> \"%s\" e \"%s\"\n",
+                        key.c_str(), it->second.c_str(), value.c_str());
+        }
+        OTTER_CHECK(inserted);
+    }
 }
 
 OTTER_TEST(i18n_builtin_pt_br_is_registered) {

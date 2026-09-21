@@ -43,6 +43,7 @@ std::string ConnectionProfile::effective_name() const {
 
 ConnConfig ConnectionProfile::to_conn_config() const {
     ConnConfig config;
+    config.driver_id       = driver_id;
     config.host            = host;
     config.port            = port;
     config.database        = database;

@@ -12,6 +12,7 @@ add_executable(otter_tests
     test_format.cpp
     test_i18n.cpp
     test_icons.cpp
+    test_mywire.cpp
     test_paging.cpp
     test_pgwire.cpp
     test_plan.cpp
@@ -27,6 +28,7 @@ target_link_libraries(otter_tests PRIVATE
     otter::otter_db
     otter::otter_sql
     otter::otter_pgwire
+    otter::otter_mywire
     otter::otter_ui
 )
 set_target_properties(otter_tests PROPERTIES FOLDER "tests")

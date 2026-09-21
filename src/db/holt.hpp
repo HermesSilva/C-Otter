@@ -16,6 +16,12 @@
 namespace otter::db {
 
 struct ConnConfig {
+    // Qual driver falar: "postgresql", "mysql". Viaja junto com o host e a
+    // senha porque e' o que decide o PROTOCOLO -- separa-lo do resto faria
+    // cada ponto de conexao ter de reencontra-lo, e um ponto esquecido
+    // conectaria ao MySQL falando o protocolo do PostgreSQL.
+    std::string driver_id = "postgresql";
+
     std::string host     = "localhost";
     std::uint16_t port   = 5432;
     std::string database;

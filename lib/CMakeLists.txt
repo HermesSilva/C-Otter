@@ -29,7 +29,7 @@ set_target_properties(otter_net PROPERTIES FOLDER "lib")
 
 if(WIN32)
     # CNG (bcrypt) e Winsock: API do sistema, sem dependencia externa.
-    target_link_libraries(otter_net PUBLIC bcrypt ws2_32)
+    target_link_libraries(otter_net PUBLIC bcrypt crypt32 ws2_32)
 else()
     find_package(OpenSSL REQUIRED)
     target_link_libraries(otter_net PUBLIC OpenSSL::Crypto)
@@ -47,6 +47,20 @@ target_include_directories(otter_pgwire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(otter_pgwire PUBLIC otter_flags otter::otter_net)
 set_target_properties(otter_pgwire PROPERTIES FOLDER "lib")
 
+# --- otter_mywire: protocolo do MySQL/MariaDB --------------------------------
+#
+# Existe porque libmysqlclient e' GPL e o ADR 0002 proibe (link estatico de
+# GPL contaminaria o produto inteiro). Mapa do protocolo em docs/MYSQL-MAP.md.
+add_library(otter_mywire STATIC
+    mywire/packet.cpp
+    mywire/auth.cpp
+    mywire/connection.cpp
+)
+add_library(otter::otter_mywire ALIAS otter_mywire)
+
+target_include_directories(otter_mywire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(otter_mywire PUBLIC otter_flags otter::otter_net)
+set_target_properties(otter_mywire PROPERTIES FOLDER "lib")
+
 # Fase 3:
-#   add_library(otter_mywire ...)   # MySQL/MariaDB
 #   add_library(otter_tds ...)      # SQL Server

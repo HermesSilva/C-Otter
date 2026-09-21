@@ -79,11 +79,47 @@ std::string header(std::string_view what, std::string_view schema,
 
 } // namespace
 
+namespace {
+
+// O dialeto corrente. Nao e' thread_local de proposito: a conexao ativa e' uma
+// so' na interface, e um worker que gere SQL precisa do MESMO dialeto que a
+// UI mostrou ao usuario.
+QuoteStyle g_dialect = QuoteStyle::double_quotes;
+
+struct Delimiters { char open; char close; };
+
+Delimiters delimiters_for(QuoteStyle style) noexcept {
+    switch (style) {
+        case QuoteStyle::backticks: return {'`', '`'};
+        case QuoteStyle::brackets:  return {'[', ']'};
+        case QuoteStyle::double_quotes: break;
+    }
+    return {'"', '"'};
+}
+
+} // namespace
+
+void set_sql_dialect(QuoteStyle style) { g_dialect = style; }
+
+QuoteStyle sql_dialect() noexcept { return g_dialect; }
+
+void set_sql_dialect_for(std::string_view driver_id) {
+    if (driver_id == "mysql" || driver_id == "mariadb") {
+        set_sql_dialect(QuoteStyle::backticks);
+    } else if (driver_id == "mssql" || driver_id == "sqlserver") {
+        set_sql_dialect(QuoteStyle::brackets);
+    } else {
+        set_sql_dialect(QuoteStyle::double_quotes);
+    }
+}
+
 std::string quote_if_needed(std::string_view identifier) {
-    if (identifier.empty()) return "\"\"";
+    const Delimiters d = delimiters_for(g_dialect);
+
+    if (identifier.empty()) return std::string{d.open} + d.close;
 
     // Comeca por letra minuscula ou '_' e contem so' [a-z0-9_]? Entao nao
-    // precisa de aspas.
+    // precisa de delimitador.
     const bool simple_start =
         (identifier[0] >= 'a' && identifier[0] <= 'z') || identifier[0] == '_';
 
@@ -102,12 +138,14 @@ std::string quote_if_needed(std::string_view identifier) {
 
     std::string out;
     out.reserve(identifier.size() + 2);
-    out.push_back('"');
+    out.push_back(d.open);
     for (const char c : identifier) {
-        if (c == '"') out.push_back('"');
+        // Delimitador dentro do nome e' dobrado -- em colchetes, so' o de
+        // FECHAR precisa, porque '[' nao encerra nada.
+        if (c == d.close) out.push_back(d.close);
         out.push_back(c);
     }
-    out.push_back('"');
+    out.push_back(d.close);
     return out;
 }
 

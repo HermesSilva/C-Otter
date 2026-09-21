@@ -1,7 +1,9 @@
 #include "ui/session.hpp"
 
 #include "base/i18n.hpp"
-#include "db/drivers/postgres.hpp"
+#include "db/catalog_reader.hpp"
+#include "db/ddl.hpp"
+#include "db/registry.hpp"
 
 #include <utility>
 
@@ -31,12 +33,30 @@ void Session::connect_async(const db::ConnConfig& config) {
         status_message_ = TRF("connecting to %s:%u...", config.host.c_str(),
                               static_cast<unsigned>(config.port));
         database_name_  = config.database;
+        driver_id_      = config.driver_id;
         schemas_.clear();
         foreign_keys_.clear();
     }
 
     worker_ = std::thread([this, config] {
-        auto connection = db::postgres_driver().connect(config);
+        db::Driver* driver = db::find_driver(config.driver_id);
+        if (driver == nullptr) {
+            // Driver desconhecido nao cai no padrao: conectar a um MySQL
+            // falando o protocolo do PostgreSQL daria um erro de protocolo
+            // que nao ajuda ninguem.
+            const std::lock_guard<std::mutex> lock(mutex_);
+            status_message_ = TRF("no driver for '%s'", config.driver_id.c_str());
+            state_.store(SessionState::failed, std::memory_order_release);
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        // O SQL gerado (UPDATE da grade, DDL, agregacao no servidor) precisa
+        // do delimitador do SGBD certo: com aspas duplas num MySQL, o comando
+        // compara a coluna com uma STRING em vez de referencia-la.
+        db::set_sql_dialect_for(config.driver_id);
+
+        auto connection = driver->connect(config);
 
         if (!connection) {
             const std::lock_guard<std::mutex> lock(mutex_);
@@ -50,27 +70,46 @@ void Session::connect_async(const db::ConnConfig& config) {
 
         // Ja' que estamos no worker, carrega o catalogo antes de liberar a UI:
         // uma arvore vazia por meio segundo pareceria falha de conexao.
-        db::PostgresCatalog catalog(*holt);
+        std::unique_ptr<db::CatalogReader> catalog =
+            db::make_catalog_reader(config.driver_id, *holt);
+
+        if (catalog == nullptr) {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt_           = std::move(holt);
+            status_message_ = TRF("connected, but there is no catalog reader for '%s'",
+                                  config.driver_id.c_str());
+            state_.store(SessionState::connected, std::memory_order_release);
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        const bool sequences  = catalog->has_sequences();
+        const bool user_types = catalog->has_user_types();
 
         std::vector<db::SchemaMeta>     schemas;
         std::vector<db::ForeignKeyMeta> keys;
         std::string message;
 
-        auto loaded = catalog.load_schemas();
+        auto loaded = catalog->load_schemas();
         if (loaded) {
             schemas = std::move(*loaded);
 
             for (db::SchemaMeta& schema : schemas) {
-                auto tables = catalog.load_tables(schema.name);
+                auto tables = catalog->load_tables(schema.name);
                 if (tables) {
                     schema.tables = std::move(*tables);
                     schema.tables_loaded = true;
                 }
             }
 
-            // Foreign keys de 'public' alimentam a inferencia de JOIN do
-            // completion (ADR 0004, camada 4).
-            auto fks = catalog.load_foreign_keys("public");
+            // As foreign keys alimentam a inferencia de JOIN do completion
+            // (ADR 0004, camada 4). O schema de onde le-las depende do SGBD:
+            // "public" no PostgreSQL, o banco da conexao no MySQL -- pedir
+            // "public" a um MySQL simplesmente nao acharia nada.
+            std::string fk_schema = catalog->default_schema();
+            if (fk_schema.empty()) fk_schema = config.database;
+
+            auto fks = catalog->load_foreign_keys(fk_schema);
             if (fks) keys = std::move(*fks);
 
             std::size_t table_count = 0;
@@ -85,10 +124,12 @@ void Session::connect_async(const db::ConnConfig& config) {
         }
 
         const std::lock_guard<std::mutex> lock(mutex_);
-        holt_           = std::move(holt);
-        schemas_        = std::move(schemas);
-        foreign_keys_   = std::move(keys);
-        status_message_ = std::move(message);
+        holt_            = std::move(holt);
+        schemas_         = std::move(schemas);
+        foreign_keys_    = std::move(keys);
+        status_message_  = std::move(message);
+        has_sequences_   = sequences;
+        has_user_types_  = user_types;
         state_.store(SessionState::connected, std::memory_order_release);
         busy_.store(false, std::memory_order_release);
     });
@@ -294,7 +335,7 @@ db::TableMeta* Session::find_table(std::string_view schema,
 }
 
 void Session::run_catalog_async(
-    std::function<void(db::PostgresCatalog&)> loader) {
+    std::function<void(db::CatalogReader&)> loader) {
     if (busy_.load(std::memory_order_acquire)) return;
     if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
 
@@ -312,14 +353,22 @@ void Session::run_catalog_async(
             return;
         }
 
-        db::PostgresCatalog catalog(*holt);
-        loader(catalog);
+        // O leitor e' criado por chamada, e nao guardado: ele segura uma
+        // referencia ao Holt, e o Holt pode ser trocado por uma reconexao
+        // entre uma expansao da arvore e a seguinte.
+        std::unique_ptr<db::CatalogReader> catalog =
+            db::make_catalog_reader(driver_id_, *holt);
+        if (catalog == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+        loader(*catalog);
         busy_.store(false, std::memory_order_release);
     });
 }
 
 void Session::load_columns_async(std::string schema, std::string table) {
-    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
         auto columns = catalog.load_columns(schema, table);
         if (!columns) return;
 
@@ -332,7 +381,7 @@ void Session::load_columns_async(std::string schema, std::string table) {
 }
 
 void Session::load_constraints_async(std::string schema, std::string table) {
-    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
         auto constraints = catalog.load_constraints(schema, table);
         if (!constraints) return;
 
@@ -345,7 +394,7 @@ void Session::load_constraints_async(std::string schema, std::string table) {
 }
 
 void Session::load_indexes_async(std::string schema, std::string table) {
-    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
         auto indexes = catalog.load_indexes(schema, table);
         if (!indexes) return;
 
@@ -360,7 +409,7 @@ void Session::load_indexes_async(std::string schema, std::string table) {
 void Session::load_keys_async(std::string schema, std::string table) {
     // Chaves e referências vêm juntas: quem abre uma quase sempre quer a outra,
     // e são duas consultas baratas sobre o mesmo catálogo.
-    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
         auto keys       = catalog.load_table_foreign_keys(schema, table);
         auto references = catalog.load_references(schema, table);
 
@@ -375,7 +424,7 @@ void Session::load_keys_async(std::string schema, std::string table) {
 }
 
 void Session::load_view_definition_async(std::string schema, std::string view) {
-    run_catalog_async([this, schema, view](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, view](db::CatalogReader& catalog) {
         auto definition = catalog.load_view_definition(schema, view);
         if (!definition) return;
 
@@ -388,7 +437,7 @@ void Session::load_view_definition_async(std::string schema, std::string view) {
 }
 
 void Session::load_triggers_async(std::string schema, std::string table) {
-    run_catalog_async([this, schema, table](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, table](db::CatalogReader& catalog) {
         auto triggers = catalog.load_triggers(schema, table);
         if (!triggers) return;
 
@@ -401,7 +450,7 @@ void Session::load_triggers_async(std::string schema, std::string table) {
 }
 
 void Session::load_sequences_async(std::string schema) {
-    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema](db::CatalogReader& catalog) {
         auto sequences = catalog.load_sequences(schema);
         if (!sequences) return;
 
@@ -414,7 +463,7 @@ void Session::load_sequences_async(std::string schema) {
 }
 
 void Session::load_routines_async(std::string schema) {
-    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema](db::CatalogReader& catalog) {
         auto routines = catalog.load_routines(schema);
         if (!routines) return;
 
@@ -427,7 +476,7 @@ void Session::load_routines_async(std::string schema) {
 }
 
 void Session::load_types_async(std::string schema) {
-    run_catalog_async([this, schema](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema](db::CatalogReader& catalog) {
         auto types = catalog.load_types(schema);
         if (!types) return;
 
@@ -441,7 +490,7 @@ void Session::load_types_async(std::string schema) {
 
 void Session::load_routine_definition_async(std::string schema, std::string name,
                                             std::string arguments) {
-    run_catalog_async([this, schema, name, arguments](db::PostgresCatalog& catalog) {
+    run_catalog_async([this, schema, name, arguments](db::CatalogReader& catalog) {
         auto definition = catalog.load_routine_definition(schema, name, arguments);
         if (!definition) return;
 

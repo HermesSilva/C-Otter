@@ -102,38 +102,65 @@ EditTarget find_edit_target(const ResultSet& rs,
         return target;
     }
 
-    // Uma tabela so'. Colunas com OID zero sao expressoes e agregados --
+    // Uma tabela so'. Colunas SEM origem sao expressoes e agregados --
     // ignoradas, nao desqualificam o resultado: "SELECT id, nome, now()"
     // continua editavel nas duas primeiras.
+    //
+    // A origem chega de dois jeitos, conforme o SGBD: por OID no PostgreSQL
+    // (RowDescription) e por NOME no MySQL (ColumnDefinition41), que nao tem
+    // OID. Olhar so' o OID fazia todo resultado de MySQL ser recusado com
+    // "nao vem de uma tabela" -- inclusive um SELECT * numa tabela.
     std::set<std::uint32_t> oids;
+    std::set<std::pair<std::string, std::string>> names;   // (schema, tabela)
+
     for (std::size_t c = 0; c < rs.column_count(); ++c) {
-        const std::uint32_t oid = rs.column(c).info().source_table_oid;
-        if (oid != 0) oids.insert(oid);
+        const ColumnInfo& info = rs.column(c).info();
+        if (info.source_table_oid != 0) {
+            oids.insert(info.source_table_oid);
+        } else if (!info.source_table.empty()) {
+            names.emplace(info.source_schema, info.source_table);
+        }
     }
 
-    if (oids.empty()) {
+    if (oids.empty() && names.empty()) {
         target.refusal = EditRefusal::no_source_table;
         return target;
     }
-    if (oids.size() > 1) {
+    if (oids.size() + names.size() > 1) {
         target.refusal = EditRefusal::multiple_tables;
         return target;
     }
 
-    const std::uint32_t table_oid = *oids.begin();
-
-    // Acha a tabela no catalogo pelo OID.
+    // Acha a tabela no catalogo, pelo OID ou pelo nome.
     const SchemaMeta* found_schema = nullptr;
     const TableMeta*  found_table = nullptr;
 
-    for (const SchemaMeta& schema : schemas) {
-        for (const TableMeta& table : schema.tables) {
-            if (table.oid != table_oid) continue;
-            found_schema = &schema;
-            found_table  = &table;
-            break;
+    if (!oids.empty()) {
+        const std::uint32_t table_oid = *oids.begin();
+        for (const SchemaMeta& schema : schemas) {
+            for (const TableMeta& table : schema.tables) {
+                if (table.oid != table_oid) continue;
+                found_schema = &schema;
+                found_table  = &table;
+                break;
+            }
+            if (found_table != nullptr) break;
         }
-        if (found_table != nullptr) break;
+    } else {
+        const auto& [schema_name, table_name] = *names.begin();
+        for (const SchemaMeta& schema : schemas) {
+            // O schema pode vir vazio quando o servidor nao o informa; nesse
+            // caso o nome da tabela decide sozinho.
+            if (!schema_name.empty() && schema.name != schema_name) continue;
+
+            for (const TableMeta& table : schema.tables) {
+                if (table.name != table_name) continue;
+                found_schema = &schema;
+                found_table  = &table;
+                break;
+            }
+            if (found_table != nullptr) break;
+        }
     }
 
     if (found_table == nullptr) {

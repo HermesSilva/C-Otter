@@ -60,6 +60,22 @@ struct ColumnInfo {
     // subconsulta e CTE (ADR 0014).
     std::uint32_t source_table_oid = 0;
     std::int16_t  source_column = 0;   // attnum na tabela de origem
+
+    // A mesma informacao por NOME, para os SGBDs que nao tem OID.
+    //
+    // O MySQL identifica a origem assim: o ColumnDefinition41 traz o banco, a
+    // tabela real e o nome real da coluna. `source_table` e' a tabela REAL, e
+    // nao o apelido usado na consulta -- um UPDATE contra o apelido nao
+    // existe. Vazio tem o mesmo sentido que `source_table_oid == 0`: a coluna
+    // e' expressao, agregado ou constante, e nao da' para editar.
+    std::string   source_schema;        // banco, no MySQL
+    std::string   source_table;
+    std::string   source_column_name;   // nome real, quando ha' apelido
+
+    // A coluna veio de uma tabela? Cobre as duas formas de identificacao.
+    [[nodiscard]] bool has_source() const noexcept {
+        return source_table_oid != 0 || !source_table.empty();
+    }
 };
 
 } // namespace otter::db

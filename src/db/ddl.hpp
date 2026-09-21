@@ -10,10 +10,34 @@
 
 #include "db/catalog.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace otter::db {
+
+// Estilo de delimitador de identificador do SGBD corrente.
+//
+// Estado de modulo em vez de parametro nas ~20 funcoes que geram SQL: o
+// dialeto e' propriedade da CONEXAO, nao de cada chamada, e passa-lo adiante
+// em toda a cadeia (UI -> ddl -> edit -> aggregate) so' criaria pontos onde
+// esquecer de repassar.
+//
+// Definido uma vez por conexao, em set_sql_dialect(). Sem isto, um UPDATE
+// gerado para o MySQL sairia com "aspas duplas" -- que o MySQL le como
+// STRING, nao como identificador, e o comando falha ou, pior, compara uma
+// coluna com um texto literal.
+enum class QuoteStyle : std::uint8_t {
+    double_quotes,   // "nome" -- PostgreSQL, padrao SQL
+    backticks,       // `nome` -- MySQL, MariaDB
+    brackets,        // [nome] -- SQL Server
+};
+
+void set_sql_dialect(QuoteStyle style);
+[[nodiscard]] QuoteStyle sql_dialect() noexcept;
+
+// Define o dialeto a partir do identificador de driver do perfil.
+void set_sql_dialect_for(std::string_view driver_id);
 
 // Escapa um identificador quando ele precisa: nome com maiuscula, espaco ou
 // palavra reservada sai entre aspas duplas.

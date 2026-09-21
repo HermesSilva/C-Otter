@@ -90,8 +90,8 @@ std::vector<DriverEntry> driver_catalog() {
     // TR() no momento de desenhar.
     return {
         {"postgresql", "PostgreSQL",  "Popular",    5432, true,  nullptr},
-        {"mysql",      "MySQL",       "Popular",    3306, false, "protocol in development"},
-        {"mariadb",    "MariaDB",     "Popular",    3306, false, "protocol in development"},
+        {"mysql",      "MySQL",       "Popular",    3306, true,  ""},
+        {"mariadb",    "MariaDB",     "Popular",    3306, true,  ""},
         {"sqlite",     "SQLite",      "Embedded",      0, false, "planned for phase 3"},
         {"mssql",      "SQL Server",  "Popular",    1433, false, "TDS planned for phase 3"},
         {"oracle",     "Oracle",      "Popular",    1521, false, "planned for phase 3"},
@@ -220,7 +220,13 @@ void ConnectionDialog::draw_driver_catalog() {
 
     ImGui::Separator();
 
-    const bool can_advance = profile_.driver_id == "postgresql";
+    // Habilita pelo que o catalogo diz estar disponivel, e nao por um nome
+    // fixo: com o driver fixo aqui, acrescentar o MySQL deixaria a linha
+    // selecionavel e o botao "Proximo" morto, sem explicacao na tela.
+    bool can_advance = false;
+    for (const DriverEntry& driver : driver_catalog()) {
+        if (profile_.driver_id == driver.id) { can_advance = driver.available; break; }
+    }
     ImGui::BeginDisabled(!can_advance);
     if (ImGui::Button(TR("Next >"), ImVec2(110, 0))) step_ = Step::configure;
     ImGui::EndDisabled();

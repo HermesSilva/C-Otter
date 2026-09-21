@@ -8,6 +8,7 @@
 add_subdirectory(pgconnect)    # conexao real + metadados + ResultSet colunar
 add_subdirectory(catalog)      # constraints, indices, FKs, sequences, rotinas
 add_subdirectory(dbeaver_import)  # le o workspace real do DBeaver (ADR 0012)
+add_subdirectory(myconnect)    # conexao real ao MySQL falando lib/mywire
 
 #   add_subdirectory(grid)     # 1M x 20 celulas a 144 fps
 

@@ -68,7 +68,88 @@ std::vector<SchemaMeta> catalog_with_pk() {
     return {schema};
 }
 
+// O mesmo resultado, mas identificando a origem por NOME em vez de OID --
+// como o MySQL faz, porque o ColumnDefinition41 nao tem OID.
+ResultSet make_result_named(const std::vector<ColumnSpec>& columns,
+                            std::string_view schema, std::string_view table,
+                            const std::vector<std::vector<std::string>>& rows) {
+    ResultSetBuilder builder;
+    for (const ColumnSpec& spec : columns) {
+        ColumnInfo info;
+        info.name = spec.name;
+        info.kind = spec.kind;
+
+        // table_oid != 0 no spec significa "esta coluna vem da tabela"; aqui
+        // isso vira o par (schema, tabela) em vez do OID.
+        if (spec.table_oid != 0) {
+            info.source_schema = std::string(schema);
+            info.source_table  = std::string(table);
+            info.source_column_name = spec.name;
+        }
+        builder.add_column(std::move(info));
+    }
+    for (const auto& row : rows) {
+        for (std::size_t c = 0; c < row.size(); ++c) builder.append_text(c, row[c]);
+    }
+    builder.set_row_count(rows.size());
+    return builder.take();
+}
+
 } // namespace
+
+// --- Origem por nome, sem OID (MySQL) ----------------------------------------
+
+OTTER_TEST(edit_finds_the_table_by_name_when_there_is_no_oid) {
+    // O MySQL nao tem OID: a origem vem como (banco, tabela) no
+    // ColumnDefinition41. Olhar so' o OID fazia TODO resultado de MySQL ser
+    // recusado com "nao vem de uma tabela" -- inclusive um SELECT * numa
+    // tabela com chave primaria. Foi o que a captura de tela mostrou.
+    const ResultSet rs = make_result_named(
+        {{"cliente_id", DataKind::integer, 1}, {"nome", DataKind::string, 1}},
+        "otter_test", "cliente",
+        {{"1", "Alfa"}, {"2", "Beta"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(target.editable());
+    OTTER_CHECK_EQ(target.table, std::string{"cliente"});
+    OTTER_CHECK_EQ(target.schema, std::string{"otter_test"});
+}
+
+OTTER_TEST(edit_by_name_still_refuses_a_join) {
+    // Duas tabelas diferentes continuam sendo recusadas, mesmo sem OID: um
+    // UPDATE precisa saber QUAL tabela alterar.
+    ResultSetBuilder builder;
+    for (const auto& [column, table] : {std::pair{"cliente_id", "cliente"},
+                                        std::pair{"total", "pedido"}}) {
+        ColumnInfo info;
+        info.name          = column;
+        info.source_schema = "otter_test";
+        info.source_table  = table;
+        builder.add_column(std::move(info));
+    }
+    builder.append_text(0, "1");
+    builder.append_text(1, "10");
+    builder.set_row_count(1);
+
+    const EditTarget target = find_edit_target(builder.take(), catalog_with_pk());
+    OTTER_CHECK(!target.editable());
+    OTTER_CHECK(target.refusal == EditRefusal::multiple_tables);
+}
+
+OTTER_TEST(edit_by_name_ignores_expressions) {
+    // Uma coluna calculada nao tem origem e NAO desqualifica o resultado:
+    // "SELECT id, nome, NOW()" continua editavel nas duas primeiras.
+    const ResultSet rs = make_result_named(
+        {{"cliente_id", DataKind::integer, 1},
+         {"nome",       DataKind::string, 1},
+         {"agora",      DataKind::timestamp, 0}},    // sem origem
+        "otter_test", "cliente",
+        {{"1", "Alfa", "2026-01-01"}});
+
+    const EditTarget target = find_edit_target(rs, catalog_with_pk());
+    OTTER_CHECK(target.editable());
+    OTTER_CHECK_EQ(target.table, std::string{"cliente"});
+}
 
 // --- Quando a grade NAO deve editar ------------------------------------------
 

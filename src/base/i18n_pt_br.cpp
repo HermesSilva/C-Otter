@@ -6,6 +6,8 @@
 // codigo de UI.
 #include "base/i18n.hpp"
 
+#include <span>
+
 namespace otter::i18n {
 namespace {
 
@@ -71,7 +73,6 @@ const char* const kPtBr[] = {
     "Result",                     "Resultado",
     "Queries",                    "Queries",
     "New connection",             "Nova conexão",
-    "Edit",                       "Editar",
     "no connection",              "nenhuma conexão",
     "connect to browse the schema", "conecte-se para navegar o schema",
     "loading...",                 "carregando...",
@@ -155,10 +156,14 @@ const char* const kPtBr[] = {
     // --- Conexoes salvas e importacao (ADR 0012) ---
     "this database is not supported yet",
     "este banco ainda não é suportado",
-    "MySQL driver is not implemented yet",
-    "o driver MySQL ainda não foi implementado",
-    "MariaDB driver is not implemented yet",
-    "o driver MariaDB ainda não foi implementado",
+    "saved",                      "salvas",
+    "native PostgreSQL and MySQL protocols",
+    "protocolos PostgreSQL e MySQL nativos",
+    "double-click to connect",    "duplo clique para conectar",
+    "no driver for '%s'",
+    "não há driver para '%s'",
+    "connected, but there is no catalog reader for '%s'",
+    "conectado, mas não há leitor de catálogo para '%s'",
     "SQLite driver is not implemented yet",
     "o driver SQLite ainda não foi implementado",
     "Oracle driver is planned for a later phase",
@@ -209,7 +214,6 @@ const char* const kPtBr[] = {
     "One INSERT per row",         "Um INSERT por linha",
     "no options",                 "sem opções",
     "Preview",                    "Prévia",
-    "File",                       "Arquivo",
     "Copy to clipboard",          "Copiar",
     "Save to file",               "Salvar em arquivo",
     "Copy the whole result, not just the preview",
@@ -321,9 +325,7 @@ const char* const kPtBr[] = {
     "Choose the driver for the new connection.",
         "Escolha o driver para a nova conexão.",
     "Filter drivers...",          "Filtrar drivers...",
-    "Driver",                     "Driver",
     "Category",                   "Categoria",
-    "Status",                     "Estado",
     "available",                  "disponível",
     "Next >",                     "Avançar >",
     "< Back",                     "< Voltar",
@@ -353,7 +355,6 @@ const char* const kPtBr[] = {
     "General",                    "Geral",
 
     // Aba Principal
-    "Server",                     "Servidor",
     "Host",                       "Host",
     "Port",                       "Porta",
     "Database",                   "Banco de dados",
@@ -442,7 +443,6 @@ const char* const kPtBr[] = {
     "uses the PostgreSQL driver", "usa o driver PostgreSQL",
 
     // --- Mensagens com formatacao ---
-    "%zu row(s), %zu column(s)",  "%zu linha(s), %zu coluna(s)",
     "%zu row(s) x %zu column(s)  |  %zu bytes",
         "%zu linha(s) × %zu coluna(s)  |  %zu bytes",
     "connected | %zu schema(s), %zu table(s), %zu FK(s)",
@@ -474,6 +474,13 @@ const char* const kPtBr[] = {
 void register_pt_br() {
     register_catalog("pt-BR", "Portuguese (Brazil)", "Português (Brasil)",
                      kPtBr, sizeof(kPtBr) / sizeof(kPtBr[0]));
+}
+
+// Exposto para o teste conferir que nao ha' chave repetida. Uma repeticao com
+// traducoes DIFERENTES e' um defeito de verdade: qual vence depende da ordem
+// de insercao, e o texto da tela muda sem ninguem ter mexido nele.
+std::span<const char* const> pt_br_entries() {
+    return {kPtBr, sizeof(kPtBr) / sizeof(kPtBr[0])};
 }
 
 } // namespace otter::i18n

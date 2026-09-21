@@ -105,8 +105,8 @@ struct DriverMapping {
 
 constexpr DriverMapping kDriverMappings[] = {
     {"postgresql", "postgresql", ""},
-    {"mysql",      "",  "MySQL driver is not implemented yet"},
-    {"mariadb",    "",  "MariaDB driver is not implemented yet"},
+    {"mysql",      "mysql", ""},
+    {"mariadb",    "mysql", ""},   // mesmo protocolo, mesmo driver
     {"sqlite",     "",  "SQLite driver is not implemented yet"},
     {"generic",    "",  "generic JDBC has no equivalent without a JVM"},
     {"oracle",     "",  "Oracle driver is planned for a later phase"},
@@ -231,8 +231,20 @@ json::Value profile_to_json(const StoredProfile& stored) {
 
     // url no formato JDBC: o DBeaver a usa para exibir e reconectar. Escrever
     // algo que ele entenda e' o ponto de gravar no formato dele.
+    //
+    // O sub-protocolo vem do PROVIDER, nao de um prefixo fixo: com
+    // "jdbc:postgresql://" cravado aqui, um perfil MySQL era gravado com uma
+    // url que dizia PostgreSQL -- e o campo aparecia errado na tela do
+    // DBeaver. Foi assim que o defeito apareceu, olhando o arquivo gravado.
+    const std::string scheme =
+        stored.provider == "mysql"   ? "mysql"
+      : stored.provider == "mariadb" ? "mariadb"
+      : stored.provider == "sqlite"  ? "sqlite"
+      : stored.provider.empty()      ? "postgresql"
+                                     : stored.provider;
+
     config["url"] = json::Value(
-        "jdbc:postgresql://" + profile.host + ":" +
+        "jdbc:" + scheme + "://" + profile.host + ":" +
         std::to_string(profile.port) + "/" + profile.database);
 
     if (!profile.driver_properties.empty()) {
@@ -393,13 +405,22 @@ Result<std::vector<StoredProfile>> load_profiles(const StoreLocation& location) 
 
 Status save_profiles(const StoreLocation& location,
                      const std::vector<StoredProfile>& profiles) {
+    // O id gerado precisa ser o MESMO nos dois arquivos: `data-sources.json`
+    // guarda a conexao sob ele, e `credentials-config.json` guarda a senha
+    // sob a mesma chave. Gerar um id local aqui e passar o vetor original
+    // adiante -- com `id` ainda vazio -- fazia a senha ser gravada sob a
+    // chave "", e nenhum perfil a encontrava na releitura.
+    //
+    // O sintoma na tela era "Access denied (using password: NO)" numa conexao
+    // recem-importada que dizia ter senha salva.
+    std::vector<StoredProfile> with_ids = profiles;
+    for (StoredProfile& stored : with_ids) {
+        if (stored.id.empty()) stored.id = generate_id(stored.profile.driver_id);
+    }
+
     json::Object connections;
-
-    for (const StoredProfile& stored : profiles) {
-        std::string id = stored.id;
-        if (id.empty()) id = generate_id(stored.profile.driver_id);
-
-        connections[id] = profile_to_json(stored);
+    for (const StoredProfile& stored : with_ids) {
+        connections[stored.id] = profile_to_json(stored);
     }
 
     json::Object root;
@@ -409,7 +430,7 @@ Status save_profiles(const StoreLocation& location,
     OTTER_RETURN_IF_ERROR(write_file(
         location.data_sources, json::serialize(json::Value(std::move(root)), 2)));
 
-    return write_credentials(location, profiles);
+    return write_credentials(location, with_ids);
 }
 
 } // namespace otter::db

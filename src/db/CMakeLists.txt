@@ -16,9 +16,14 @@ otter_add_library(otter_db
         edit.cpp
         export.cpp
         plan.cpp
+        drivers/mysql.cpp
+        catalog_mysql.cpp
+        catalog_reader.cpp
+        registry.cpp
         drivers/postgres.cpp
     DEPS
         otter::otter_base
+        otter::otter_mywire
         otter::otter_pgwire
 )
 

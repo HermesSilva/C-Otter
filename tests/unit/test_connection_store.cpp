@@ -105,9 +105,9 @@ OTTER_TEST(store_reports_why_a_connection_is_unusable) {
 
     dir.write("data-sources.json", R"({
   "connections": {
-    "mysql8-123": {
-      "provider": "mysql", "driver": "mysql8", "name": "legado",
-      "configuration": {"host": "10.0.0.1", "port": "3306"}
+    "sqlite-123": {
+      "provider": "sqlite", "driver": "sqlite_jdbc", "name": "legado",
+      "configuration": {"host": "10.0.0.1", "port": "0"}
     }
   }
 })");
@@ -126,7 +126,37 @@ OTTER_TEST(store_reports_why_a_connection_is_unusable) {
     // O motivo e' texto fixo em ingles -- chave de traducao, resolvida por
     // TR() na hora de desenhar. Um texto montado com o nome do provider
     // nunca casaria com o catalogo.
-    OTTER_CHECK(stored.unsupported_reason.find("MySQL") != std::string::npos);
+    OTTER_CHECK(stored.unsupported_reason.find("SQLite") != std::string::npos);
+}
+
+OTTER_TEST(store_maps_mysql_and_mariadb_to_the_mysql_driver) {
+    // MariaDB fala o mesmo protocolo e e' servido pelo MESMO driver, mas o
+    // DBeaver guarda "mariadb" como provider. Sem este mapeamento, metade das
+    // conexoes importadas continuaria marcada como indisponivel.
+    const TempDir dir("mysql-family");
+
+    dir.write("data-sources.json", R"({
+  "connections": {
+    "mysql8-1": {
+      "provider": "mysql", "driver": "mysql8", "name": "producao",
+      "configuration": {"host": "10.0.0.1", "port": "3306"}
+    },
+    "mariadb-2": {
+      "provider": "mariadb", "driver": "mariaDB", "name": "homologacao",
+      "configuration": {"host": "10.0.0.2", "port": "3307"}
+    }
+  }
+})");
+
+    auto profiles = load_profiles(dir.location());
+    OTTER_CHECK(profiles.has_value());
+    OTTER_CHECK_EQ(profiles->size(), std::size_t{2});
+
+    for (const StoredProfile& stored : *profiles) {
+        OTTER_CHECK(stored.supported);
+        OTTER_CHECK(stored.unsupported_reason.empty());
+        OTTER_CHECK_EQ(stored.profile.driver_id, std::string{"mysql"});
+    }
 }
 
 OTTER_TEST(store_survives_fields_it_does_not_know) {
@@ -190,6 +220,56 @@ OTTER_TEST(store_round_trips_a_profile_with_password) {
     OTTER_CHECK_EQ(p.password, std::string{"senha-com-acento-ção"});
     OTTER_CHECK(p.type == ConnectionType::test);
     OTTER_CHECK_EQ(p.driver_properties.at("sslmode"), std::string{"prefer"});
+}
+
+OTTER_TEST(store_keeps_the_password_of_a_profile_saved_without_an_id) {
+    // O caminho da IMPORTACAO: o perfil vem sem id, porque o do DBeaver
+    // pertence ao arquivo dele e nao e' reaproveitado. O id e' gerado na
+    // gravacao, e precisa ser o MESMO nos dois arquivos -- a conexao vai para
+    // data-sources.json sob ele, e a senha para credentials-config.json sob a
+    // mesma chave.
+    //
+    // O teste acima nao pegava isto porque fixava o id a mao. Com o id
+    // gerado numa variavel local e descartado, a senha ia para a chave "" e
+    // nenhum perfil a encontrava de volta -- o sintoma na tela era
+    // "Access denied (using password: NO)" logo apos importar.
+    const TempDir dir("generated-id");
+
+    StoredProfile stored;
+    stored.id.clear();                    // como a importacao deixa
+    stored.provider  = "mysql";
+    stored.driver    = "mysql8";
+    stored.supported = true;
+
+    stored.profile.driver_id     = "mysql";
+    stored.profile.name          = "importada";
+    stored.profile.host          = "localhost";
+    stored.profile.port          = 3306;
+    stored.profile.user          = "root";
+    stored.profile.password      = "senha-secreta";
+    stored.profile.save_password = true;
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+
+    const StoredProfile& read = back->front();
+    OTTER_CHECK(!read.id.empty());        // ganhou um id
+    OTTER_CHECK_EQ(read.profile.password, std::string{"senha-secreta"});
+    OTTER_CHECK_EQ(read.profile.user, std::string{"root"});
+    OTTER_CHECK_EQ(read.profile.driver_id, std::string{"mysql"});
+
+    // E o id sobrevive a uma segunda gravacao, em vez de mudar a cada
+    // salvamento -- se mudasse, a senha se perderia na volta seguinte.
+    const std::string first_id = read.id;
+    OTTER_CHECK(save_profiles(dir.location(), *back).has_value());
+
+    auto again = load_profiles(dir.location());
+    OTTER_CHECK(again.has_value() && again->size() == 1);
+    OTTER_CHECK_EQ(again->front().id, first_id);
+    OTTER_CHECK_EQ(again->front().profile.password, std::string{"senha-secreta"});
 }
 
 OTTER_TEST(store_does_not_write_a_password_when_told_not_to) {

@@ -42,19 +42,21 @@ Distribuição dos 275 comandos por área:
 | Funcionalidade | DBeaver | C-Otter |
 |---|---|---|
 | Conectar a PostgreSQL | ✅ | ✅ |
+| Conectar a MySQL / MariaDB | ✅ | ✅ protocolo nativo, sem libmysqlclient |
 | Diálogo de conexão com campos básicos | ✅ | ✅ |
 | Indicador visual de estado da conexão | ✅ | ✅ |
 | Desconectar | ✅ | ✅ |
 | Pré-preenchimento por variáveis de ambiente | ✅ | ✅ |
-| Múltiplas conexões simultâneas | ✅ | ⬜ |
-| Salvar/persistir conexões | ✅ | ⬜ |
+| Múltiplas conexões simultâneas | ✅ | ✅ |
+| Salvar/persistir conexões | ✅ | ✅ no formato do DBeaver (ADR 0012) |
+| Importar conexões do DBeaver | ➖ | ✅ com senha decifrada |
 | Credenciais em cofre do SO (DPAPI/libsecret) | ✅ | ⬜ |
 | Pastas de organização de conexões | ✅ | ⬜ |
 | Túnel SSH | ✅ | ⬜ |
 | TLS/SSL | ✅ | ⬜ |
 | Teste de conexão antes de salvar | ✅ | ⬜ |
 | Conexão somente-leitura | ✅ | ⬜ |
-| ~50 SGBDs | ✅ | ➖ (5 na v1) |
+| ~50 SGBDs | ✅ | ➖ 2 de 5 previstos na v1 |
 
 ## 2. Navigator (46 comandos no DBeaver)
 
@@ -65,10 +67,11 @@ Distribuição dos 275 comandos por área:
 | Carregamento tardio (lazy) | ✅ | ✅ |
 | Tamanho e contagem estimada de linhas | ✅ | ✅ |
 | Distinção visual de views | ✅ | ✅ |
-| Índices, constraints, triggers, sequences | ✅ | ⬜ |
-| Funções e procedures | ✅ | ⬜ |
-| Filtro/busca na árvore | ✅ | ⬜ |
-| Menu de contexto (DDL, dados, renomear) | ✅ | ⬜ |
+| Índices, constraints, triggers, sequences | ✅ | ✅ |
+| Funções e procedures | ✅ | ✅ |
+| Filtro/busca na árvore | ✅ | ✅ |
+| Menu de contexto (DDL, dados, renomear) | ✅ | ✅ exceto renomear |
+| Esconder pasta que o SGBD não tem | ✅ `visibleIf` | ✅ |
 | Criar/alterar/remover objeto | ✅ | ⬜ |
 | Gerar DDL | ✅ | ⬜ |
 | Copiar nome qualificado | ✅ | ⬜ |

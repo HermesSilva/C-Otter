@@ -13,6 +13,7 @@
 #include "db/export.hpp"
 #include "db/plan.hpp"
 #include "db/result_set.hpp"
+#include "sql/dialect.hpp"
 #include "sql/script.hpp"
 #include "ui/connection_dialog.hpp"
 #include "ui/icons.hpp"
@@ -45,6 +46,13 @@ private:
     void draw_toolbar();
     void draw_dockspace();
     void draw_raft_panel();
+    void draw_saved_profiles();
+
+    // Nome do SGBD para exibicao, a partir do driver_id do perfil.
+    static std::string dbms_name(const std::string& driver_id);
+
+    // Dialeto SQL da conexao ativa, para lexer, formatador e reescrita.
+    [[nodiscard]] const sql::Dialect& active_dialect() const;
     void draw_navigator_panel();
 
     // O nome passa no filtro do Navigator? Filtro vazio aceita tudo.
@@ -230,6 +238,12 @@ private:
     std::size_t        editing_column_ = 0;
     bool               editing_active_ = false;
     bool               saving_edits_ = false;
+
+    // Uma releitura foi disparada logo apos gravar edicoes. Ela REUSA
+    // executing_document_id_, que por isso nao pode ser zerado no mesmo
+    // quadro -- se fosse, o resultado novo chegaria sem ninguem para colher e
+    // a grade ficaria exibindo o valor anterior a' gravacao.
+    bool               rereading_after_save_ = false;
     char               navigator_filter_[128] = "";
 
     // Documento esperando as constraints para saber se da' para editar.

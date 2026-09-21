@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -58,6 +59,10 @@ void register_catalog(std::string_view code, std::string_view name,
 // construtor de objeto global, porque o linker com /OPT:REF descarta unidades
 // de traducao nao referenciadas -- e o catalogo sumiria do executavel.
 void load_builtin_catalogs();
+
+// As entradas do catalogo pt-BR, em pares (chave, traducao). Exposto para o
+// teste que impede chave repetida.
+[[nodiscard]] std::span<const char* const> pt_br_entries();
 
 // Textos vistos mas nunca traduzidos -- alimenta o relatorio de cobertura.
 [[nodiscard]] std::vector<std::string> missing_translations();
