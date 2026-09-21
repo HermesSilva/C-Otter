@@ -293,6 +293,28 @@ void Session::load_types_async(std::string schema) {
     });
 }
 
+void Session::load_routine_definition_async(std::string schema, std::string name,
+                                            std::string arguments) {
+    run_catalog_async([this, schema, name, arguments](db::PostgresCatalog& catalog) {
+        auto definition = catalog.load_routine_definition(schema, name, arguments);
+        if (!definition) return;
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        db::SchemaMeta* s = find_schema(schema);
+        if (s == nullptr) return;
+
+        for (db::RoutineMeta& routine : s->routines) {
+            // Nome E assinatura: duas sobrecargas de mesmo nome receberiam o
+            // corpo da primeira se a comparacao fosse so' pelo nome.
+            if (routine.name != name || routine.arguments != arguments) continue;
+
+            routine.definition = std::move(*definition);
+            routine.definition_loaded = true;
+            break;
+        }
+    });
+}
+
 bool Session::auto_commit() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return holt_ ? holt_->auto_commit() : true;

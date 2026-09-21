@@ -1065,33 +1065,41 @@ void MainShell::draw_view_definition(const db::SchemaMeta& schema,
         return;
     }
 
-    // Caixa rolavel com o SQL. Altura limitada: uma view de relatorio tem
-    // dezenas de linhas e empurraria o resto da arvore para fora da tela.
+    draw_sql_body("##viewdef", view.definition);
+    ImGui::TreePop();
+}
+
+void MainShell::draw_sql_body(const char* id, const std::string& sql) {
+    const Palette& p = colors();
+
+    // Altura limitada: uma view de relatorio ou uma funcao plpgsql tem dezenas
+    // de linhas e empurraria o resto da arvore para fora da tela. Rolagem
+    // horizontal em vez de quebra de linha -- SQL indentado perde a estrutura
+    // quando quebrado.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, col(p.bg_darkest));
-    if (ImGui::BeginChild("##viewdef",
-                          ImVec2(0.0f, ImGui::GetFontSize() * 9.0f),
+    if (ImGui::BeginChild(id, ImVec2(0.0f, ImGui::GetFontSize() * 9.0f),
                           ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_HorizontalScrollbar)) {
         ImGui::PushStyleColor(ImGuiCol_Text, col(p.syntax_string));
-        ImGui::TextUnformatted(view.definition.c_str());
+        ImGui::TextUnformatted(sql.c_str());
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
 
-    if (icon_text_button("##copydef", Icon::copy, TR("Copy"),
+    ImGui::PushID(id);
+    if (icon_text_button("##copy", Icon::copy, TR("Copy"),
                          TR("Copy the definition to the clipboard"))) {
-        ImGui::SetClipboardText(view.definition.c_str());
+        ImGui::SetClipboardText(sql.c_str());
     }
     ImGui::SameLine();
-    if (icon_text_button("##opendef", Icon::open, TR("Open in editor"),
+    if (icon_text_button("##open", Icon::open, TR("Open in editor"),
                          TR("Open the definition in a new SQL tab"))) {
-        // Abre como script: a view vira ponto de partida para uma consulta,
-        // que e' o uso mais comum de olhar a definicao.
-        new_document().editor().SetText(view.definition);
+        // Abre como script: olhar a definicao quase sempre precede escrever
+        // algo em cima dela.
+        new_document().editor().SetText(sql);
     }
-
-    ImGui::TreePop();
+    ImGui::PopID();
 }
 
 void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
@@ -1140,13 +1148,28 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
     for (const db::RoutineMeta& routine : schema.routines) {
         const bool is_procedure = routine.kind == db::ObjKind::procedure;
 
+        // O id do ImGui precisa da assinatura, nao so' do nome: sobrecargas
+        // compartilham o nome, e duas linhas com o mesmo id fariam a segunda
+        // abrir junto com a primeira.
+        ImGui::PushID((routine.name + "(" + routine.arguments + ")").c_str());
+
         ImGui::BeginGroup();
         icon_inline(is_procedure ? Icon::procedure : Icon::function,
                     is_procedure ? p.data : p.text_dim);
         ImGui::SameLine(0.0f, 4.0f);
-        ImGui::TextColored(col4(p.text), "%s", routine.name.c_str());
+
+        ImGui::PushStyleColor(ImGuiCol_Text, col(p.text));
+        const bool open = ImGui::TreeNode(routine.name.c_str());
+        ImGui::PopStyleColor();
+
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "(%s)", routine.arguments.c_str());
+
+        // O retorno distingue funcao de procedure de relance, sem tooltip.
+        if (!is_procedure && !routine.return_type.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.data), "→ %s", routine.return_type.c_str());
+        }
         ImGui::EndGroup();
 
         if (ImGui::IsItemHovered()) {
@@ -1156,6 +1179,21 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
             if (!routine.comment.empty()) tip += "\n\n" + routine.comment;
             ImGui::SetTooltip("%s", tip.c_str());
         }
+
+        if (open) {
+            if (!routine.definition_loaded && !session_.busy()) {
+                session_.load_routine_definition_async(
+                    schema.name, routine.name, routine.arguments);
+            }
+
+            if (routine.definition.empty()) {
+                ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+            } else {
+                draw_sql_body("##routinedef", routine.definition);
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
     }
     ImGui::TreePop();
 }

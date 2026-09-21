@@ -57,6 +57,11 @@ private:
                              const db::TableMeta& table);
     void draw_view_definition(const db::SchemaMeta& schema,
                               const db::TableMeta& view);
+
+    // Caixa rolavel com um corpo de SQL, mais os botoes de copiar e abrir no
+    // editor. Serve para view e para funcao: o conteudo muda, a apresentacao
+    // nao.
+    void draw_sql_body(const char* id, const std::string& sql);
     void draw_sequences_folder(const db::SchemaMeta& schema);
     void draw_routines_folder(const db::SchemaMeta& schema);
     void draw_types_folder(const db::SchemaMeta& schema);

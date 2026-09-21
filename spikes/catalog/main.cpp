@@ -154,6 +154,22 @@ int main(int argc, char** argv) {
                         std::string(otter::db::to_string(r.kind)).c_str(),
                         r.name.c_str(), r.arguments.c_str(),
                         r.return_type.c_str(), r.language.c_str());
+
+            // O corpo e' o ponto delicado: a versao anterior montava a
+            // assinatura a mao e o servidor rejeitava.
+            auto body = catalog.load_routine_definition(schema, r.name,
+                                                        r.arguments);
+            if (!body) {
+                std::printf("      def FALHOU: %s\n",
+                            body.error().to_string().c_str());
+            } else if (body->empty()) {
+                std::printf("      def VAZIA (nenhuma linha retornada)\n");
+            } else {
+                const std::size_t eol = body->find('\n');
+                std::printf("      def: %s ...  (%zu bytes)\n",
+                            body->substr(0, std::min(eol, std::size_t{60})).c_str(),
+                            body->size());
+            }
         }
     } else {
         std::printf("FALHOU: %s\n", routines.error().to_string().c_str());

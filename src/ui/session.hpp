@@ -77,6 +77,12 @@ public:
     void load_routines_async(std::string schema);
     void load_types_async(std::string schema);
 
+    // Corpo de uma funcao ou procedure. Precisa da assinatura alem do nome:
+    // sobrecargas compartilham o nome, e pg_get_functiondef identifica a
+    // rotina por regprocedure.
+    void load_routine_definition_async(std::string schema, std::string name,
+                                       std::string arguments);
+
     // --- Transacoes ---------------------------------------------------------
     //
     // Consultas baratas e sincronas: leem estado ja' conhecido pela conexao,

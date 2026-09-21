@@ -48,6 +48,8 @@ Connection
         │       ├── Indexes (do schema) ⬜
         │       ├── Sequences         ✅  last_value, owned_by
         │       ├── Procedures/Functions ✅  assinatura, retorno, linguagem
+        │       │   ├── Definition         ✅  pg_get_functiondef
+        │       │   └── Parameters         ⬜
         │       ├── Data Types        ✅  enum, domain, composto, range
         │       │   ├── Enum values        ✅  na ordem de enumsortorder
         │       │   └── Attributes         ✅  campos do composto
@@ -78,7 +80,7 @@ Connection
 
 | | DBeaver | C-Otter |
 |---|---|---|
-| Tipos de nó na árvore | **~70** | **20** |
+| Tipos de nó na árvore | **~70** | **21** |
 | Classes de modelo `Postgre*` | **90** | 5 structs |
 
 ## Ordem de implementação
@@ -101,11 +103,11 @@ Por valor de uso, não por ordem na árvore.
 
 | # | Item | Por quê |
 |---|------|---------|
-| 1 | **Corpo de função** | `load_routine_definition()` pronto, sem UI |
-| 2 | **Partições e herança** | |
-| 3 | **Dependencies** | Grafo de dependências |
-| 4 | **Rules e Policies (RLS)** | |
-| 5 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
+| 1 | **Partições e herança** | |
+| 2 | **Dependencies** | Grafo de dependências |
+| 3 | **Rules e Policies (RLS)** | |
+| 4 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
+| 5 | Parâmetros de rotina | Sub-pasta de cada função |
 | 6 | Encodings, Collations, Languages | Referência |
 
 ## Decisões de design

@@ -1,6 +1,7 @@
 # Guia de elementos — o que funciona e o que não funciona
 
-**Última verificação: 2026-09-21** · build `win-debug`, PostgreSQL 18.2, banco `ERP_TID`
+**Última verificação: 2026-09-21** · build `win-release`, PostgreSQL 18.2, bancos
+`ERP_TID` (schema `public`) e `otter_test` (fixture)
 
 Este é o guia operacional: cada painel, botão, menu e atalho do C-Otter, com o estado
 **verificado na aplicação rodando** — não deduzido do código.
@@ -166,7 +167,7 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | Funções e procedures | ✅ | Assinatura, retorno, linguagem; ícones distintos |
 | **Corpo da view** | ✅ | `pg_get_viewdef` formatado, com Copiar / Abrir no editor |
 | Ícone próprio por tipo | ✅ | 18 tipos, nenhum compartilhado |
-| Corpo da função | 🟡 | `load_routine_definition()` pronto, sem UI |
+| **Corpo da função** | ✅ | `pg_get_functiondef`, com Copiar / Abrir no editor |
 | **Tipos de dados** | ✅ | enum com valores ordenados, composto com campos, domain com CHECK |
 | Campo de filtro/busca | ⬜ | |
 | Menu de contexto | ⬜ | Sem "ver dados", "gerar DDL", "renomear" |
@@ -447,6 +448,28 @@ Testes automatizados (113, todos verdes):
 ```powershell
 build\win-release\bin\otter_tests.exe
 ```
+
+### Testes contra um banco real
+
+Uma consulta sintaticamente válida em C++ pode ser rejeitada pelo servidor, e
+nenhum teste unitário pega isso. Foi o que aconteceu com
+`load_routine_definition()`: ficou marcado como "pronto" montando uma
+assinatura que o PostgreSQL recusava com
+`ERRO: o nome do tipo de dados "p_cliente integer" não é válido`.
+
+`otter_tests_live` executa as consultas de catálogo de verdade — 35
+verificações sobre relações, corpos de view e de função, tipos e filhos de
+tabela.
+
+```powershell
+psql -h localhost -U postgres -d ERP_TID -f tests/integration/fixtures.sql
+$env:PGDATABASE="ERP_TID"; $env:PGPASSWORD="..."
+build\win-release\bin\otter_tests_live.exe
+```
+
+Fora do `ctest` por padrão: depende de um servidor externo. Uma suíte que falha
+por falta de banco treina a ignorar falha, o que é pior que não ter o teste.
+Para incluir, configurar com `-DOTTER_LIVE_TESTS=ON`.
 
 ## Manutenção
 

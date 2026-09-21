@@ -733,13 +733,26 @@ Result<std::vector<RoutineMeta>> PostgresCatalog::load_routines(
 
 Result<std::string> PostgresCatalog::load_routine_definition(
     std::string_view schema, std::string_view name, std::string_view arguments) {
-    // Identifica pela assinatura: sobrecargas compartilham o nome.
-    const std::string signature =
-        std::string(schema) + "." + std::string(name) +
-        "(" + std::string(arguments) + ")";
-
+    // Localiza pelo OID, comparando a assinatura ja' formatada pelo servidor.
+    //
+    // A versao anterior montava 'schema.nome(args)' e convertia para
+    // ::regprocedure. Nao funcionava: pg_get_function_arguments devolve
+    // "p_cliente integer" -- com o NOME do parametro -- e regprocedure aceita
+    // so' os tipos. O servidor respondia
+    //
+    //     ERRO: o nome do tipo de dados "p_cliente integer" nao e' valido
+    //
+    // Comparar a saida de pg_get_function_arguments com ela mesma dispensa
+    // remontar a assinatura, e continua distinguindo sobrecargas: duas
+    // funcoes de mesmo nome tem listas de argumentos diferentes por definicao.
     const std::string sql =
-        "SELECT pg_get_functiondef(" + quote_literal(signature) + "::regprocedure)";
+        "SELECT pg_get_functiondef(p.oid)"
+        "  FROM pg_proc p"
+        "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+        " WHERE n.nspname = " + quote_literal(schema) +
+        "   AND p.proname = " + quote_literal(name) +
+        "   AND pg_get_function_arguments(p.oid) = " + quote_literal(arguments) +
+        " LIMIT 1";
 
     OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));
     if (rs.row_count() == 0) return std::string{};
