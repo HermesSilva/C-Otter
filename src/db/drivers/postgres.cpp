@@ -189,6 +189,14 @@ public:
         return conn_.server_version();
     }
 
+    [[nodiscard]] std::string secure_channel() const override {
+        if (!conn_.tls_active()) return {};
+        const auto& info = conn_.tls_info();
+        std::string text = info.protocol;
+        if (!info.cipher.empty()) text += ", " + info.cipher;
+        return text;
+    }
+
     [[nodiscard]] std::string current_schema() const override { return schema_; }
 
 private:
@@ -339,6 +347,12 @@ public:
         params.password = config.password;
         params.timeout  = std::chrono::duration_cast<std::chrono::milliseconds>(
             config.connect_timeout);
+
+        // `require` implica exigir: se o servidor nao oferecer TLS, a conexao
+        // falha em vez de cair em claro sem avisar.
+        params.use_tls     = config.ssl_enabled();
+        params.require_tls = config.ssl_enabled();
+        params.allow_invalid_certificate = !config.ssl_verifies_certificate();
 
         OTTER_ASSIGN_OR_RETURN(auto conn, pgwire::Connection::connect(params));
         return std::unique_ptr<Holt>(new PostgresHolt(std::move(conn)));

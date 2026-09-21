@@ -30,3 +30,9 @@ set_target_properties(spike_qq PROPERTIES FOLDER "spikes")
 add_executable(spike_alter_live alter_live.cpp)
 target_link_libraries(spike_alter_live PRIVATE otter_flags otter::otter_base otter::otter_db)
 set_target_properties(spike_alter_live PROPERTIES FOLDER "spikes")
+
+# Verificacao do TLS contra servidor de verdade: o aperto de mao nao e'
+# testavel em unidade (ver o cabecalho de tls_live.cpp).
+add_executable(spike_tls_live tls_live.cpp)
+target_link_libraries(spike_tls_live PRIVATE otter_flags otter::otter_base otter::otter_db)
+set_target_properties(spike_tls_live PROPERTIES FOLDER "spikes")

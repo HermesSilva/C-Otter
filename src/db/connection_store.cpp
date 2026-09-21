@@ -202,6 +202,41 @@ StoredProfile profile_from_json(const std::string& id,
         profile.driver_properties[key] = std::string(value.as_string());
     }
 
+    // SSL. No DBeaver e' um "handler" de rede, com id por driver e chaves
+    // DIFERENTES em cada um -- extraido de PostgreConstants.java e
+    // MySQLConstants.java, registrado em docs/DBEAVER-MAP.md.
+    //
+    //   postgre_ssl -> "sslMode": disable|require|verify-ca|verify-full
+    //   mysql_ssl   -> "ssl.require" e "ssl.verify.server", dois booleanos
+    //
+    // O `enabled` do handler manda: com ele falso, o modo gravado e' resto de
+    // uma configuracao desligada e nao deve exigir TLS.
+    const json::Value& handlers = config["handlers"];
+    for (const char* handler_id : {"postgre_ssl", "mysql_ssl"}) {
+        const json::Value& handler = handlers[handler_id];
+        if (handler.kind() != json::Kind::object) continue;
+
+        profile.ssl.enabled = handler["enabled"].as_bool();
+
+        const json::Value& properties = handler["properties"];
+        if (const std::string_view mode = properties["sslMode"].as_string();
+            !mode.empty()) {
+            profile.ssl.mode = ssl_mode_from_string(mode);
+        } else if (properties["ssl.verify.server"].as_bool()) {
+            profile.ssl.mode = SslMode::verify_full;
+        } else {
+            profile.ssl.mode = SslMode::require;
+        }
+
+        profile.ssl.root_cert_path =
+            std::string(properties["ssl.ca.cert"].as_string());
+        profile.ssl.client_cert_path =
+            std::string(properties["ssl.client.cert"].as_string());
+        profile.ssl.client_key_path =
+            std::string(properties["ssl.client.key"].as_string());
+        break;
+    }
+
     apply_driver(stored);
 
     // Guarda o no' inteiro: regravar um perfil importado nao deve apagar
@@ -253,6 +288,47 @@ json::Value profile_to_json(const StoredProfile& stored) {
             properties[key] = json::Value(value);
         }
         config["properties"] = json::Value(std::move(properties));
+    }
+
+    // SSL no formato do handler do DBeaver. Gravar so' quando ligado: o
+    // DBeaver tambem omite handler desabilitado, e um handler vazio no
+    // arquivo aparece como aba configurada na tela dele.
+    if (profile.ssl.enabled) {
+        const bool is_mysql = stored.provider == "mysql";
+
+        json::Object properties;
+        if (is_mysql) {
+            // O MySQL nao tem "modo": tem dois booleanos. `require` vira
+            // verificacao desligada, que e' o que o modo significa.
+            properties["ssl.require"] = json::Value(true);
+            properties["ssl.verify.server"] = json::Value(
+                profile.ssl.mode == SslMode::verify_ca ||
+                profile.ssl.mode == SslMode::verify_full);
+        } else {
+            properties["sslMode"] =
+                json::Value(std::string(to_string(profile.ssl.mode)));
+        }
+        if (!profile.ssl.root_cert_path.empty()) {
+            properties["ssl.ca.cert"] = json::Value(profile.ssl.root_cert_path);
+        }
+        if (!profile.ssl.client_cert_path.empty()) {
+            properties["ssl.client.cert"] =
+                json::Value(profile.ssl.client_cert_path);
+        }
+        if (!profile.ssl.client_key_path.empty()) {
+            properties["ssl.client.key"] =
+                json::Value(profile.ssl.client_key_path);
+        }
+
+        json::Object handler;
+        handler["type"]       = json::Value(std::string("CONFIG"));
+        handler["enabled"]    = json::Value(true);
+        handler["properties"] = json::Value(std::move(properties));
+
+        json::Object handlers;
+        handlers[is_mysql ? "mysql_ssl" : "postgre_ssl"] =
+            json::Value(std::move(handler));
+        config["handlers"] = json::Value(std::move(handlers));
     }
 
     json::Object node;

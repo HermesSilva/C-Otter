@@ -44,6 +44,37 @@ O formato de `data-sources.json` é um objeto `connections`, com uma chave por c
 }
 ```
 
+### Configuração de rede: `handlers`
+
+O SSL e o túnel SSH **não ficam em `properties`**. São *network handlers*, cada
+um com id próprio e um mapa de propriedades dentro de `configuration.handlers`.
+Extraído de `DataSourceSerializerModern.java:727` (leitura) e `:1203` (escrita).
+
+O id e as chaves mudam por driver — não há um formato comum:
+
+| Driver | Id do handler | Chaves | Fonte |
+|--------|---------------|--------|-------|
+| PostgreSQL | `postgre_ssl` | `sslMode`: `disable`/`require`/`verify-ca`/`verify-full` | `PostgreConstants.java:129` e `:68` |
+| MySQL | `mysql_ssl` | `ssl.require` e `ssl.verify.server`, dois booleanos | `MySQLConstants.java:38` e `:43-44` |
+
+Certificados, comuns aos dois: `ssl.ca.cert`, `ssl.client.cert`,
+`ssl.client.key`.
+
+```json
+"handlers": {
+  "mysql_ssl": {
+    "type": "CONFIG",
+    "enabled": true,
+    "properties": { "ssl.require": true, "ssl.verify.server": false }
+  }
+}
+```
+
+O `enabled` manda: o DBeaver **omite** handler desabilitado ao gravar, e um
+handler presente com `enabled: false` é resto de configuração desligada. O
+C-Otter segue as duas regras — sem isso, um perfil com a caixa desmarcada na
+tela exigiria TLS.
+
 A criptografia das credenciais, extraída de `DefaultValueEncryptor.java` e
 `BaseProjectImpl.java`:
 

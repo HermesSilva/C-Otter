@@ -46,6 +46,7 @@ enum class Icon : std::uint8_t {
     error,
     info,
     clock,
+    lock,          // canal cifrado (TLS)
     filter,
 
     // Tipos de objeto do banco. Cada um tem desenho proprio: reaproveitar um

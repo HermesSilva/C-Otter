@@ -5074,6 +5074,20 @@ void MainShell::draw_status_bar() {
                                dbms_name(driver_id).c_str(),
                                session().server_version().c_str());
             ImGui::SameLine();
+
+            // Cadeado so' quando o canal esta' REALMENTE cifrado. Nao ha'
+            // simbolo para "em claro": um icone de cadeado aberto some no meio
+            // da barra, e a ausencia do fechado e' a informacao -- desde que
+            // o cadeado nunca minta quando aparece.
+            if (const std::string channel = session().secure_channel();
+                !channel.empty()) {
+                icon_inline(Icon::lock, colors().ok);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s: %s", TR("Encrypted connection"),
+                                      channel.c_str());
+                }
+                ImGui::SameLine();
+            }
         }
         // Progresso do script no lugar da mensagem: num script de 40 comandos,
         // "executando..." parado seria indistinguivel de travado.
@@ -5444,6 +5458,7 @@ void MainShell::draw_icon_gallery() {
         {Icon::chevron_down, "chevron_down"},
         {Icon::warning, "warning"},       {Icon::error, "error"},
         {Icon::info, "info"},             {Icon::clock, "clock"},
+        {Icon::lock, "lock"},
         {Icon::filter, "filter"},
     };
 

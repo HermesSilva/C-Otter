@@ -11,9 +11,20 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace otter::db {
+
+// Modo TLS, com os nomes do `sslmode` do PostgreSQL -- que o DBeaver tambem
+// usa. Fica aqui, e nao em `connection_config.hpp`, porque o `ConnConfig` que
+// chega ao driver precisa dele e e' o mais basico dos dois cabecalhos.
+enum class SslMode : std::uint8_t {
+    disable, allow, prefer, require, verify_ca, verify_full,
+};
+
+[[nodiscard]] const char* to_string(SslMode mode) noexcept;
+[[nodiscard]] SslMode ssl_mode_from_string(std::string_view text) noexcept;
 
 struct ConnConfig {
     // Qual driver falar: "postgresql", "mysql". Viaja junto com o host e a
@@ -29,6 +40,25 @@ struct ConnConfig {
     std::string password;
     std::string options;                              // parametros extras do driver
     std::chrono::seconds connect_timeout{10};
+
+    // Modo TLS. O enum vem de `connection_config.hpp`, que ja' o define para
+    // o perfil salvo -- um segundo enum com os mesmos nomes so' criaria a
+    // chance de traduzir um para o outro errado.
+    SslMode ssl_mode = SslMode::disable;
+
+    // `allow` e `prefer` do libpq significam "tenta cifrar, aceita em claro":
+    // protegem contra um escuta passivo e contra mais ninguem. O C-Otter os
+    // aceita no perfil, por vir do DBeaver, mas NAO exige TLS neles.
+    [[nodiscard]] bool ssl_enabled() const noexcept {
+        return ssl_mode == SslMode::require ||
+               ssl_mode == SslMode::verify_ca ||
+               ssl_mode == SslMode::verify_full;
+    }
+    // `require` nao verifica nada: quem escolhe esse modo quer o canal
+    // cifrado num servidor de desenvolvimento, com certificado autoassinado.
+    [[nodiscard]] bool ssl_verifies_certificate() const noexcept {
+        return ssl_mode == SslMode::verify_ca || ssl_mode == SslMode::verify_full;
+    }
 };
 
 // O que o driver suporta. A UI consulta isto para habilitar ou esconder acoes,
@@ -123,6 +153,15 @@ public:
     [[nodiscard]] virtual Capabilities capabilities() const noexcept = 0;
     [[nodiscard]] virtual std::string server_version() const = 0;
     [[nodiscard]] virtual std::string current_schema() const = 0;
+
+    // Descricao do canal: "TLS 1.3, AES_256_GCM" quando cifrado, vazio quando
+    // em claro. Texto em vez de booleano porque a barra de status mostra QUAL
+    // protocolo e cifra foram negociados -- "cifrado" sozinho nao distingue
+    // um TLS 1.3 de um TLS 1.0 com cifra obsoleta.
+    //
+    // Nao e' puro: um driver que nao negocia TLS nao deve ser obrigado a
+    // declarar que nao negocia.
+    [[nodiscard]] virtual std::string secure_channel() const { return {}; }
 
     // Historico desta conexao, para o inspetor de queries.
     [[nodiscard]] const std::vector<QueryLog>& query_log() const noexcept {

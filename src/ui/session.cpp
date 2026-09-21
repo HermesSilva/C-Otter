@@ -654,6 +654,11 @@ std::string Session::server_version() const {
     return holt_ ? holt_->server_version() : std::string();
 }
 
+std::string Session::secure_channel() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return holt_ ? holt_->secure_channel() : std::string();
+}
+
 std::string Session::database_name() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return database_name_;

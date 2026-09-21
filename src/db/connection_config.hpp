@@ -8,6 +8,8 @@
 // driver precisa para abrir o socket.
 #pragma once
 
+#include "db/holt.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -60,12 +62,6 @@ struct SshTunnelConfig {
     std::chrono::seconds connect_timeout{10};
     std::chrono::seconds keep_alive{60};
 };
-
-enum class SslMode : std::uint8_t {
-    disable, allow, prefer, require, verify_ca, verify_full,
-};
-
-[[nodiscard]] const char* to_string(SslMode mode) noexcept;
 
 struct SslConfig {
     bool        enabled = false;

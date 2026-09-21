@@ -11,9 +11,9 @@ set(OTTER_NET_SOURCES
 )
 
 if(WIN32)
-    list(APPEND OTTER_NET_SOURCES net/crypto_win32.cpp)
+    list(APPEND OTTER_NET_SOURCES net/crypto_win32.cpp net/tls_win32.cpp)
 else()
-    list(APPEND OTTER_NET_SOURCES net/crypto_openssl.cpp)
+    list(APPEND OTTER_NET_SOURCES net/crypto_openssl.cpp net/tls_openssl.cpp)
 endif()
 
 add_library(otter_net STATIC ${OTTER_NET_SOURCES})
@@ -29,7 +29,7 @@ set_target_properties(otter_net PROPERTIES FOLDER "lib")
 
 if(WIN32)
     # CNG (bcrypt) e Winsock: API do sistema, sem dependencia externa.
-    target_link_libraries(otter_net PUBLIC bcrypt crypt32 ws2_32)
+    target_link_libraries(otter_net PUBLIC bcrypt crypt32 secur32 ws2_32)
 else()
     find_package(OpenSSL REQUIRED)
     target_link_libraries(otter_net PUBLIC OpenSSL::Crypto)

@@ -173,7 +173,10 @@ armadilhas:
 | **Particionamento e eventos** | ✅ |
 | **System Info**, com filtro sobre 633 variáveis | ✅ |
 | **Usuários e GRANTs** | ✅ sem nunca ler a senha |
-| TLS | ⬜ |
+| TLS (`CLIENT_SSL`, Schannel) | ✅ no Windows; Linux pendente (ADR 0017) |
+| `caching_sha2_password` sobre TLS, sem RSA | ✅ |
+| `mysql_clear_password` **sob TLS** | ✅ recusado em claro |
+| Certificado de cliente no aperto de mão | ⬜ gravado e lido, não usado |
 | Protocolo preparado (`COM_STMT_*`) | ⬜ |
 
 Verificado contra um **MySQL 8.0.46 real** em 2026-09-21:
@@ -197,3 +200,16 @@ Nenhum destes quebrava o build, e nenhum apareceria num teste unitário:
 | Pastas `Sequences` e `Tipos de dados` vazias em todo banco | sem o equivalente aos `visibleIf` do DBeaver |
 | `somente leitura: o resultado não vem de uma tabela` num `SELECT * FROM cliente` | origem procurada só por OID, que o MySQL não tem |
 | Grade exibindo o valor **antigo** depois de gravar | a releitura reusava `executing_document_id_`, que era zerado no mesmo quadro |
+| Ícone do cadeado lendo como **envelope** na barra de status | `PathArcTo(π, 0)` desenha a metade de BAIXO; a alça caía dentro da caixa. O intervalo certo é `π → 2π`, como em `draw_role` |
+| `require` falhando com "aperto de mão TLS (0x00090320)" | o MySQL pede certificado de cliente de forma OPCIONAL; `SEC_I_INCOMPLETE_CREDENTIALS` não é erro, e o passo seguinte do laço responde "não tenho" |
+| `not a socket` na primeira consulta **depois** de um TLS bem-sucedido | o `TlsChannel` guardava um `Socket*`, e a `Connection` é movida para dentro do `Holt` |
+
+### Aberto, não corrigido
+
+`otter_tests_mysql_live` com `MYSQL_PASSWORD` vazio falha com **"BCryptEncrypt
+falhou"** em vez de dizer que a senha está vazia. A primeira chamada de
+`BCryptEncrypt` (a que só mede o tamanho) passa e a segunda falha, o que sugere
+divergência entre `out_size` medido e o buffer. Não reproduzido de forma
+controlada — não há conta de senha vazia no servidor de teste — e por isso
+**não corrigido às cegas**. O caminho normal, com senha, funciona: é o que as
+108 verificações de `test_catalog_mysql_live.cpp` exercitam.

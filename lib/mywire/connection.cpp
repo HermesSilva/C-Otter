@@ -95,6 +95,8 @@ Connection::~Connection() { close(); }
 
 Connection::Connection(Connection&& other) noexcept
     : socket_(std::move(other.socket_)),
+      tls_(std::move(other.tls_)),
+      tls_active_(other.tls_active_),
       sequence_(other.sequence_),
       capabilities_(other.capabilities_),
       connection_id_(other.connection_id_),
@@ -113,6 +115,8 @@ Connection& Connection::operator=(Connection&& other) noexcept {
     if (this != &other) {
         close();
         socket_         = std::move(other.socket_);
+        tls_            = std::move(other.tls_);
+        tls_active_     = other.tls_active_;
         sequence_       = other.sequence_;
         capabilities_   = other.capabilities_;
         connection_id_  = other.connection_id_;
@@ -141,6 +145,8 @@ void Connection::close() noexcept {
     writer.put_u8(static_cast<std::uint8_t>(Command::quit));
     (void)send_packet(writer.body());
 
+    tls_.close();
+    tls_active_ = false;
     socket_.close();
 }
 
@@ -148,7 +154,21 @@ void Connection::close() noexcept {
 
 Status Connection::send_packet(std::span<const std::byte> body) {
     const std::vector<std::byte> framed = frame(body, sequence_);
-    return socket_.write_all(framed);
+    return write_raw(framed);
+}
+
+// Todo o trafego passa por estes dois. Depois do upgrade o socket continua
+// aberto, mas escrever nele diretamente mandaria texto em claro no meio de
+// uma sessao cifrada -- o servidor derrubaria a conexao com um erro de
+// protocolo que nao aponta para a causa.
+Status Connection::write_raw(std::span<const std::byte> data) {
+    if (tls_active_) return tls_.write_all(socket_, data);
+    return socket_.write_all(data);
+}
+
+Status Connection::read_raw(std::span<std::byte> buffer) {
+    if (tls_active_) return tls_.read_exact(socket_, buffer);
+    return socket_.read_exact(buffer);
 }
 
 Result<std::vector<std::byte>> Connection::receive_packet() {
@@ -160,7 +180,7 @@ Result<std::vector<std::byte>> Connection::receive_packet() {
     // so' aparece em producao.
     for (;;) {
         std::array<std::byte, 4> header{};
-        if (const Status status = socket_.read_exact(header); !status) {
+        if (const Status status = read_raw(header); !status) {
             return std::unexpected(status.error().with_context("reading packet header"));
         }
 
@@ -176,7 +196,7 @@ Result<std::vector<std::byte>> Connection::receive_packet() {
 
         if (length > 0) {
             if (const Status status =
-                    socket_.read_exact(std::span(body).subspan(offset, length));
+                    read_raw(std::span(body).subspan(offset, length));
                 !status) {
                 return std::unexpected(status.error().with_context("reading packet body"));
             }
@@ -305,7 +325,59 @@ Status Connection::handshake(const ConnectParams& params) {
             "are out of scope (ADR 0010 targets 5.5+)"});
     }
 
+    if (params.use_tls) {
+        if (!(server_capabilities & cap_ssl)) {
+            if (params.require_tls) {
+                return std::unexpected(Error{
+                    Errc::not_supported,
+                    "server does not offer TLS (no CLIENT_SSL capability); "
+                    "the connection requires it"});
+            }
+            // Sem `require`, seguir em claro e' o que o usuario pediu -- mas
+            // quem ve' a barra de status vai ver `tls_active() == false`.
+        } else if (!net::tls_available()) {
+            if (params.require_tls) {
+                return std::unexpected(Error{
+                    Errc::not_supported,
+                    "TLS is not available in this build"});
+            }
+        } else if (const Status status = start_tls(params); !status) {
+            return std::unexpected(status.error());
+        }
+    }
+
     return authenticate(params, plugin, challenge);
+}
+
+// O upgrade do MySQL: um HandshakeResponse41 TRUNCADO -- so' o cabecalho de
+// 32 bytes, sem usuario nem senha -- e a partir do byte seguinte o aperto de
+// mao TLS. O `sequence_` NAO reinicia: o pacote de autenticacao que vem
+// depois, ja' cifrado, continua a mesma numeracao.
+Status Connection::start_tls(const ConnectParams& params) {
+    capabilities_ |= cap_ssl;
+
+    PacketWriter writer;
+    writer.put_u32(capabilities_);
+    writer.put_u32(static_cast<std::uint32_t>(kMaxPayload));
+    writer.put_u8(kCharsetUtf8Mb4);
+    writer.fill(23);
+
+    if (const Status status = send_packet(writer.body()); !status) {
+        return std::unexpected(
+            status.error().with_context("sending SSL request"));
+    }
+
+    net::TlsOptions options;
+    options.host                       = params.host;
+    options.allow_invalid_certificate  = params.allow_invalid_certificate;
+    options.allow_host_mismatch        = params.allow_invalid_certificate;
+
+    if (const Status status = tls_.handshake(socket_, options); !status) {
+        return std::unexpected(status.error().with_context(
+            "TLS handshake with " + params.host));
+    }
+    tls_active_ = true;
+    return {};
 }
 
 Status Connection::authenticate(const ConnectParams& params,
@@ -318,11 +390,22 @@ Status Connection::authenticate(const ConnectParams& params,
     } else if (plugin == kCachingSha2) {
         response = caching_sha2_response(params.password, challenge);
     } else if (plugin == kClearPassword) {
-        // Senha em claro so' faz sentido sobre TLS, que ainda nao temos.
-        return std::unexpected(Error{
-            Errc::not_supported,
-            "server requested mysql_clear_password, which sends the password "
-            "in the clear; C-Otter refuses it until TLS is implemented"});
+        // Senha em claro e' legitima -- e' como PAM e LDAP funcionam -- mas
+        // SO' dentro de um canal cifrado. Sem TLS, recusar e' a unica resposta
+        // correta: obedecer mandaria a senha do usuario pela rede em texto.
+        if (!tls_active_) {
+            return std::unexpected(Error{
+                Errc::not_supported,
+                "server requested mysql_clear_password, which sends the "
+                "password in the clear; enable TLS for this connection"});
+        }
+        std::vector<std::byte> clear;
+        clear.reserve(params.password.size() + 1);
+        for (const char c : params.password) {
+            clear.push_back(static_cast<std::byte>(c));
+        }
+        clear.push_back(std::byte{0});   // o plugin espera terminador
+        response = std::move(clear);
     } else {
         return std::unexpected(Error{
             Errc::not_supported,
@@ -419,9 +502,26 @@ Status Connection::finish_caching_sha2(const ConnectParams& params,
     // o MySQL 8 -- onde caching_sha2_password e' o padrao -- so' conectaria
     // depois de outro cliente ter conectado antes.
     //
-    // A senha vai cifrada com a chave publica RSA do servidor. Sobre TLS
-    // bastaria mandar em claro, mas ainda nao temos TLS, e mandar em claro
-    // sem ele seria expor a senha na rede.
+    // Sobre TLS o canal ja' protege a senha, e o protocolo manda envia-la em
+    // claro (com o terminador nulo) -- o caminho RSA nem e' aceito pelo
+    // servidor ai', que responde ao pedido de chave publica com erro.
+    if (tls_active_) {
+        PacketWriter clear;
+        clear.put_bytes(std::as_bytes(std::span(params.password)));
+        clear.put_u8(0);
+        if (const Status status = send_packet(clear.body()); !status) {
+            return std::unexpected(status.error());
+        }
+        const Result<std::vector<std::byte>> ok = receive_packet();
+        if (!ok) return std::unexpected(ok.error());
+        if (!ok->empty() && static_cast<std::uint8_t>((*ok)[0]) == 0xFF) {
+            return std::unexpected(error_from(*ok));
+        }
+        return {};
+    }
+
+    // Sem TLS, a senha vai cifrada com a chave publica RSA do servidor --
+    // manda-la em claro aqui a exporia na rede.
 
     // 0x02 pede a chave publica. O servidor so' aceita o pedido quando NAO
     // ofereceu a chave junto -- que e' o nosso caso, por nao usarmos TLS.

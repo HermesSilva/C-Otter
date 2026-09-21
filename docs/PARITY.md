@@ -53,7 +53,7 @@ Distribuição dos 275 comandos por área:
 | Credenciais em cofre do SO (DPAPI/libsecret) | ✅ | ⬜ |
 | Pastas de organização de conexões | ✅ | ⬜ |
 | Túnel SSH | ✅ | ⬜ |
-| TLS/SSL | ✅ | ⬜ |
+| TLS/SSL | ✅ | ✅ Schannel no Windows; Linux pendente (ADR 0009) |
 | Teste de conexão antes de salvar | ✅ | ⬜ |
 | Conexão somente-leitura | ✅ | ⬜ |
 | ~50 SGBDs | ✅ | ➖ 2 de 5 previstos na v1 |
@@ -201,12 +201,21 @@ esses 77% valem. Ver `docs/MYSQL-MAP.md` (21 de 27 nós da árvore MySQL) e
 
 ## Próximos passos, por impacto
 
-1. **TLS** — destrava o `caching_sha2_password` sem RSA e as conexões remotas
+1. **TLS no Linux** — `lib/net/tls_openssl.cpp` ainda é esboço, e
+   `tls_available()` responde `false` lá: a caixa "usar SSL" aparece desligada
+   em vez de falhar na conexão
 2. **Inserir e duplicar linha na grade** — excluir já funciona; o buffer de
    edição já comporta os três
 4. **Editar no painel de valor** — hoje ele só mostra; JSON e texto longo
    mereciam edição multilinha, que a célula não comporta
 5. **Savepoints na UI** — o driver já os implementa
+
+~~TLS no MySQL e no PostgreSQL~~ — **concluído em 2026-09-21** no Windows.
+Verificado contra o MySQL local (`spikes/dbeaver_import/tls_live.cpp`): o modo
+`require` negocia TLS 1.2 com `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384` e
+`verify-full` recusa o certificado autoassinado. **O caminho do PostgreSQL
+(`SSLRequest`) compila e segue o protocolo, mas NÃO foi verificado contra
+servidor** — não há perfil PostgreSQL local com senha salva.
 
 ~~Ligar `analyze_scope` à UI~~ — **concluído em 2026-09-21**.
 ~~Grade editável, transações, paginação, ordenação, filtro, abas, arquivo~~ —

@@ -23,17 +23,6 @@ const ConnectionTypeInfo& connection_type_info(ConnectionType type) {
     return kDevelopment;
 }
 
-const char* to_string(SslMode mode) noexcept {
-    switch (mode) {
-        case SslMode::disable:     return "disable";
-        case SslMode::allow:       return "allow";
-        case SslMode::prefer:      return "prefer";
-        case SslMode::require:     return "require";
-        case SslMode::verify_ca:   return "verify-ca";
-        case SslMode::verify_full: return "verify-full";
-    }
-    return "prefer";
-}
 
 std::string ConnectionProfile::effective_name() const {
     if (!name.empty()) return name;
@@ -50,6 +39,11 @@ ConnConfig ConnectionProfile::to_conn_config() const {
     config.user            = user;
     config.password        = password;
     config.connect_timeout = connect_timeout;
+
+    // O `enabled` e' o que a caixa da aba SSL controla; o modo so' vale
+    // quando ela esta' marcada. Sem esse teste, um perfil com a caixa
+    // desmarcada mas modo `require` gravado exigiria TLS sem a UI dizer.
+    config.ssl_mode = ssl.enabled ? ssl.mode : SslMode::disable;
     return config;
 }
 

@@ -9,6 +9,7 @@
 #include "base/error.hpp"
 #include "mywire/packet.hpp"
 #include "net/socket.hpp"
+#include "net/tls.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -26,6 +27,13 @@ struct ConnectParams {
     std::string   user;
     std::string   password;
     std::chrono::milliseconds timeout{10000};
+
+    // TLS. `require` faz a conexao FALHAR quando o servidor nao oferece --
+    // o contrario (tentar e seguir em claro) daria ao usuario a impressao de
+    // estar protegido quando nao esta'.
+    bool          use_tls = false;
+    bool          require_tls = false;
+    bool          allow_invalid_certificate = false;
 };
 
 // Tipos de coluna do MySQL, de `enum_field_types`. Precisamos deles para
@@ -144,6 +152,14 @@ public:
         return connection_id_;
     }
     [[nodiscard]] std::uint16_t server_status() const noexcept { return status_; }
+
+    // A conexao esta' cifrada? A barra de status mostra, porque "conectado"
+    // sem dizer se e' em claro esconde a informacao que mais importa numa
+    // conexao remota.
+    [[nodiscard]] bool tls_active() const noexcept { return tls_active_; }
+    [[nodiscard]] const net::TlsInfo& tls_info() const noexcept {
+        return tls_.info();
+    }
     [[nodiscard]] std::int64_t last_affected_rows() const noexcept {
         return affected_rows_;
     }
@@ -153,6 +169,9 @@ public:
 
 private:
     [[nodiscard]] Status  send_packet(std::span<const std::byte> body);
+    [[nodiscard]] Status  write_raw(std::span<const std::byte> data);
+    [[nodiscard]] Status  read_raw(std::span<std::byte> buffer);
+    [[nodiscard]] Status  start_tls(const ConnectParams& params);
     [[nodiscard]] Status  send_command(Command command, std::string_view argument);
     [[nodiscard]] Result<std::vector<std::byte>> receive_packet();
 
@@ -166,7 +185,12 @@ private:
     // Transforma um pacote ERR em erro nosso, preservando o codigo do MySQL.
     [[nodiscard]] Error error_from(std::span<const std::byte> body) const;
 
-    net::Socket socket_;
+    net::Socket     socket_;
+
+    // Quando o TLS esta' ativo, TODO trafego passa por aqui. O socket
+    // continua sendo o dono da conexao -- o canal so' cifra.
+    net::TlsChannel tls_;
+    bool            tls_active_ = false;
     std::uint8_t  sequence_     = 0;
     std::uint32_t capabilities_ = 0;
     std::uint32_t connection_id_ = 0;

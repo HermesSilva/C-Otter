@@ -15,6 +15,7 @@ add_executable(otter_tests
     test_format.cpp
     test_i18n.cpp
     test_icons.cpp
+    test_ssl_mode.cpp
     test_mywire.cpp
     test_paging.cpp
     test_pgwire.cpp

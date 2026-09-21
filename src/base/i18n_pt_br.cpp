@@ -536,8 +536,20 @@ const char* const kPtBr[] = {
     "Not implemented.",           "Não implementado.",
     "Not implemented - the configuration is saved, but the tunnel is not established.",
         "Não implementado — a configuração é salva, mas o túnel não é estabelecido.",
+    // A chave antiga ficou: um catalogo de traducao e' consultado por TEXTO,
+    // e remover a chave de uma versao anterior nao quebra nada -- mas manter
+    // custa uma linha e cobre um binario antigo lendo catalogo novo.
     "Not implemented - the protocol does not negotiate TLS yet.",
         "Não implementado — o protocolo ainda não negocia TLS.",
+    "TLS is not available in this build of C-Otter.",
+        "O TLS não está disponível nesta compilação do C-Otter.",
+    "This mode accepts an unencrypted connection. Use 'require' or stronger to actually require TLS.",
+        "Este modo aceita conexão sem criptografia. Use 'require' ou mais forte "
+        "para realmente exigir TLS.",
+    "Certificate files are saved but not used yet; validation uses the system certificate store.",
+        "Os arquivos de certificado são salvos, mas ainda não são usados; a "
+        "validação usa o repositório de certificados do sistema.",
+    "Encrypted connection",       "Conexão criptografada",
     "SSH host",                   "Host SSH",
     "Authentication##ssh",        "Autenticação##ssh",
     "Public key",                 "Chave pública",

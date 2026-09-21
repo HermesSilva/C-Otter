@@ -44,6 +44,8 @@ Connection::~Connection() { close(); }
 
 Connection::Connection(Connection&& other) noexcept
     : socket_(std::move(other.socket_)),
+      tls_(std::move(other.tls_)),
+      tls_active_(other.tls_active_),
       parameters_(std::move(other.parameters_)),
       transaction_status_(other.transaction_status_),
       backend_pid_(other.backend_pid_),
@@ -56,6 +58,8 @@ Connection& Connection::operator=(Connection&& other) noexcept {
     if (this != &other) {
         close();
         socket_             = std::move(other.socket_);
+        tls_                = std::move(other.tls_);
+        tls_active_         = other.tls_active_;
         parameters_         = std::move(other.parameters_);
         transaction_status_ = other.transaction_status_;
         backend_pid_        = other.backend_pid_;
@@ -71,19 +75,34 @@ void Connection::close() noexcept {
     if (socket_.is_open()) {
         // Terminate ('X'): encerramento limpo. Se falhar, fechamos assim mesmo.
         MessageWriter writer('X');
-        (void)socket_.write_all(writer.finish());
+        (void)write_raw(writer.finish());
+        tls_.close();
+        tls_active_ = false;
         socket_.close();
     }
 }
 
 Status Connection::send(std::span<const std::byte> data) {
+    return write_raw(data);
+}
+
+// Todo o trafego passa por estes dois. Depois do upgrade, escrever no socket
+// direto mandaria texto em claro no meio de uma sessao cifrada -- e o
+// servidor derrubaria a conexao com um erro que nao aponta para a causa.
+Status Connection::write_raw(std::span<const std::byte> data) {
+    if (tls_active_) return tls_.write_all(socket_, data);
     return socket_.write_all(data);
+}
+
+Status Connection::read_raw(std::span<std::byte> buffer) {
+    if (tls_active_) return tls_.read_exact(socket_, buffer);
+    return socket_.read_exact(buffer);
 }
 
 Result<Connection::Incoming> Connection::receive() {
     // Cabecalho: [tipo: 1][tamanho: 4]. O tamanho inclui os proprios 4 bytes.
     std::array<std::byte, 5> header{};
-    OTTER_RETURN_IF_ERROR(socket_.read_exact(header));
+    OTTER_RETURN_IF_ERROR(read_raw(header));
 
     Incoming message;
     message.type = static_cast<char>(header[0]);
@@ -107,7 +126,7 @@ Result<Connection::Incoming> Connection::receive() {
 
     message.body.resize(length - 4);
     if (!message.body.empty()) {
-        OTTER_RETURN_IF_ERROR(socket_.read_exact(message.body));
+        OTTER_RETURN_IF_ERROR(read_raw(message.body));
     }
     return message;
 }
@@ -120,6 +139,10 @@ Result<Connection> Connection::connect(const ConnectParams& params) {
     conn.socket_ = std::move(socket);
     conn.host_   = params.host;
     conn.port_   = params.port;
+
+    if (params.use_tls) {
+        OTTER_RETURN_IF_ERROR(conn.start_tls(params));
+    }
 
     // StartupMessage nao tem byte de tipo.
     MessageWriter startup(0);
@@ -140,6 +163,58 @@ Result<Connection> Connection::connect(const ConnectParams& params) {
     OTTER_RETURN_IF_ERROR(conn.authenticate(params));
 
     return conn;
+}
+
+// O upgrade do PostgreSQL: um SSLRequest -- mensagem SEM byte de tipo, com o
+// "numero de versao" magico 80877103 -- e uma resposta de UM byte: 'S' aceita,
+// 'N' recusa. E' o unico ponto do protocolo em que a resposta nao e' uma
+// mensagem com cabecalho, e por isso le-se o byte cru.
+Status Connection::start_tls(const ConnectParams& params) {
+    constexpr std::int32_t kSslRequestCode = 80877103;
+
+    MessageWriter request(0);
+    request.put_int32(kSslRequestCode);
+    OTTER_RETURN_IF_ERROR(socket_.write_all(request.finish()));
+
+    std::array<std::byte, 1> answer{};
+    OTTER_RETURN_IF_ERROR(socket_.read_exact(answer));
+
+    const char reply = static_cast<char>(answer[0]);
+    if (reply == 'N') {
+        // O servidor recusou. Seguir em claro e' valido -- o StartupMessage
+        // ainda nao foi enviado, o fluxo esta' intacto -- mas so' quando o
+        // usuario nao exigiu TLS.
+        if (params.require_tls) {
+            return fail(Errc::not_supported,
+                        "o servidor não aceita TLS (resposta 'N' ao "
+                        "SSLRequest), e a conexão o exige");
+        }
+        return {};
+    }
+    if (reply != 'S') {
+        // 'E' aqui e' um ErrorResponse de servidor antigo demais para o
+        // SSLRequest. Qualquer outro byte e' fluxo corrompido.
+        return fail(Errc::protocol_error,
+                    std::string("resposta inesperada ao SSLRequest: '") +
+                        reply + "'");
+    }
+
+    if (!net::tls_available()) {
+        return fail(Errc::not_supported,
+                    "TLS não está disponível nesta compilação");
+    }
+
+    net::TlsOptions options;
+    options.host                      = params.host;
+    options.allow_invalid_certificate = params.allow_invalid_certificate;
+    options.allow_host_mismatch       = params.allow_invalid_certificate;
+
+    if (const Status status = tls_.handshake(socket_, options); !status) {
+        return std::unexpected(status.error().with_context(
+            "aperto de mão TLS com " + params.host));
+    }
+    tls_active_ = true;
+    return {};
 }
 
 Status Connection::authenticate(const ConnectParams& params) {

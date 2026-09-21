@@ -6,6 +6,7 @@
 
 #include "base/error.hpp"
 #include "net/socket.hpp"
+#include "net/tls.hpp"
 #include "pgwire/message.hpp"
 
 #include <chrono>
@@ -26,6 +27,12 @@ struct ConnectParams {
     std::string   password;
     std::string   application_name = "C-Otter";
     std::chrono::milliseconds timeout{10000};
+
+    // TLS. `require` faz a conexao FALHAR quando o servidor recusa -- o
+    // contrario daria ao usuario a impressao de estar protegido sem estar.
+    bool          use_tls = false;
+    bool          require_tls = false;
+    bool          allow_invalid_certificate = false;
 };
 
 // Descricao de uma coluna, vinda de RowDescription.
@@ -85,6 +92,12 @@ public:
         return affected_rows_;
     }
 
+    // A conexao esta' cifrada? A barra de status precisa dizer.
+    [[nodiscard]] bool tls_active() const noexcept { return tls_active_; }
+    [[nodiscard]] const net::TlsInfo& tls_info() const noexcept {
+        return tls_.info();
+    }
+
 private:
     struct Incoming {
         char                   type = 0;
@@ -92,6 +105,9 @@ private:
     };
 
     [[nodiscard]] Status send(std::span<const std::byte> data);
+    [[nodiscard]] Status write_raw(std::span<const std::byte> data);
+    [[nodiscard]] Status read_raw(std::span<std::byte> buffer);
+    [[nodiscard]] Status start_tls(const ConnectParams& params);
     [[nodiscard]] Result<Incoming> receive();
     [[nodiscard]] Status authenticate(const ConnectParams& params);
     [[nodiscard]] Status handle_sasl(const ConnectParams& params,
@@ -99,7 +115,12 @@ private:
     [[nodiscard]] Status handle_md5(const ConnectParams& params,
                                     std::span<const std::byte> body);
 
-    net::Socket socket_;
+    net::Socket     socket_;
+
+    // Com TLS ativo todo trafego passa pelo canal; o socket segue dono da
+    // conexao e so' transporta os bytes cifrados.
+    net::TlsChannel tls_;
+    bool            tls_active_ = false;
     std::map<std::string, std::string> parameters_;
     TransactionStatus transaction_status_ = TransactionStatus::idle;
 

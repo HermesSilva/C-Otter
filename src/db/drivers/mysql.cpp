@@ -246,6 +246,14 @@ public:
         return conn_.server_version();
     }
 
+    [[nodiscard]] std::string secure_channel() const override {
+        if (!conn_.tls_active()) return {};
+        const auto& info = conn_.tls_info();
+        std::string text = info.protocol;
+        if (!info.cipher.empty()) text += ", " + info.cipher;
+        return text;
+    }
+
     // No MySQL o banco corrente FAZ o papel do schema: nao existe nivel
     // intermediario. Devolver "public" aqui, como no PostgreSQL, apontaria
     // para um schema que nao existe.
@@ -370,6 +378,12 @@ public:
         params.password = config.password;
         params.timeout  = std::chrono::duration_cast<std::chrono::milliseconds>(
             config.connect_timeout);
+
+        // `require` implica exigir: se o servidor nao oferecer TLS, a conexao
+        // falha em vez de cair em claro sem avisar.
+        params.use_tls     = config.ssl_enabled();
+        params.require_tls = config.ssl_enabled();
+        params.allow_invalid_certificate = !config.ssl_verifies_certificate();
 
         OTTER_ASSIGN_OR_RETURN(auto conn, mywire::Connection::connect(params));
 

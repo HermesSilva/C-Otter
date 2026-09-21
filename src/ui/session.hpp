@@ -92,6 +92,10 @@ public:
     // enquanto o worker pode estar escrevendo.
     [[nodiscard]] std::string status_message() const;
     [[nodiscard]] std::string server_version() const;
+
+    // "TLS 1.3, AES_256_GCM" quando cifrado; vazio em claro. E' o que a barra
+    // de status usa para decidir se mostra o cadeado.
+    [[nodiscard]] std::string secure_channel() const;
     [[nodiscard]] std::string database_name() const;
 
     // Pastas que o SGBD conectado oferece. Uma pasta que ele NAO tem nao deve

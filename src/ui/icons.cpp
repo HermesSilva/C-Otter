@@ -279,6 +279,27 @@ void draw_clock(const Canvas& c) {
     c.line(0.0f, 0.0f, 0.14f, 0.08f);
 }
 
+// Cadeado: arco por cima, corpo retangular por baixo. O arco NAO fecha no
+// corpo -- deixar a fresta e' o que distingue o cadeado de uma bolsa a 14 px.
+void draw_lock(const Canvas& c) {
+    // O arco fica INTEIRAMENTE acima do corpo. Duas versões anteriores o
+    // centraram dentro da caixa e o resultado lia como envelope: a alça
+    // aparecia como o vinco do papel, não como argola de cadeado. O que
+    // distingue os dois à distância é o vão entre a alça e a caixa.
+    // π a 2π, e não π a 0: os dois cobrem a mesma meia-volta, mas o ImGui
+    // percorre o intervalo NA ORDEM dada, e π→0 desenha a metade de BAIXO.
+    // Com ela, a alça caía dentro da caixa e o ícone lia como envelope.
+    c.dl->PathArcTo(c.at(0.0f, -0.06f), 0.17f * c.size, 3.1416f,
+                    2.0f * 3.1416f, 14);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+
+    // O corpo é mais LARGO que o arco: é esse degrau nos ombros que faz a
+    // silhueta ler como cadeado. Com as duas larguras iguais, o contorno vira
+    // um retângulo de topo abaulado.
+    c.rect(-0.28f, -0.06f, 0.28f, 0.32f, 0.06f);
+    c.line(0.0f, 0.06f, 0.0f, 0.19f);   // o segredo
+}
+
 void draw_filter(const Canvas& c) {
     c.dl->PathLineTo(c.at(-0.34f, -0.26f));
     c.dl->PathLineTo(c.at( 0.34f, -0.26f));
@@ -644,6 +665,7 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::error:         draw_error(c);         break;
         case Icon::info:          draw_info(c);          break;
         case Icon::clock:         draw_clock(c);         break;
+        case Icon::lock:          draw_lock(c);          break;
         case Icon::filter:        draw_filter(c);        break;
 
         case Icon::materialized_view: draw_materialized_view(c); break;

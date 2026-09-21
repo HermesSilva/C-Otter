@@ -1,4 +1,5 @@
 #include "ui/connection_dialog.hpp"
+#include "net/tls.hpp"
 #include "base/i18n.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
@@ -579,12 +580,23 @@ void ConnectionDialog::draw_tab_ssh() {
 void ConnectionDialog::draw_tab_ssl() {
     ImGui::BeginChild("##ssl", ImVec2(0, -80));
 
+    // O binario do Linux ainda nao tem TLS (tls_openssl.cpp e' um esboco).
+    // Deixar a caixa clicavel la' seria oferecer algo que falha so' na hora
+    // de conectar -- a diretiva 6 manda dizer na tela.
+    const bool available = net::tls_available();
+    if (!available) {
+        ImGui::TextColored(
+            col4(colors().warn),
+            TR("TLS is not available in this build of C-Otter."));
+        ImGui::Separator();
+    }
+
+    ImGui::BeginDisabled(!available);
     ImGui::Checkbox(TR("Use SSL"), &profile_.ssl.enabled);
-    ImGui::TextColored(col4(colors().warn),
-                       "Não implementado — o protocolo ainda não negocia TLS.");
+    ImGui::EndDisabled();
     ImGui::Separator();
 
-    ImGui::BeginDisabled(!profile_.ssl.enabled);
+    ImGui::BeginDisabled(!profile_.ssl.enabled || !available);
 
     static constexpr const char* kModes[] = {
         "disable", "allow", "prefer", "require", "verify-ca", "verify-full",
@@ -597,12 +609,31 @@ void ConnectionDialog::draw_tab_ssl() {
     help_marker("require exige criptografia; verify-ca valida o certificado do "
                 "servidor; verify-full valida também o nome do host.");
 
+    // allow e prefer significam "tenta cifrar, aceita em claro": protegem
+    // contra um escuta passivo e contra mais ninguem. Existem para nao perder
+    // o valor de um perfil importado do DBeaver, mas o C-Otter conecta em
+    // claro neles -- e quem escolhe precisa saber disso ANTES de conectar.
+    if (profile_.ssl.mode == db::SslMode::allow ||
+        profile_.ssl.mode == db::SslMode::prefer) {
+        ImGui::TextColored(
+            col4(colors().warn),
+            TR("This mode accepts an unencrypted connection. Use 'require' "
+               "or stronger to actually require TLS."));
+    }
+
     ImGui::SetNextItemWidth(400);
     input_string(TR("CA certificate"), profile_.ssl.root_cert_path, 260);
     ImGui::SetNextItemWidth(400);
     input_string(TR("Client certificate"), profile_.ssl.client_cert_path, 260);
     ImGui::SetNextItemWidth(400);
     input_string(TR("Client key"), profile_.ssl.client_key_path, 260);
+
+    // Estes tres campos sao gravados e lidos -- um perfil importado do
+    // DBeaver nao os perde -- mas o aperto de mao ainda nao os usa: a
+    // validacao vai pela cadeia de certificados do sistema.
+    ImGui::TextColored(col4(colors().warn),
+                       TR("Certificate files are saved but not used yet; "
+                          "validation uses the system certificate store."));
 
     ImGui::EndDisabled();
     ImGui::EndChild();
