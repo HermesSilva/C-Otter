@@ -794,6 +794,11 @@ const char* const kPtBr[] = {
     "Rename tab",                 "Renomear aba",
     "Empty restores the default name.",
         "Vazio volta ao nome padrão.",
+
+    // --- Contagem sob demanda ---
+    "of %zu",                     "de %zu",
+    "Count the whole result (one more full scan)",
+        "Contar o resultado inteiro (mais uma varredura completa)",
 };
 
 } // namespace

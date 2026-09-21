@@ -365,7 +365,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | Intervalo de linhas exibido | ✅ | `linhas 401-600 +` — o `+` indica que há mais |
 | SQL paginado auditável | ✅ | O inspetor mostra o `LIMIT`/`OFFSET` efetivamente executado |
 | `LIMIT` do usuário respeitado | ✅ | Consulta com `LIMIT` próprio não é reescrita |
-| Total exato de linhas | ⬜ | Exigiria `COUNT(*)`; a grade mostra `+` em vez de número falso |
+| **Total exato de linhas** | 🟡 | O `+` virou botão que conta sob demanda (`resultset.count`). SQL e recusas cobertos por teste; **o número na tela não foi confirmado** — a automação não conseguiu encadear conectar+executar+clicar |
 | **Visão de registro único** | ✅ | `Tab`; nome/valor/tipo, com a chave primária marcada |
 | **Seleção de célula** | ✅ | Clique simples; setas, Home/End, PageUp/PageDown navegam |
 | **Teclas de edição na grade** | ✅ | `Enter`, `Alt+Insert`, `Alt+Delete`, `Esc` — 7 de 47 do DBeaver (`docs/GRID-KEYS.md`) |
@@ -414,7 +414,7 @@ um de MySQL ao lado de um de PostgreSQL, sem nada distinguindo.
 | **Indicador de transação aberta** | ✅ | Na barra, com glow quando há transação |
 | **Gravação de edições em transação** | ✅ | Ou tudo, ou nada — mesmo em autocommit |
 | **Aviso ao fechar com alterações pendentes** | ✅ | Menu Sair, `Alt+F4` e o `X` da janela; diz quantos scripts e quantas células |
-| Savepoints na UI | ⬜ | O driver os implementa (`Holt::savepoint`); falta a tela |
+| Savepoints na UI | ➖ | **O DBeaver também não os expõe** — busca por `savepoint` nos `plugin.xml` não acha comando nenhum; ele os usa internamente e os filtra do log (`SQLLogFilter.java:43`). O driver os implementa (`Holt::savepoint`); criar uma tela aqui seria divergir sem paridade a ganhar |
 
 ---
 

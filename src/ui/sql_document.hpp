@@ -99,6 +99,16 @@ public:
     [[nodiscard]] bool has_more() const noexcept { return has_more_; }
     void set_has_more(bool more) noexcept { has_more_ = more; }
 
+    // Total de linhas do resultado inteiro, quando o usuario pediu a
+    // contagem (o `resultset.count` do DBeaver).
+    //
+    // `optional` e nao um sentinela: "ainda nao contei" e "contei e deu zero"
+    // sao estados diferentes, e zero e' um total legitimo.
+    [[nodiscard]] const std::optional<std::size_t>& total_rows() const noexcept {
+        return total_rows_;
+    }
+    void set_total_rows(std::size_t total) noexcept { total_rows_ = total; }
+
     // Ordenacao pedida no cabecalho da grade. Vai para o servidor junto com
     // a pagina: ordenar so' as 200 linhas visiveis daria a ordem errada.
     [[nodiscard]] const sql::SortOrder& sort() const noexcept { return sort_; }
@@ -183,6 +193,9 @@ public:
         has_more_ = false;
         sort_     = {};
         filter_   = {};
+        // A contagem pertence a UMA consulta: mante-la apos executar outra
+        // exibiria o total da anterior ao lado das linhas da nova.
+        total_rows_.reset();
     }
 
 private:
@@ -207,6 +220,7 @@ private:
     db::EditTarget              edit_target_;
     db::GroupSpec               group_spec_;
     db::GroupResult             groups_;
+    std::optional<std::size_t>  total_rows_;
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

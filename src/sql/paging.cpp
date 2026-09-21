@@ -216,4 +216,64 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
     return result;
 }
 
+PagedQuery make_count_query(std::string_view sql, const Dialect& dialect,
+                            const ColumnFilter& filter) {
+    // Reusa a validacao inteira de make_paged_query: o que nao da' para
+    // paginar tambem nao da' para contar, e duplicar as regras faria as duas
+    // divergirem ao primeiro ajuste.
+    //
+    // Page 0 e page_size 1 sao arbitrarios -- so' o resultado da RECUSA
+    // interessa aqui; o SQL paginado e' descartado.
+    PagedQuery probe = make_paged_query(sql, dialect, /*page=*/0,
+                                        /*page_size=*/1, /*sort=*/{}, filter);
+
+    PagedQuery result;
+    result.sql     = std::string(sql);
+    result.refusal = probe.refusal;
+
+    // `already_limited` nao impede CONTAR: o usuario escreveu LIMIT 50, e
+    // "quantas linhas ha' no total" continua sendo uma pergunta valida --
+    // a resposta e' o que existe antes do limite dele.
+    //
+    // A subconsulta preserva o LIMIT, entao a contagem devolve no maximo 50.
+    // E' o numero certo: e' o tamanho do resultado que a grade esta'
+    // mostrando, que e' o que "contar o resultado" quer dizer.
+    if (probe.refusal != PagingRefusal::none &&
+        probe.refusal != PagingRefusal::already_limited) {
+        return result;
+    }
+
+    // Sem o ';' e sem os comentarios do fim: envolver "SELECT ... ;" numa
+    // subconsulta produz "... ;\n) AS otter_count", que o servidor recusa
+    // com "erro de sintaxe em ou proximo a ';'".
+    //
+    // O mesmo trim_trailing que make_paged_query usa -- e pela mesma razao:
+    // o texto do usuario termina como ele escreveu, nao como o SQL gerado
+    // precisa.
+    Lexer count_lexer(sql, dialect);
+    const std::vector<Token> count_tokens =
+        count_lexer.tokenize_all(/*skip_trivia=*/false);
+    const std::string inner(trim_trailing(sql, count_tokens));
+
+    std::string counted = "SELECT COUNT(*) FROM (\n" + inner +
+                          "\n) AS otter_count";
+
+    // O filtro entra na MESMA subconsulta, para a contagem bater com o que a
+    // grade exibe: contar sem filtrar daria o total da tabela enquanto a
+    // tela mostra o subconjunto.
+    if (!filter.empty()) {
+        counted += "\n WHERE \"";
+        for (const char c : filter.column) {
+            if (c == '"') counted += "\"\"";
+            else          counted.push_back(c);
+        }
+        counted += "\" " + filter.expression;
+    }
+
+    result.sql       = std::move(counted);
+    result.rewritten = true;
+    result.requested = 1;   // uma linha, uma coluna
+    return result;
+}
+
 } // namespace otter::sql

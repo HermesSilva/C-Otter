@@ -297,3 +297,86 @@ OTTER_TEST(paging_ignores_an_incomplete_filter) {
         make_paged_query("SELECT * FROM t", postgres_dialect(), 0, 200, {},
                          ColumnFilter{"", "> 5"}).sql, "WHERE"));
 }
+
+// --- Contagem sob demanda (resultset.count) ---------------------------------
+//
+// Por que existe: o COUNT vai para o servidor como SQL gerado, e um numero
+// errado e' pior que a ausencia dele -- o usuario decide se pagina ou refina
+// a consulta com base nele.
+
+OTTER_TEST(count_wraps_the_query_in_a_subquery) {
+    // Envolver, e nao anexar: a consulta pode ter WHERE, GROUP BY ou HAVING,
+    // e contar antes da agregacao daria um numero diferente do que a grade
+    // mostra.
+    const PagedQuery q = make_count_query("SELECT * FROM cliente",
+                                          postgres_dialect());
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "COUNT(*)"));
+    OTTER_CHECK(contains(q.sql, "SELECT * FROM cliente"));
+}
+
+OTTER_TEST(count_survives_group_by) {
+    // Com GROUP BY, o total e' o numero de GRUPOS -- que e' o que a grade
+    // exibe. Anexar WHERE aqui seria sintaxe invalida.
+    const PagedQuery q = make_count_query(
+        "SELECT pais, COUNT(*) FROM cliente GROUP BY pais", postgres_dialect());
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "GROUP BY pais"));
+}
+
+OTTER_TEST(count_applies_the_grid_filter) {
+    // Contar sem o filtro daria o total da tabela enquanto a tela mostra o
+    // subconjunto -- dois numeros discordando na mesma janela.
+    const PagedQuery q = make_count_query("SELECT * FROM cliente",
+                                          postgres_dialect(),
+                                          ColumnFilter{"credito", "> 0"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "\"credito\" > 0"));
+}
+
+OTTER_TEST(count_accepts_a_query_the_user_limited) {
+    // already_limited impede PAGINAR, nao CONTAR: "quantas linhas ha'"
+    // continua valida, e a resposta e' o tamanho do resultado exibido.
+    const PagedQuery q = make_count_query("SELECT * FROM cliente LIMIT 50",
+                                          postgres_dialect());
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "LIMIT 50"));
+}
+
+OTTER_TEST(count_refuses_what_paging_refuses) {
+    // Mesmas recusas: o que nao produz linhas nao tem o que contar.
+    OTTER_CHECK(!make_count_query("UPDATE t SET a = 1",
+                                  postgres_dialect()).rewritten);
+    OTTER_CHECK(!make_count_query("SELECT 1; SELECT 2",
+                                  postgres_dialect()).rewritten);
+    OTTER_CHECK(!make_count_query("", postgres_dialect()).rewritten);
+}
+
+OTTER_TEST(count_drops_the_trailing_semicolon) {
+    // Envolver "SELECT ... ;" numa subconsulta produz "... ;\n) AS
+    // otter_count", que o PostgreSQL recusa com 42601 -- "erro de sintaxe em
+    // ou proximo a ';'".
+    //
+    // Encontrado na tela: o paged_sql guarda a consulta como o usuario a
+    // escreveu, e o texto de boas-vindas termina com ';'.
+    const PagedQuery q = make_count_query("SELECT * FROM cliente;",
+                                          postgres_dialect());
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(!contains(q.sql, ";\n)"));
+    OTTER_CHECK(contains(q.sql, "cliente\n)"));
+}
+
+OTTER_TEST(count_drops_a_trailing_comment) {
+    // Mesma razao: o ") AS otter_count" cairia DENTRO do comentario de linha,
+    // e a subconsulta ficaria sem fechar.
+    const PagedQuery q = make_count_query(
+        "SELECT * FROM cliente -- ativos\n", postgres_dialect());
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(!contains(q.sql, "-- ativos"));
+}

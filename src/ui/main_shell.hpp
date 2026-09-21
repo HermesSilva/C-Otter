@@ -235,6 +235,14 @@ private:
     // Executa uma pagina da consulta guardada no documento (ADR 0011).
     void execute_page(SqlDocument& document, std::size_t page);
 
+    // Conta o resultado inteiro (o `resultset.count` do DBeaver). Sob
+    // demanda: e' outra varredura completa.
+    void count_total_rows(SqlDocument& document);
+
+    // Documento que espera uma contagem. O resultado chega pelo mesmo canal
+    // da grade, e sem a marca substituiria as linhas por uma celula.
+    std::size_t counting_document_id_ = 0;
+
     // --- Documentos (abas) ---------------------------------------------------
     SqlDocument& new_document();
     void close_document(std::size_t index);

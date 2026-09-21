@@ -981,6 +981,35 @@ void MainShell::execute_script() {
     target.execute_script_async(std::move(statements));
 }
 
+// Conta o resultado inteiro -- o `resultset.count` do DBeaver.
+//
+// Sob demanda, disparada pelo "+" ao lado do intervalo de linhas. Automatica
+// seria o oposto do que a paginacao existe para fazer: outra varredura
+// completa a cada consulta (ADR 0011).
+void MainShell::count_total_rows(SqlDocument& document) {
+    if (document.paged_sql().empty()) return;
+
+    Session& target = session_for(document);
+    if (target.state() != SessionState::connected || target.busy()) return;
+
+    const Connection* owner = connection_by_id(document.connection_id());
+    const sql::Dialect& dialect =
+        owner != nullptr ? sql::dialect_for(owner->profile.driver_id)
+                         : active_dialect();
+
+    const sql::PagedQuery counted =
+        sql::make_count_query(document.paged_sql(), dialect, document.filter());
+    if (!counted.rewritten) return;
+
+    // Marca ESTE documento como o que espera uma contagem. O resultado chega
+    // pelo mesmo canal da grade, e sem a marca ele substituiria as linhas
+    // exibidas por uma celula com o numero.
+    counting_document_id_ = document.id();
+    document.set_executing(true);
+
+    target.execute_async(counted.sql);
+}
+
 void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     // Caminho por onde TODA execucao passa -- e' aqui que a conexao errada
     // fazia mais estrago.
@@ -1066,6 +1095,36 @@ void MainShell::draw() {
     // A sessao do documento que executou, nao a ativa: o usuario pode ter
     // clicado noutra conexao enquanto a consulta corria, e colher o
     // resultado da sessao errada misturaria as duas grades.
+    // Contagem sob demanda: colhida ANTES do bloco da grade, senao o
+    // resultado de uma celula (o COUNT) substituiria as linhas exibidas.
+    if (counting_document_id_ != 0) {
+        for (auto& document : documents_) {
+            if (document->id() != counting_document_id_) continue;
+
+            Session& counter = session_for(*document);
+            if (counter.busy()) break;
+
+            if (auto result = counter.take_result();
+                result.has_value() && result->row_count() > 0 &&
+                result->column_count() > 0) {
+                // COUNT(*) devolve texto pelo protocolo; converter aqui
+                // evita depender do tipo que cada driver reporta.
+                const std::string text(result->text(0, 0));
+                try {
+                    document->set_total_rows(
+                        static_cast<std::size_t>(std::stoull(text)));
+                } catch (const std::exception&) {
+                    // Numero ilegivel: deixa sem total, e o "+" volta. Um
+                    // numero errado seria pior que a ausencia dele.
+                }
+            }
+
+            document->set_executing(false);
+            counting_document_id_ = 0;
+            break;
+        }
+    }
+
     Session* runner = nullptr;
     if (executing_document_id_ != 0) {
         for (auto& document : documents_) {
@@ -5372,12 +5431,34 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
             ImGui::TextColored(col4(p.text), TR("rows %zu-%zu"), first, last);
         }
 
-        // "+" em vez de um total: saber o total exigiria um COUNT(*), que
-        // varre a tabela outra vez (ADR 0011). Um numero inventado seria pior
-        // que a ausencia dele.
+        // "+" em vez de um total: saber o total exige um COUNT(*), que varre
+        // a tabela outra vez (ADR 0011). Um numero inventado seria pior que a
+        // ausencia dele.
+        //
+        // O "+" e' CLICAVEL e faz essa contagem sob demanda -- o
+        // `resultset.count` do DBeaver. Sob demanda, nunca automatica:
+        // dispara-la a cada consulta transformaria toda paginacao no custo
+        // que a paginacao existe para evitar.
+        if (document.has_more()) {
+            ImGui::SameLine();
+            if (document.total_rows().has_value()) {
+                ImGui::TextColored(col4(p.data), TR("of %zu"),
+                                   *document.total_rows());
+            } else {
+                ImGui::BeginDisabled(!can_run);
+                if (ImGui::SmallButton("+")) count_total_rows(document);
+                ImGui::EndDisabled();
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s",
+                                      TR("Count the whole result (one more "
+                                         "full scan)"));
+                }
+            }
+        }
+
         ImGui::SameLine();
-        ImGui::TextColored(col4(p.text_dim), "%s  |  %zu %s  |  %zu bytes",
-                           document.has_more() ? "+" : "",
+        ImGui::TextColored(col4(p.text_dim), "|  %zu %s  |  %zu bytes",
                            rs.column_count(), TR("column(s)"),
                            rs.bytes_used());
 

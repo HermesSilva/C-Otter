@@ -88,4 +88,25 @@ struct ColumnFilter {
                                           const SortOrder& sort = {},
                                           const ColumnFilter& filter = {});
 
+// Monta a consulta que conta o resultado INTEIRO -- o `resultset.count` do
+// DBeaver.
+//
+// Sob demanda, nunca automatica: e' outra varredura completa da tabela, e
+// dispara-la a cada consulta transformaria toda paginacao no custo que a
+// paginacao existe para evitar (ADR 0011). A grade mostra "+" ate' que se
+// peca o numero.
+//
+// Envolve a consulta numa subconsulta, pelas mesmas tres razoes do filtro:
+// a original pode ter WHERE, pode terminar em GROUP BY, e contar antes da
+// agregacao daria um numero diferente do que a grade mostra.
+//
+// O ORDER BY do usuario fica DENTRO da subconsulta. E' inofensivo para a
+// contagem, e remove-lo exigiria reescrever o SQL dele.
+//
+// Usa as MESMAS recusas de make_paged_query: o que nao da' para paginar
+// tambem nao da' para contar.
+[[nodiscard]] PagedQuery make_count_query(std::string_view sql,
+                                          const Dialect& dialect,
+                                          const ColumnFilter& filter = {});
+
 } // namespace otter::sql
