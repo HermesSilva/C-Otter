@@ -279,7 +279,9 @@ Reescrito em 2026-09-21 seguindo o assistente do DBeaver: catálogo de drivers +
 | **Bytes em memória** | ✅ | Não existe no DBeaver |
 | Rolagem horizontal | ✅ | |
 | Mensagem de comando sem resultado | ✅ | Com linhas afetadas |
-| Ordenar pelo cabeçalho | ⬜ | |
+| **Ordenar pelo cabeçalho** | ✅ | No **servidor** — com paginação, ordenar no cliente daria a ordem errada |
+| Terceiro clique remove a ordenação | ✅ | `SortTristate`; volta à ordem do servidor |
+| `ORDER BY` do usuário respeitado | ✅ | Consulta com ordem própria não é sobreposta |
 | Selecionar célula / linha | ⬜ | |
 | Copiar célula | ⬜ | |
 | **Editar célula** | ⬜ | |
@@ -469,7 +471,7 @@ build\win-release\bin\c-otter.exe
 tools\screenshot.ps1 -Out arvore.png
 ```
 
-Testes automatizados (164, todos verdes):
+Testes automatizados (170, todos verdes):
 
 ```powershell
 build\win-release\bin\otter_tests.exe

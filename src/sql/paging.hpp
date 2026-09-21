@@ -44,6 +44,18 @@ struct PagedQuery {
     std::size_t requested = 0;
 };
 
+// Ordenacao pedida pelo cabecalho da grade.
+//
+// Vai para o SERVIDOR, nao para o cliente: com paginacao, ordenar as 200
+// linhas da pagina daria a ordem errada -- seriam as 200 primeiras linhas na
+// ordem do banco, reordenadas entre si, e nao as 200 menores do resultado.
+struct SortOrder {
+    std::string column;         // vazio = sem ordenacao
+    bool        descending = false;
+
+    [[nodiscard]] bool empty() const noexcept { return column.empty(); }
+};
+
 // Monta a consulta de uma pagina.
 //
 // `page` e' base zero. Quando a consulta nao pode ser reescrita com seguranca,
@@ -52,6 +64,7 @@ struct PagedQuery {
 [[nodiscard]] PagedQuery make_paged_query(std::string_view sql,
                                           const Dialect& dialect,
                                           std::size_t page,
-                                          std::size_t page_size = kDefaultPageSize);
+                                          std::size_t page_size = kDefaultPageSize,
+                                          const SortOrder& sort = {});
 
 } // namespace otter::sql

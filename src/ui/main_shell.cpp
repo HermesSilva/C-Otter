@@ -431,9 +431,13 @@ void MainShell::execute_current_sql() {
     std::string sql = document->sql_to_execute();
     if (sql.empty()) return;
 
-    // Nova consulta: volta para a primeira pagina.
+    // Nova consulta: volta para a primeira pagina e descarta a ordenacao.
+    //
+    // Manter a coluna de ordenacao seria errado -- a consulta nova pode nem
+    // ter essa coluna, e o servidor rejeitaria o ORDER BY.
     document->set_paged_sql(sql);
     document->set_page(0);
+    document->set_sort({});
     execute_page(*document, 0);
 }
 
@@ -446,7 +450,8 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
     // reescrever, executa o original: rodar algo diferente do que o usuario
     // escreveu seria pior que a espera.
     const sql::PagedQuery paged = sql::make_paged_query(
-        document.paged_sql(), sql::postgres_dialect(), page);
+        document.paged_sql(), sql::postgres_dialect(), page,
+        sql::kDefaultPageSize, document.sort());
 
     document.set_page(page);
     document.set_paged(paged.rewritten);
@@ -1891,7 +1896,11 @@ void MainShell::draw_grid_panel() {
             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
             ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
-            ImGuiTableFlags_SizingFixedFit;
+            ImGuiTableFlags_SizingFixedFit |
+            // Sortable so' marca o cabecalho como clicavel e guarda o pedido.
+            // A ordenacao em si e' nossa, no servidor -- SortTristate permite
+            // um terceiro clique que volta a' ordem original.
+            ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
 
         // O ImGui nao desenha mais de 64 colunas numa tabela. Truncar em
         // silencio faria o usuario concluir que a consulta devolveu menos
@@ -1918,10 +1927,52 @@ void MainShell::draw_grid_panel() {
             ImGui::TableSetupScrollFreeze(1, 1);   // cabecalho e 1a coluna fixos
 
             for (int c = 0; c < columns; ++c) {
+                // Sem DefaultSort: a ordem inicial e' a do servidor. Ordenar
+                // sem o usuario pedir esconderia a ordem natural do resultado,
+                // que num SELECT com ORDER BY proprio e' justamente o ponto.
                 ImGui::TableSetupColumn(
                     rs.column(static_cast<std::size_t>(c)).info().name.c_str());
             }
             ImGui::TableHeadersRow();
+
+            // A ordenacao acontece no SERVIDOR, refazendo a consulta: ordenar
+            // no cliente reordenaria apenas as 200 linhas da pagina, o que
+            // daria uma ordem que nao existe no resultado completo.
+            //
+            // O ImGui so' avisa que o pedido mudou; nos executamos.
+            if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
+                specs != nullptr && specs->SpecsDirty) {
+                specs->SpecsDirty = false;
+
+                // Ordenar exige refazer a consulta, o que so' faz sentido
+                // quando ela e' paginada -- um resultado completo ja' esta'
+                // todo na tela, e reexecutar seria custo sem ganho.
+                if (document->paged() && !session().busy()) {
+                    sql::SortOrder order;
+
+                    // SpecsCount == 0 com SortTristate: o terceiro clique
+                    // removeu a ordenacao. SortOrder vazio volta a' ordem
+                    // original do servidor.
+                    if (specs->SpecsCount > 0) {
+                        const ImGuiTableColumnSortSpecs& spec = specs->Specs[0];
+                        const auto index =
+                            static_cast<std::size_t>(spec.ColumnIndex);
+                        if (index < rs.column_count()) {
+                            order.column     = rs.column(index).info().name;
+                            order.descending =
+                                spec.SortDirection == ImGuiSortDirection_Descending;
+                        }
+                    }
+
+                    if (order.column != document->sort().column ||
+                        order.descending != document->sort().descending) {
+                        document->set_sort(std::move(order));
+                        // Volta para a primeira pagina: continuar na pagina 5
+                        // de uma ordem diferente nao corresponde a nada.
+                        execute_page(*document, 0);
+                    }
+                }
+            }
 
             // Virtualizacao: so' as linhas visiveis sao desenhadas. E' o que
             // torna 1M linhas viavel (ADR 0005).

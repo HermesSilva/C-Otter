@@ -149,3 +149,72 @@ OTTER_TEST(paging_refuses_empty_input) {
     OTTER_CHECK(page_of("   \n  -- so um comentario\n").refusal ==
                 PagingRefusal::empty);
 }
+
+// --- Ordenacao pelo cabecalho -----------------------------------------------
+
+OTTER_TEST(paging_adds_order_by_before_the_limit) {
+    // A ordem importa duas vezes: a gramatica exige ORDER antes de LIMIT, e o
+    // sentido tambem -- limitar primeiro daria as 200 primeiras linhas na
+    // ordem do banco, depois reordenadas entre si.
+    const PagedQuery q = make_paged_query("SELECT * FROM cliente",
+                                          postgres_dialect(), 0, 200,
+                                          SortOrder{"nome", false});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"nome\" ASC"));
+
+    const std::size_t order_pos = q.sql.find("ORDER BY");
+    const std::size_t limit_pos = q.sql.find("LIMIT");
+    OTTER_CHECK(order_pos < limit_pos);
+}
+
+OTTER_TEST(paging_sorts_descending_when_asked) {
+    const PagedQuery q = make_paged_query("SELECT * FROM cliente",
+                                          postgres_dialect(), 0, 200,
+                                          SortOrder{"credito", true});
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"credito\" DESC"));
+}
+
+OTTER_TEST(paging_quotes_the_sort_column) {
+    // Coluna chamada "order" ou com maiuscula quebraria a consulta sem aspas.
+    const PagedQuery reserved = make_paged_query(
+        "SELECT * FROM t", postgres_dialect(), 0, 200, SortOrder{"order"});
+    OTTER_CHECK(contains(reserved.sql, "ORDER BY \"order\" ASC"));
+
+    const PagedQuery mixed = make_paged_query(
+        "SELECT * FROM t", postgres_dialect(), 0, 200,
+        SortOrder{"TIDxAcaoSensivelID"});
+    OTTER_CHECK(contains(mixed.sql, "\"TIDxAcaoSensivelID\""));
+}
+
+OTTER_TEST(paging_keeps_the_users_own_order_by) {
+    // Dois ORDER BY na mesma consulta sao erro de sintaxe, e sobrepor o do
+    // usuario executaria algo diferente do que esta' na tela.
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM cliente ORDER BY criado_em DESC",
+        postgres_dialect(), 0, 200, SortOrder{"nome"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "ORDER BY criado_em DESC"));
+    OTTER_CHECK(!contains(q.sql, "\"nome\""));
+
+    // E continua paginando: so' a ordenacao da grade foi ignorada.
+    OTTER_CHECK(contains(q.sql, "LIMIT 201"));
+}
+
+OTTER_TEST(paging_ignores_order_by_inside_a_subquery) {
+    // O ORDER BY e' da subconsulta; a externa continua sem ordem, e a
+    // ordenacao da grade e' legitima.
+    const PagedQuery q = make_paged_query(
+        "SELECT * FROM (SELECT * FROM t ORDER BY id) s",
+        postgres_dialect(), 0, 200, SortOrder{"nome"});
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"nome\" ASC"));
+}
+
+OTTER_TEST(paging_without_sort_produces_no_order_by) {
+    const PagedQuery q = page_of("SELECT * FROM cliente");
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(!contains(q.sql, "ORDER BY"));
+}

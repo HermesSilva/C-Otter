@@ -66,6 +66,20 @@ que finge funcionar.
 Quando a consulta foi reescrita, o inspetor de queries mostra o SQL **efetivamente
 executado**, com o `LIMIT` acrescentado. O usuário precisa poder auditar o que rodou.
 
+## Ordenação (acrescentado em 2026-09-21)
+
+Clicar no cabeçalho da grade reescreve a consulta com `ORDER BY`, no mesmo
+mecanismo. **A ordenação tem que ir para o servidor**: com paginação, ordenar as
+200 linhas visíveis produziria as 200 primeiras linhas na ordem do banco,
+reordenadas entre si — que não são as 200 menores do resultado.
+
+O `ORDER BY` vai **antes** do `LIMIT`, como exige a gramática. Uma consulta que já
+tem `ORDER BY` de nível externo não é reordenada: dois `ORDER BY` são erro de
+sintaxe, e sobrepor o do usuário executaria algo diferente do que está na tela.
+
+O custo aparece no inspetor: contra 2 milhões de linhas sem índice, ordenar levou
+76 ms contra 0,88 ms sem ordenação.
+
 ## Consequências
 
 - A UI não trava mais com `SELECT` sem `LIMIT`

@@ -9,6 +9,7 @@
 #include "TextEditor.h"
 
 #include "db/result_set.hpp"
+#include "sql/paging.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -81,11 +82,17 @@ public:
     [[nodiscard]] bool has_more() const noexcept { return has_more_; }
     void set_has_more(bool more) noexcept { has_more_ = more; }
 
+    // Ordenacao pedida no cabecalho da grade. Vai para o servidor junto com
+    // a pagina: ordenar so' as 200 linhas visiveis daria a ordem errada.
+    [[nodiscard]] const sql::SortOrder& sort() const noexcept { return sort_; }
+    void set_sort(sql::SortOrder sort) { sort_ = std::move(sort); }
+
     void reset_paging() {
         paged_sql_.clear();
         page_     = 0;
         paged_    = false;
         has_more_ = false;
+        sort_     = {};
     }
 
 private:
@@ -96,6 +103,7 @@ private:
     std::string                 status_;
     std::optional<db::ResultSet> result_;
     std::string                 paged_sql_;
+    sql::SortOrder              sort_;
     std::size_t                 page_ = 0;
     std::size_t                 save_point_ = 0;
     bool                        pinned_ = false;

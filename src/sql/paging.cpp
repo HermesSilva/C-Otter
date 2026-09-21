@@ -52,7 +52,8 @@ std::string_view to_string(PagingRefusal refusal) noexcept {
 }
 
 PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
-                            std::size_t page, std::size_t page_size) {
+                            std::size_t page, std::size_t page_size,
+                            const SortOrder& sort) {
     PagedQuery result;
     result.sql = std::string(sql);
 
@@ -101,6 +102,7 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
     // recusar por causa dele deixaria a consulta externa sem limite.
     int depth = 0;
     bool has_outer_limit = false;
+    bool has_outer_order = false;
     bool saw_statement_end = false;
 
     for (const Token& token : tokens) {
@@ -135,6 +137,11 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
                 iequals(token.text, "OFFSET")) {
                 has_outer_limit = true;
             }
+            // ORDER de nivel externo: a ordenacao da grade seria acrescentada
+            // depois, e dois ORDER BY na mesma consulta sao erro de sintaxe.
+            if (iequals(token.text, "ORDER")) {
+                has_outer_order = true;
+            }
         }
     }
 
@@ -156,6 +163,25 @@ PagedQuery make_paged_query(std::string_view sql, const Dialect& dialect,
     const std::size_t requested = page_size + 1;
 
     std::string paged(trim_trailing(sql, tokens));
+
+    // ORDER BY antes do LIMIT -- e' a ordem exigida pela gramatica, e o
+    // sentido tambem: limitar primeiro daria as 200 primeiras linhas na ordem
+    // do banco, depois reordenadas entre si.
+    //
+    // Um ORDER BY que o usuario escreveu tem precedencia: dois ORDER BY na
+    // mesma consulta sao erro de sintaxe, e sobrepor o dele seria executar
+    // algo diferente do que esta' na tela.
+    if (!sort.empty() && !has_outer_order) {
+        // O nome vem do cabecalho da grade, portanto do servidor -- mas citar
+        // e' barato e protege contra uma coluna chamada "order" ou "Nome".
+        paged += "\nORDER BY \"";
+        for (const char c : sort.column) {
+            if (c == '"') paged += "\"\"";
+            else          paged.push_back(c);
+        }
+        paged += sort.descending ? "\" DESC" : "\" ASC";
+    }
+
     paged += "\nLIMIT " + std::to_string(requested);
     if (page > 0) {
         paged += " OFFSET " + std::to_string(page * page_size);
