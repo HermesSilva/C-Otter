@@ -121,6 +121,15 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Copia de cada pacote SEM a versao no nome: e' o que deixa o README
+      # apontar para releases/latest/download/<nome> sem ser editado a cada
+      # versao. O nome com versao continua, com o .sha256 dele.
+      - name: Nomes fixos para o link do README
+        run: |
+          cp dist/c-otter-*-windows-x64.zip   dist/c-otter-windows-x64.zip
+          cp dist/c-otter-*-linux-x64.tar.gz  dist/c-otter-linux-x64.tar.gz
+          ls -la dist
+
       # Tag com sufixo (v0.2.0-rc1) sai como pre-release.
       - name: Criar a Release
         env:

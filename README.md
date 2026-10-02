@@ -9,6 +9,24 @@
 A universal database manager written in C++23, inspired by the architecture of
 [DBeaver](https://github.com/dbeaver/dbeaver) — same river, faster current.
 
+## Download
+
+| System | Package |
+|--------|---------|
+| Windows x64 | [**c-otter-windows-x64.zip**](https://github.com/HermesSilva/C-Otter/releases/latest/download/c-otter-windows-x64.zip) |
+| Linux x64 | [**c-otter-linux-x64.tar.gz**](https://github.com/HermesSilva/C-Otter/releases/latest/download/c-otter-linux-x64.tar.gz) |
+
+The links always point to the latest release; older versions and checksums are on the
+[releases page](https://github.com/HermesSilva/C-Otter/releases).
+
+There is no installer: unpack and run `c-otter.exe` (Windows) or `./c-otter` (Linux). The
+product is portable — everything it writes (settings, connections, passwords, scripts)
+stays in `.C-Otter/` and `.script/` next to the executable.
+
+- **Windows**: no runtime or DLL to install.
+- **Linux**: needs glibc 2.39 or newer (Ubuntu 24.04+), X11 or Wayland, and OpenGL 3.3. TLS and
+  integrated authentication are not available on Linux yet — see [Status](#status).
+
 ## What it is
 
 C-Otter is a cross-platform database client: it connects, browses metadata, edits data in
