@@ -59,13 +59,15 @@ jobs:
         run: echo "version=$(bash tools/package_version.sh)" >> "$GITHUB_OUTPUT"
 
       # Clang 19: ate' o 18 ele nao habilita o <expected> da libstdc++
-      # (docs/adr/0006, atualizacao de 2026-10-02). xvfb e mesa-dri sao so'
-      # para o passo "Abrir o programa".
+      # (docs/adr/0006, atualizacao de 2026-10-02). llvm-19 traz o llvm-ar e
+      # o llvm-ranlib, que o CMake exige para arquivar objetos de LTO: sem
+      # ele o build morre em "CMAKE_CXX_COMPILER_AR-NOTFOUND". xvfb e
+      # mesa-dri sao so' para o passo "Abrir o programa".
       - name: Dependencias
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-19 ninja-build pkg-config libssl-dev \
+            clang-19 llvm-19 ninja-build pkg-config libssl-dev \
             libgl1-mesa-dev xorg-dev libwayland-dev libwayland-bin \
             libxkbcommon-dev wayland-protocols \
             xvfb libgl1-mesa-dri

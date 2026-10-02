@@ -104,7 +104,7 @@ O que custou, e fica registrado para não se repetir:
 Continua **sem garantia de entrega**: não há CI Linux, as suítes ao vivo não rodaram lá, e
 faltam TLS (`tls_openssl.cpp` é esboço) e a autenticação integrada do SQL Server.
 
-Pacotes para compilar: `clang-19 ninja-build pkg-config libssl-dev libgl1-mesa-dev xorg-dev
+Pacotes para compilar: `clang-19 llvm-19 ninja-build pkg-config libssl-dev libgl1-mesa-dev xorg-dev
 libwayland-dev libwayland-bin libxkbcommon-dev wayland-protocols`.
 
 ## Consequências

@@ -6,145 +6,149 @@
 > float together in a raft. Basically, they were born for databases.
 > Here, every JOIN is an **OTTER JOIN**.
 
-Um gerenciador universal de bancos de dados escrito em C++23, inspirado na arquitetura do
-[DBeaver](https://github.com/dbeaver/dbeaver) — mesmo rio, corrente mais rápida.
+A universal database manager written in C++23, inspired by the architecture of
+[DBeaver](https://github.com/dbeaver/dbeaver) — same river, faster current.
 
-## O que é
+## What it is
 
-C-Otter é um cliente de banco de dados multiplataforma: conecta, navega metadados, edita
-dados em grid, executa SQL e transfere dados entre SGBDs. A diferença em relação ao ancestral
-é o custo de execução — sem JVM, sem OSGi, sem JDBC, com drivers nativos e uma UI em modo
-imediato.
+C-Otter is a cross-platform database client: it connects, browses metadata, edits data in
+a grid, runs SQL and moves data between DBMSs. The difference from its ancestor is the
+runtime cost — no JVM, no OSGi, no JDBC, with native drivers and an immediate-mode UI.
 
-## Alvos da v1
+## v1 targets
 
-| Eixo | Decisão |
+| Axis | Decision |
+|------|----------|
+| Language | C++23, zero dependencies in the core |
+| UI | Dear ImGui + GLFW/OpenGL 3.3, in-house virtualized grid, vector icons |
+| Drivers | In-house wire protocols, no client library: PostgreSQL, MySQL/MariaDB, SQL Server and SQL Anywhere done; SQLite and Oracle to do |
+| Platforms | Windows and Linux — CMake + MSVC/Clang |
+| Build | CMake 4.x + Ninja, fully static link (`/MT`); packages for both systems built by GitHub Actions |
+
+## Otter glossary
+
+Project terms that show up in the code and the docs:
+
+| Term | Meaning |
 |------|---------|
-| Linguagem | C++23, zero dependências no núcleo |
-| UI | Dear ImGui + GLFW/OpenGL 3.3, grid virtualizado próprio, ícones vetoriais |
-| Drivers | Protocolo próprio, sem biblioteca cliente: PostgreSQL, MySQL/MariaDB, SQL Server e SQL Anywhere prontos; SQLite e Oracle a fazer |
-| Plataformas | Windows e Linux — CMake + MSVC/Clang |
-| Build | CMake 4.x + Ninja, link estático total (`/MT`); pacotes dos dois sistemas pelo GitHub Actions |
+| **Raft** | The workspace: the set of connections that float together |
+| **Holt** | A single connection/datasource (the otter's den) |
+| **Pocket Rock** | Local metadata cache — the favorite rock the otter keeps in its pocket |
+| **Otter Join** | A JOIN. Always. |
+| **Float** | An execution session on top of a Holt |
 
-## Glossário da lontra
+## Status
 
-Termos do projeto que apareceram no código e nos docs:
+**In development — the application runs and connects to real databases.**
 
-| Termo | Significado |
-|-------|-------------|
-| **Raft** | O workspace: o conjunto de conexões que flutuam juntas |
-| **Holt** | Uma conexão/datasource individual (a toca da lontra) |
-| **Pocket Rock** | Cache local de metadados — a pedra favorita que a lontra guarda no bolso |
-| **Otter Join** | Um JOIN. Sempre. |
-| **Float** | Sessão de execução sobre um Holt |
+Four DBMSs, all through protocols written in this project (`lib/`), without libpq,
+libmysqlclient, FreeTDS or ODBC. Several simultaneous connections, SQL editor with
+highlighting and autocomplete over real metadata, **editable** virtualized grid with
+paging, transactions, object editor, export and import, three themes and i18n
+(EN + pt-BR). Connections are stored in DBeaver's format; on first run the ones from
+DBeaver, pgAdmin and SSMS are copied over.
 
-## Estado
+**Coverage against DBeaver: 68.0% of its 281 commands and 78.9% of its 147 shortcuts**,
+measured by `tools/regen_docs.py` against its `plugin.xml` files — see
+[`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) and [`docs/PARITY.md`](docs/PARITY.md).
 
-**Em desenvolvimento — a aplicação roda e conecta a bancos reais.**
+### Per DBMS
 
-Quatro SGBDs, todos por protocolo escrito no projeto (`lib/`), sem libpq, libmysqlclient,
-FreeTDS ou ODBC. Várias conexões simultâneas, editor SQL com realce e autocomplete sobre
-metadados reais, grade virtualizada **editável** com paginação, transações, editor de
-objeto, exportação e importação, três temas e i18n (EN + pt-BR). As conexões persistem no
-formato do DBeaver; na primeira execução as do DBeaver, do pgAdmin e do SSMS são copiadas.
-
-**Cobertura frente ao DBeaver: 68,0% dos 281 comandos e 78,9% dos 147 atalhos**, medidos
-por `tools/regen_docs.py` contra os `plugin.xml` dele — ver
-[`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) e [`docs/PARITY.md`](docs/PARITY.md).
-
-### Por SGBD
-
-Legenda: ✅ pronto · 🟡 funciona, com a diferença dita · ⬜ falta. "Conferido" quer dizer
-executado contra o servidor, não só compilado.
+Legend: ✅ done · 🟡 works, with the stated difference · ⬜ missing. "Verified" means run
+against the server, not just compiled.
 
 | | PostgreSQL | MySQL / MariaDB | SQL Server | SQL Anywhere |
 |---|---|---|---|---|
-| Protocolo | wire v3 (`lib/pgwire`) | `lib/mywire` | TDS 7.4 (`lib/tdswire`) | TDS 5.0 (`lib/tdswire`) |
-| Autenticação | SCRAM-SHA-256, MD5 | `mysql_native_password`, `caching_sha2_password` | SQL Server e Windows (SSPI) | nativa do banco |
-| TLS (Windows) | 🟡 implementado, aperto de mão não conferido | ✅ | ✅ | ⬜ sem cifra |
-| Árvore, contra a do DBeaver | ✅ 59 de 59 pastas | 🟡 24 de 27 nós | 🟡 21 de 30 pastas | 🟡 14 de 17 pastas |
-| Consulta, paginação, grade editável | ✅ | ✅ | ✅ | ✅ |
-| Editor de objeto (criar, alterar, apagar) | ✅ 26 de 27 tipos | ✅ | 🟡 10 de 16 tipos | ✅ |
-| Permissões (`GRANT` / `REVOKE`) | ✅ | 🟡 por objeto | ✅ | ✅ |
-| Ferramentas de manutenção | ✅ | ✅ | ✅ | ✅ |
-| Backup e restore | ✅ `pg_dump` / `pg_restore` | ✅ `mysqldump` / `mysql` | ✅ `BACKUP` / `RESTORE DATABASE` | 🟡 SQL gerado, não executado |
-| Sessões e travas | ✅ | ✅ sessões | ✅ | ✅ |
-| Plano de execução (*Explain*) | ✅ | ⬜ não conferido | ⬜ | ⬜ |
-| Vários resultados num lote | — | — | 🟡 só o primeiro | 🟡 só o primeiro |
-| Conferido contra | PostgreSQL 18 | MySQL 8.0.46 | SQL Server 2022 | SQL Anywhere 16 |
-| Suíte ao vivo | `otter_tests_live` | 108 + 111 verificações | 187 verificações | 337 verificações |
-| Mapa completo | [`NAVIGATOR-TREE`](docs/NAVIGATOR-TREE.md), [`OBJECT-EDITOR`](docs/OBJECT-EDITOR.md) | [`MYSQL-MAP`](docs/MYSQL-MAP.md) | [`MSSQL-MAP`](docs/MSSQL-MAP.md) | [`SQLANYWHERE-MAP`](docs/SQLANYWHERE-MAP.md) |
+| Protocol | wire v3 (`lib/pgwire`) | `lib/mywire` | TDS 7.4 (`lib/tdswire`) | TDS 5.0 (`lib/tdswire`) |
+| Authentication | SCRAM-SHA-256, MD5 | `mysql_native_password`, `caching_sha2_password` | SQL Server and Windows (SSPI) | database native |
+| TLS (Windows) | 🟡 implemented, handshake not verified | ✅ | ✅ | ⬜ no encryption |
+| Object tree, against DBeaver's | ✅ 59 of 59 folders | 🟡 24 of 27 nodes | 🟡 21 of 30 folders | 🟡 14 of 17 folders |
+| Query, paging, editable grid | ✅ | ✅ | ✅ | ✅ |
+| Object editor (create, alter, drop) | ✅ 26 of 27 types | ✅ | 🟡 10 of 16 types | ✅ |
+| Permissions (`GRANT` / `REVOKE`) | ✅ | 🟡 per object | ✅ | ✅ |
+| Maintenance tools | ✅ | ✅ | ✅ | ✅ |
+| Backup and restore | ✅ `pg_dump` / `pg_restore` | ✅ `mysqldump` / `mysql` | ✅ `BACKUP` / `RESTORE DATABASE` | 🟡 SQL generated, not executed |
+| Sessions and locks | ✅ | ✅ sessions | ✅ | ✅ |
+| Execution plan (*Explain*) | ✅ | ⬜ not verified | ⬜ | ⬜ |
+| Multiple result sets in a batch | — | — | 🟡 first one only | 🟡 first one only |
+| Verified against | PostgreSQL 18 | MySQL 8.0.46 | SQL Server 2022 | SQL Anywhere 16 |
+| Live suite | `otter_tests_live` | 108 + 111 checks | 187 checks | 337 checks |
+| Full map | [`NAVIGATOR-TREE`](docs/NAVIGATOR-TREE.md), [`OBJECT-EDITOR`](docs/OBJECT-EDITOR.md) | [`MYSQL-MAP`](docs/MYSQL-MAP.md) | [`MSSQL-MAP`](docs/MSSQL-MAP.md) | [`SQLANYWHERE-MAP`](docs/SQLANYWHERE-MAP.md) |
 
-#### PostgreSQL — o que falta
+#### PostgreSQL — what is missing
 
-- **TLS conferido**: o `SSLRequest` está implementado, mas o servidor de teste roda com
-  `ssl = off` e o aperto de mão nunca foi exercitado.
-- Global Backup (`pg_dumpall`) e o assistente de foreign data wrappers.
-- Chaves virtuais e `With Hierarchy` na aba de permissões.
-- Fonte de materialized view, trigger e regra é somente leitura; chave estrangeira sem
-  `DEFERRABLE` no formulário.
-- 7 das 62 listas da árvore: as colunas de constraint, FK, índice e referência aparecem no
-  detalhe, não como subnós.
-- *Navigator view* Simple / Custom: a árvore é sempre a Advanced.
+- **Verified TLS**: `SSLRequest` is implemented, but the test server runs with `ssl = off`
+  and the handshake has never been exercised.
+- Global Backup (`pg_dumpall`) and the foreign data wrappers wizard.
+- Virtual keys, and `With Hierarchy` on the permissions tab.
+- The source of materialized views, triggers and rules is read-only; foreign keys have no
+  `DEFERRABLE` in the form.
+- 7 of the 62 tree lists: the columns of constraints, FKs, indexes and references show up
+  in the detail, not as child nodes.
+- *Navigator view* Simple / Custom: the tree is always the Advanced one.
 
-#### MySQL / MariaDB — o que falta
+#### MySQL / MariaDB — what is missing
 
-- **MariaDB não foi conferido** (sequences, packages): só há MySQL na máquina de teste.
-- Na árvore: índices e triggers "do banco" (as pastas virtuais) e packages.
-- Certificado de cliente no TLS (gravado e lido, não usado) e protocolo preparado
+- **MariaDB has not been verified** (sequences, packages): the test machine only has MySQL.
+- In the tree: database-level indexes and triggers (the virtual folders) and packages.
+- TLS client certificate (stored and read, not used) and the prepared protocol
   (`COM_STMT_*`).
-- Privilégios: a matriz global e por schema (hoje é por objeto) e a lista dos de rotina.
-- Limites da conta, engine, charset e auto-increment da tabela: mostrados, alterados só
-  por SQL.
-- *Explain*: o leitor de plano entende o formato do PostgreSQL; no MySQL não foi conferido.
-- Defeito aberto: senha vazia falha com uma mensagem de criptografia em vez de dizer que
-  a senha está vazia.
+- Privileges: the global and per-schema matrix (today it is per object) and the list of
+  routine privileges.
+- Account limits and the table's engine, charset and auto-increment: shown, changed only
+  through SQL.
+- *Explain*: the plan reader understands PostgreSQL's format; on MySQL it has not been
+  verified.
+- Open defect: an empty password fails with a cryptography message instead of saying the
+  password is empty.
 
-#### SQL Server — o que falta
+#### SQL Server — what is missing
 
-- **Autenticação**: 2 dos 8 modelos do DBeaver. Faltam NTLM com credenciais digitadas e
-  os quatro do Entra ID (Active Directory).
+- **Authentication**: 2 of DBeaver's 8 models. Missing are NTLM with typed credentials and
+  the four Entra ID (Active Directory) ones.
 - TDS 8.0 (`Encrypt=strict`).
-- Vários conjuntos de resultado: só o primeiro chega à grade.
-- Parâmetros vão no texto do comando (não há RPC) e não há carga em massa (`BULK`).
-- *Explain* (`SHOWPLAN_XML`) e *Execute SQL script natively* (`sqlcmd`) ficam desabilitados,
-  com o motivo.
-- Na árvore: tabelas externas, partições, triggers do schema e propriedades estendidas
-  além de `MS_Description`.
-- No editor: tipo de dado, tipo de tabela e tabela externa; índice sem colunas incluídas
-  nem columnstore; sinônimo sem formulário.
-- `geometry`, `geography` e `hierarchyid` aparecem como binário; `bit` como `1`/`0`.
-- Instância nomeada conferida só contra um SQL Server Browser de teste.
+- Multiple result sets: only the first one reaches the grid.
+- Parameters go in the command text (there is no RPC) and there is no bulk load (`BULK`).
+- *Explain* (`SHOWPLAN_XML`) and *Execute SQL script natively* (`sqlcmd`) are disabled,
+  with the reason shown.
+- In the tree: external tables, partitions, schema-level triggers and extended properties
+  other than `MS_Description`.
+- In the editor: data type, table type and external table; indexes without included
+  columns or columnstore; synonyms have no form.
+- `geometry`, `geography` and `hierarchyid` are shown as binary; `bit` as `1`/`0`.
+- Named instances verified only against a test SQL Server Browser.
 
-#### SQL Anywhere — o que falta
+#### SQL Anywhere — what is missing
 
-- **Sem cifra**: senha e dados trafegam em claro. O diálogo avisa e recusa "Use SSL"; a
-  saída é o túnel SSH.
-- SAP ASE não é suportado (mesmo protocolo, outro catálogo): a conexão falha dizendo isso.
-- Vários conjuntos de resultado: só o primeiro chega à grade.
-- *Explain* e *Execute SQL script natively* (`dbisql`) ficam desabilitados, com o motivo.
-- Renomear rotina, trigger, evento, sequence e domínio; criar view materializada pelo
-  formulário.
-- Pastas que só listam, sem editor: políticas de login, dbspaces, servidores remotos, web
-  services, publicações. Ficaram fora da árvore: SQL Remote / MobiLink, LDAP, certificados,
-  planos de manutenção e espelhamento.
-- `BACKUP DATABASE` e `VALIDATE DATABASE`: SQL conferido, não executados.
+- **No encryption**: password and data travel in clear text. The dialog says so and refuses
+  "Use SSL"; the way out is the SSH tunnel.
+- SAP ASE is not supported (same protocol, different catalog): the connection fails saying
+  so.
+- Multiple result sets: only the first one reaches the grid.
+- *Explain* and *Execute SQL script natively* (`dbisql`) are disabled, with the reason
+  shown.
+- Renaming routines, triggers, events, sequences and domains; creating a materialized view
+  through the form.
+- Folders that only list, with no editor: login policies, dbspaces, remote servers, web
+  services, publications. Left out of the tree: SQL Remote / MobiLink, LDAP, certificates,
+  maintenance plans and mirroring.
+- `BACKUP DATABASE` and `VALIDATE DATABASE`: SQL checked, not executed.
 
-#### Comum aos quatro
+#### Common to all four
 
-- **Linux**: compila, passa nos testes unitários e abre, mas **sem TLS** e sem
-  autenticação integrada; as suítes ao vivo nunca rodaram lá
+- **Linux**: it builds, passes the unit tests and opens, but with **no TLS** and no
+  integrated authentication; the live suites have never run there
   ([ADR 0006](docs/adr/0006-rendering-backend.md)).
-- Túnel SSH pelo cliente `ssh` do sistema: chave ou agente, sem senha digitada; não
-  conferido contra um servidor SSH de verdade.
-- Transferência direta entre bancos, XLSX e criar a tabela de destino na importação.
-- Demais SGBDs do catálogo de drivers: SQLite e Oracle estão planejados; os outros ficam
-  fora da v1 e a tela diz qual é qual.
+- SSH tunnel through the system's `ssh` client: key or agent, no typed password; not
+  verified against a real SSH server.
+- Direct transfer between databases, XLSX, and creating the target table on import.
+- Other DBMSs in the driver catalog: SQLite and Oracle are planned; the rest are out of
+  scope for v1, and the screen says which is which.
 
-### Executar e publicar
+### Running and releasing
 
 ```powershell
-build test                      # Windows: compila o win-release e roda os testes
+build test                      # Windows: builds win-release and runs the tests
 build\win-release\bin\c-otter.exe
 ```
 
@@ -153,28 +157,31 @@ cmake --preset linux-release && cmake --build build/linux-release    # Linux, Cl
 build/linux-release/bin/c-otter
 ```
 
-O pacote de cada sistema sai de `tools\package.ps1` e `tools/package.sh`. Publicar é
-empurrar uma tag: `git tag v0.1.0 && git push origin v0.1.0` dispara
-[`.github/workflows/release.yml`](.github/workflows/release.yml), que compila, testa,
-empacota os dois e cria a Release. A tag tem de bater com o `VERSION` do `CMakeLists.txt`.
+Each system's package comes out of `tools\package.ps1` and `tools/package.sh`. Releasing
+is pushing a tag: `git tag v0.1.0 && git push origin v0.1.0` triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds, tests,
+packages both and creates the Release. The tag must match the `VERSION` in
+`CMakeLists.txt`.
 
-### Documentação
+### Documentation
 
-- [`CLAUDE.md`](CLAUDE.md) — **diretivas de trabalho; ler primeiro**
-- [`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) — mapa exaustivo do DBeaver, gerado por `tools/map_dbeaver.py`
-- [`docs/NAVIGATOR-TREE.md`](docs/NAVIGATOR-TREE.md) — árvore de objetos: ~70 nós e o estado de cada
-- [`docs/ELEMENTS.md`](docs/ELEMENTS.md) — guia operacional: cada botão, menu e atalho
-- [`docs/PARITY.md`](docs/PARITY.md) — funcionalidades frente ao DBeaver
-- [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — lacunas estruturais e ordem de implementação
-- [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — análise do DBeaver como referência arquitetural
-- [`docs/PLAN.md`](docs/PLAN.md) — roteiro em fases · [`docs/EFFORT.md`](docs/EFFORT.md) — esforço em homem-hora
-- [`docs/adr/`](docs/adr/) — 26 decisões arquiteturais, com as revogadas marcadas
-- [`lang/README.md`](lang/README.md) — como acrescentar um idioma
+The documents below are written in Portuguese.
 
-## Licença
+- [`CLAUDE.md`](CLAUDE.md) — **working directives; read first**
+- [`docs/DBEAVER-MAP.md`](docs/DBEAVER-MAP.md) — exhaustive map of DBeaver, generated by `tools/map_dbeaver.py`
+- [`docs/NAVIGATOR-TREE.md`](docs/NAVIGATOR-TREE.md) — object tree: ~70 nodes and the state of each
+- [`docs/ELEMENTS.md`](docs/ELEMENTS.md) — operational guide: every button, menu and shortcut
+- [`docs/PARITY.md`](docs/PARITY.md) — features against DBeaver
+- [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — structural gaps and implementation order
+- [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — analysis of DBeaver as an architectural reference
+- [`docs/PLAN.md`](docs/PLAN.md) — phased roadmap · [`docs/EFFORT.md`](docs/EFFORT.md) — effort in person-hours
+- [`docs/adr/`](docs/adr/) — 26 architectural decisions, with the revoked ones marked
+- [`lang/README.md`](lang/README.md) — how to add a language
 
-A definir. O DBeaver é **Apache 2.0** (confirmado em `LICENSE.md`), o que permite trabalho
-derivado desde que preservados aviso de copyright, texto da licença e um `NOTICE` indicando
-as modificações. Como o plano prevê portar consultas de metadados dos plugins `ext.*`
-(ver [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §4), a atribuição é **obrigatória** mesmo sendo
-C-Otter uma reescrita — decidir antes da Fase 1.
+## License
+
+To be defined. DBeaver is **Apache 2.0** (confirmed in its `LICENSE.md`), which allows
+derivative work as long as the copyright notice, the license text and a `NOTICE` stating
+the modifications are preserved. Since the plan includes porting metadata queries from the
+`ext.*` plugins (see [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §4), attribution is
+**mandatory** even though C-Otter is a rewrite — to be decided before Phase 1.
