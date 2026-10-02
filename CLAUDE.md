@@ -235,3 +235,14 @@ do usuário, nada no registro, nada no diretório de trabalho.
 
 Decisão, alternativas rejeitadas e o que isso custa (as senhas viajam com a pasta) no
 ADR 0020.
+
+## 15. Commit sem linha de coautoria de IA
+
+**A mensagem de commit não leva `Co-Authored-By:` de assistente** — nem
+`Co-Authored-By: Claude ... <noreply@anthropic.com>`, nem a linha "Generated with" em
+descrição de PR. Pedido do usuário em 2026-10-02:
+
+> "Adicione em diretiva, não acrescentar esta referencia nos commits."
+
+Vale mesmo quando a ferramenta sugere a linha por padrão: esta diretiva prevalece. O autor
+do commit é quem o `git config` diz, e só.
