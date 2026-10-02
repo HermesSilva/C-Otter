@@ -115,6 +115,90 @@ Result<Sha256Digest> pbkdf2_sha256(std::string_view password,
     return derived;
 }
 
+Result<Sha512Digest> sha512(std::span<const std::byte> data) {
+    return hash_with<64>(EVP_sha512(), data);
+}
+
+Result<std::vector<std::byte>> pbkdf2_sha512(std::span<const std::byte> password,
+                                             std::span<const std::byte> salt,
+                                             std::uint32_t iterations,
+                                             std::size_t length) {
+    if (password.size() > static_cast<std::size_t>(INT_MAX) ||
+        salt.size() > static_cast<std::size_t>(INT_MAX) ||
+        iterations > static_cast<std::uint32_t>(INT_MAX) ||
+        length > static_cast<std::size_t>(INT_MAX)) {
+        return fail(Errc::internal, "parametros de PBKDF2 fora do limite");
+    }
+
+    std::vector<std::byte> derived(length);
+
+    if (PKCS5_PBKDF2_HMAC(reinterpret_cast<const char*>(bytes(password)),
+                          static_cast<int>(password.size()),
+                          bytes(salt), static_cast<int>(salt.size()),
+                          static_cast<int>(iterations), EVP_sha512(),
+                          static_cast<int>(derived.size()),
+                          reinterpret_cast<unsigned char*>(derived.data())) != 1) {
+        return fail(Errc::internal, "PKCS5_PBKDF2_HMAC falhou");
+    }
+    return derived;
+}
+
+namespace {
+
+struct CipherCtxDeleter {
+    void operator()(EVP_CIPHER_CTX* ctx) const noexcept { EVP_CIPHER_CTX_free(ctx); }
+};
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv(std::span<const std::byte> key,
+                                               std::span<const std::byte> data,
+                                               bool encrypt) {
+    const EVP_CIPHER* cipher = nullptr;
+    switch (key.size()) {
+        case 16: cipher = EVP_aes_128_cbc(); break;
+        case 24: cipher = EVP_aes_192_cbc(); break;
+        case 32: cipher = EVP_aes_256_cbc(); break;
+        default: return fail(Errc::invalid_argument, "chave AES de tamanho invalido");
+    }
+    if (data.size() % 16 != 0 || data.size() > static_cast<std::size_t>(INT_MAX)) {
+        return fail(Errc::invalid_argument, "AES-CBC sem padding exige blocos de 16 bytes");
+    }
+
+    const std::unique_ptr<EVP_CIPHER_CTX, CipherCtxDeleter> ctx{EVP_CIPHER_CTX_new()};
+    const unsigned char iv[16] = {};
+    if (!ctx || EVP_CipherInit_ex(ctx.get(), cipher, nullptr, bytes(key), iv,
+                                  encrypt ? 1 : 0) != 1 ||
+        // Sem padding: os blocos saem como entraram.
+        EVP_CIPHER_CTX_set_padding(ctx.get(), 0) != 1) {
+        return fail(Errc::internal, "EVP_CipherInit_ex(AES) falhou");
+    }
+
+    std::vector<std::byte> out(data.size() + 16);
+    int written = 0;
+    int tail = 0;
+    if (EVP_CipherUpdate(ctx.get(), reinterpret_cast<unsigned char*>(out.data()),
+                         &written, bytes(data), static_cast<int>(data.size())) != 1 ||
+        EVP_CipherFinal_ex(ctx.get(),
+                           reinterpret_cast<unsigned char*>(out.data()) + written,
+                           &tail) != 1 ||
+        static_cast<std::size_t>(written + tail) != data.size()) {
+        return fail(Errc::internal, "AES-CBC falhou");
+    }
+    out.resize(data.size());
+    return out;
+}
+
+} // namespace
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv_encrypt(std::span<const std::byte> key,
+                                                       std::span<const std::byte> data) {
+    return aes_cbc_zero_iv(key, data, /*encrypt=*/true);
+}
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv_decrypt(std::span<const std::byte> key,
+                                                       std::span<const std::byte> data) {
+    return aes_cbc_zero_iv(key, data, /*encrypt=*/false);
+}
+
 Result<std::vector<std::byte>> random_bytes(std::size_t count) {
     if (count > static_cast<std::size_t>(INT_MAX)) {
         return fail(Errc::internal, "pedido de bytes aleatorios grande demais");

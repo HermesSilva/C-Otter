@@ -3296,6 +3296,19 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         open_sql_tab(db::generate_count(schema.name, relation), /*run=*/true);
     }
 
+    if (session().is_oracle()) {
+        // Somente leitura por enquanto: o que vem abaixo (gerar DML, alterar,
+        // apagar, ferramentas) usa os geradores dos outros dialetos. O menu
+        // diz isso, em vez de oferecer o que o servidor recusaria.
+        ImGui::Separator();
+        if (ImGui::MenuItem(TR("Copy qualified name"))) ImGui::SetClipboardText(full.c_str());
+        ImGui::Separator();
+        ImGui::MenuItem(TR("Creating and altering objects is not implemented for Oracle yet"),
+                        nullptr, false, false);
+        ImGui::EndPopup();
+        return;
+    }
+
     ImGui::Separator();
 
     if (ImGui::BeginMenu(TR("Generate SQL"))) {

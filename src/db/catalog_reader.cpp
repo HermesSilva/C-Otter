@@ -2,6 +2,7 @@
 
 #include "db/catalog_mssql.hpp"
 #include "db/catalog_mysql.hpp"
+#include "db/catalog_oracle.hpp"
 #include "db/catalog_sqlanywhere.hpp"
 #include "db/object_info_load.hpp"
 
@@ -413,10 +414,83 @@ Result<std::vector<std::string>> ReaderFor<SqlAnywhereCatalog>::load_grants(
     return catalog_.load_grants(user);
 }
 
+// --- Oracle -----------------------------------------------------------------------
+
+template <>
+bool ReaderFor<OracleCatalog>::has_database_level() const noexcept {
+    // Nao ha' banco acima do schema: load_schemas() ja' devolve os usuarios
+    // que a conexao enxerga, como os bancos do MySQL.
+    return false;
+}
+
+template <>
+Result<std::vector<DatabaseMeta>> ReaderFor<OracleCatalog>::load_databases(bool, bool) {
+    return std::vector<DatabaseMeta>{};
+}
+
+template <>
+Result<std::vector<CatalogItem>> ReaderFor<OracleCatalog>::load_list(
+    CatalogList list, std::string_view a, std::string_view b, std::string_view c) {
+    return catalog_.load_list(list, a, b, c);
+}
+
+template <>
+std::string ReaderFor<OracleCatalog>::default_schema() const {
+    // O schema E' o usuario: a arvore comeca no da conexao.
+    return catalog_.user();
+}
+
+template <>
+std::string_view ReaderFor<OracleCatalog>::schema_label() const noexcept {
+    return "Schema";
+}
+
+template <>
+bool ReaderFor<OracleCatalog>::has_sequences() const noexcept { return true; }
+
+template <>
+bool ReaderFor<OracleCatalog>::has_user_types() const noexcept { return true; }
+
+template <>
+bool ReaderFor<OracleCatalog>::has_events() const noexcept {
+    // O DBMS_SCHEDULER existe, mas ainda nao e' lido: uma pasta sempre vazia
+    // faria procurar o que o programa nao mostra.
+    return false;
+}
+
+template <>
+bool ReaderFor<OracleCatalog>::has_server_info() const noexcept {
+    // V$PARAMETER e V$SESSION exigem privilegio que a conta comum nao tem.
+    return false;
+}
+
+template <>
+Result<std::vector<ServerVariable>>
+ReaderFor<OracleCatalog>::load_server_info(ServerInfoKind) {
+    return std::vector<ServerVariable>{};
+}
+
+template <>
+bool ReaderFor<OracleCatalog>::has_users() const noexcept { return false; }
+
+template <>
+Result<std::vector<UserMeta>> ReaderFor<OracleCatalog>::load_users() {
+    return std::vector<UserMeta>{};
+}
+
+template <>
+Result<std::vector<std::string>> ReaderFor<OracleCatalog>::load_grants(std::string_view,
+                                                                      std::string_view) {
+    return std::vector<std::string>{};
+}
+
 } // namespace
 
 std::unique_ptr<CatalogReader> make_catalog_reader(std::string_view driver_id,
                                                    Holt& holt) {
+    if (driver_id == "oracle") {
+        return std::make_unique<ReaderFor<OracleCatalog>>(holt);
+    }
     if (driver_id == "postgresql") {
         return std::make_unique<ReaderFor<PostgresCatalog>>(holt);
     }

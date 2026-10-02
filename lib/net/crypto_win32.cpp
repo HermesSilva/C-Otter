@@ -132,6 +132,102 @@ Result<Sha256Digest> pbkdf2_sha256(std::string_view password,
     return derived;
 }
 
+Result<Sha512Digest> sha512(std::span<const std::byte> data) {
+    return hash_with<64>(BCRYPT_SHA512_ALGORITHM, {}, data, /*hmac=*/false);
+}
+
+Result<std::vector<std::byte>> pbkdf2_sha512(std::span<const std::byte> password,
+                                             std::span<const std::byte> salt,
+                                             std::uint32_t iterations,
+                                             std::size_t length) {
+    AlgorithmHandle provider;
+    if (!succeeded(provider.open(BCRYPT_SHA512_ALGORITHM, /*hmac=*/true))) {
+        return fail(Errc::internal, "BCryptOpenAlgorithmProvider falhou");
+    }
+
+    std::vector<std::byte> derived(length);
+
+    const NTSTATUS status = BCryptDeriveKeyPBKDF2(
+        provider.get(),
+        const_cast<PUCHAR>(reinterpret_cast<const UCHAR*>(password.data())),
+        static_cast<ULONG>(password.size()),
+        const_cast<PUCHAR>(reinterpret_cast<const UCHAR*>(salt.data())),
+        static_cast<ULONG>(salt.size()),
+        iterations,
+        reinterpret_cast<PUCHAR>(derived.data()),
+        static_cast<ULONG>(derived.size()),
+        0);
+
+    if (!succeeded(status)) {
+        return fail(Errc::internal, "BCryptDeriveKeyPBKDF2 falhou");
+    }
+    return derived;
+}
+
+namespace {
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv(std::span<const std::byte> key,
+                                               std::span<const std::byte> data,
+                                               bool encrypt) {
+    if (key.size() != 16 && key.size() != 24 && key.size() != 32) {
+        return fail(Errc::invalid_argument, "chave AES de tamanho invalido");
+    }
+    if (data.size() % 16 != 0) {
+        return fail(Errc::invalid_argument, "AES-CBC sem padding exige blocos de 16 bytes");
+    }
+
+    AlgorithmHandle provider;
+    if (!succeeded(provider.open(BCRYPT_AES_ALGORITHM, /*hmac=*/false))) {
+        return fail(Errc::internal, "BCryptOpenAlgorithmProvider(AES) falhou");
+    }
+    // O padrao do CNG ja' e' CBC; fica explicito porque o resultado depende
+    // disso e um padrao pode mudar.
+    wchar_t mode[] = BCRYPT_CHAIN_MODE_CBC;
+    if (!succeeded(BCryptSetProperty(provider.get(), BCRYPT_CHAINING_MODE,
+                                     reinterpret_cast<PUCHAR>(mode), sizeof(mode), 0))) {
+        return fail(Errc::internal, "BCryptSetProperty(CBC) falhou");
+    }
+
+    BCRYPT_KEY_HANDLE handle = nullptr;
+    if (!succeeded(BCryptGenerateSymmetricKey(
+            provider.get(), &handle, nullptr, 0,
+            const_cast<PUCHAR>(reinterpret_cast<const UCHAR*>(key.data())),
+            static_cast<ULONG>(key.size()), 0))) {
+        return fail(Errc::internal, "BCryptGenerateSymmetricKey falhou");
+    }
+
+    std::vector<std::byte> out(data.size());
+    UCHAR iv[16] = {};
+    ULONG written = 0;
+    const PUCHAR input = const_cast<PUCHAR>(reinterpret_cast<const UCHAR*>(data.data()));
+    const ULONG  size  = static_cast<ULONG>(data.size());
+
+    // Sem BCRYPT_BLOCK_PADDING: os blocos saem como entraram.
+    const NTSTATUS status =
+        encrypt ? BCryptEncrypt(handle, input, size, nullptr, iv, sizeof(iv),
+                                reinterpret_cast<PUCHAR>(out.data()), size, &written, 0)
+                : BCryptDecrypt(handle, input, size, nullptr, iv, sizeof(iv),
+                                reinterpret_cast<PUCHAR>(out.data()), size, &written, 0);
+    BCryptDestroyKey(handle);
+
+    if (!succeeded(status) || written != size) {
+        return fail(Errc::internal, "AES-CBC falhou");
+    }
+    return out;
+}
+
+} // namespace
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv_encrypt(std::span<const std::byte> key,
+                                                       std::span<const std::byte> data) {
+    return aes_cbc_zero_iv(key, data, /*encrypt=*/true);
+}
+
+Result<std::vector<std::byte>> aes_cbc_zero_iv_decrypt(std::span<const std::byte> key,
+                                                       std::span<const std::byte> data) {
+    return aes_cbc_zero_iv(key, data, /*encrypt=*/false);
+}
+
 Result<std::vector<std::byte>> random_bytes(std::size_t count) {
     std::vector<std::byte> out(count);
     const NTSTATUS status = BCryptGenRandom(

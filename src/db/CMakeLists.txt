@@ -31,6 +31,7 @@ otter_add_library(otter_db
         drivers/mysql.cpp
         drivers/mssql.cpp
         drivers/sqlanywhere.cpp
+        drivers/oracle.cpp
         alter.cpp
         coloring.cpp
         sparkline.cpp
@@ -40,6 +41,7 @@ otter_add_library(otter_db
         catalog_mysql.cpp
         catalog_mssql.cpp
         catalog_sqlanywhere.cpp
+        catalog_oracle.cpp
         catalog_reader.cpp
         registry.cpp
         drivers/postgres.cpp
@@ -47,6 +49,7 @@ otter_add_library(otter_db
         otter::otter_base
         otter::otter_mywire
         otter::otter_tdswire
+        otter::otter_orawire
         otter::otter_pgwire
 )
 

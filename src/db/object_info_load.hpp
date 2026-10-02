@@ -30,6 +30,11 @@ class SqlAnywhereCatalog;
                                           const ObjectRef& ref);
 [[nodiscard]] ObjectInfo load_object_info(MysqlCatalog& catalog, Holt& holt,
                                           const ObjectRef& ref);
+// Oracle: propriedades de ALL_OBJECTS, DDL de DBMS_METADATA.GET_DDL. Somente
+// leitura por enquanto.
+class OracleCatalog;
+[[nodiscard]] ObjectInfo load_object_info(OracleCatalog& catalog, Holt& holt,
+                                          const ObjectRef& ref);
 
 // O DDL de uma tabela do PostgreSQL, que nao tem pg_get_tabledef: colunas,
 // constraints, chaves estrangeiras, indices e comentario, lidos do catalogo.

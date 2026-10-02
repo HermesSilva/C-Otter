@@ -173,7 +173,7 @@ public:
     // decidir o que a tela oferece: PostgreSQL e SQL Server tem os dois o
     // nivel de banco, e quase nada mais em comum (VACUUM, CASCADE, PUBLIC,
     // CREATE OR REPLACE...). Vale desde connect_async, pelo driver do perfil.
-    enum class Engine : std::uint8_t { postgres, mysql, mssql, sqlanywhere };
+    enum class Engine : std::uint8_t { postgres, mysql, mssql, sqlanywhere, oracle };
     [[nodiscard]] Engine engine() const noexcept {
         return engine_.load(std::memory_order_acquire);
     }
@@ -183,6 +183,7 @@ public:
     [[nodiscard]] bool is_sqlanywhere() const noexcept {
         return engine() == Engine::sqlanywhere;
     }
+    [[nodiscard]] bool is_oracle() const noexcept { return engine() == Engine::oracle; }
 
     // Quais bancos listar. Chamado ANTES de connect_async, com as opcoes do
     // perfil ("Show template databases", "Show inaccessible databases").

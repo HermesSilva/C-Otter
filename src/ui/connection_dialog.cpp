@@ -110,7 +110,7 @@ std::vector<DriverEntry> driver_catalog() {
         {"sqlite",     "SQLite",      "Embedded",      0, false, "planned for phase 3"},
         {"sqlserver",  "SQL Server",  "Popular",    1433, true,  ""},
         {"sqlanywhere", "SQL Anywhere", "SQL",      2638, true,  ""},
-        {"oracle",     "Oracle",      "Popular",    1521, false, "planned for phase 3"},
+        {"oracle",     "Oracle",      "Popular",    1521, true,  ""},
         {"db2",        "Db2 for LUW", "SQL",       50000, false, "out of scope for v1"},
         {"clickhouse", "ClickHouse",  "Analytical", 8123, false, "out of scope for v1"},
         {"duckdb",     "DuckDB",      "Analytical",    0, false, "out of scope for v1"},
@@ -708,6 +708,19 @@ void ConnectionDialog::draw_page_connection_settings() {
         ImGui::PopTextWrapPos();
     }
 
+    if (profile_.driver_id == "oracle") {
+        // O que nao se adivinha, e o que este driver ainda nao faz (diretiva
+        // 6): no Oracle o "banco" e' um nome de SERVICO, e TLS, SID pela tela
+        // e SYSDBA ainda nao existem aqui.
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(col4(colors().text_dim), "%s",
+                           TR("Database: the SERVICE NAME (for example FREEPDB1 or "
+                              "ORCLPDB1). To connect by SID instead, add the driver "
+                              "property \"sid\".\nNot implemented yet for Oracle: TLS "
+                              "(TCPS), the SYSDBA/SYSOPER roles and TNS aliases."));
+        ImGui::PopTextWrapPos();
+    }
+
     const bool sqlserver = profile_.driver_id == "sqlserver";
     if (sqlserver) {
         // "Trust Server Certificate" do SQLServerConnectionPage (grupo
@@ -942,6 +955,9 @@ void ConnectionDialog::draw_page_driver_properties() {
                        : profile_.driver_id == "sqlanywhere"
                            ? TR("SQL Anywhere: SET TEMPORARY OPTION name = value, "
                                 "right after connecting.")
+                       : profile_.driver_id == "oracle"
+                           ? TR("Oracle: only \"sid\" is read -- it connects by SID "
+                                "instead of by service name.")
                            : TR("MySQL: SET @@name = value, right after "
                                 "connecting."));
     ImGui::TextColored(col4(colors().warn), "%s",

@@ -82,7 +82,7 @@ OTTER_TEST(url_mysql_uses_the_mysql_driver_and_port) {
 }
 
 OTTER_TEST(url_refuses_what_it_cannot_connect_to) {
-    OTTER_CHECK(!profile_from_url("jdbc:oracle://h/db").has_value());
+    OTTER_CHECK(!profile_from_url("jdbc:db2://h/db").has_value());
     OTTER_CHECK(!profile_from_url("not a url").has_value());
     OTTER_CHECK(!profile_from_url("postgresql://h:99999/db").has_value());
 }

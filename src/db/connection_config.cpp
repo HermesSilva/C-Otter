@@ -128,15 +128,21 @@ std::vector<std::string> session_setup_statements(std::string_view driver_id,
     // usuario conectado, e SETUSER e' personificacao, nao caminho de busca)
     // nem sessao somente leitura. Nada a emitir para os dois.
     const bool anywhere = driver_id == "sqlanywhere";
+    // Oracle: o schema corrente troca por ALTER SESSION (a conta continua a
+    // mesma, so' muda onde um nome sem dono e' procurado), e nao ha' sessao
+    // somente leitura -- so' transacao (SET TRANSACTION READ ONLY).
+    const bool oracle = driver_id == "oracle";
     std::vector<std::string> out;
 
     // SET ROLE e' do PostgreSQL; o campo so' existe na pagina dele.
-    if (!mysql && !mssql && !anywhere && !trimmed(setup.session_role).empty()) {
+    if (!mysql && !mssql && !anywhere && !oracle && !trimmed(setup.session_role).empty()) {
         out.push_back("SET ROLE " + quoted(trimmed(setup.session_role), '"'));
     }
 
     if (const std::string_view schema = trimmed(setup.default_schema);
-        !schema.empty() && !anywhere) {
+        !schema.empty() && oracle) {
+        out.push_back("ALTER SESSION SET CURRENT_SCHEMA = " + quoted(schema, '"'));
+    } else if (!schema.empty() && !anywhere) {
         // `public` continua no caminho: sem ele as extensoes instaladas la'
         // (e o que o usuario chama sem qualificar) somem.
         // SQL Server: o "schema padrao" da conexao e' o BANCO (USE); o schema
@@ -172,7 +178,7 @@ std::vector<std::string> session_setup_statements(std::string_view driver_id,
     // Por ultimo: as consultas de inicializacao podem precisar escrever.
     // O SQL Server nao tem sessao somente leitura: `read_only` fica a cargo
     // de quem conecta (ApplicationIntent e' so' roteamento). Nada a emitir.
-    if (setup.read_only && !mssql && !anywhere) {
+    if (setup.read_only && !mssql && !anywhere && !oracle) {
         out.push_back(mysql
             ? "SET SESSION TRANSACTION READ ONLY"
             : "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");

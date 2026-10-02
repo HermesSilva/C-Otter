@@ -38,6 +38,32 @@ using Md5Digest    = std::array<std::byte, 16>;
                                                  std::span<const std::byte> salt,
                                                  std::uint32_t iterations);
 
+// --- O5LOGON do Oracle (lib/orawire/auth.cpp) -------------------------------
+//
+// O logon do Oracle 12c+ deriva as chaves com SHA-512 e PBKDF2-HMAC-SHA512 e
+// troca os segredos em AES-CBC. Sao escolhas do servidor, nao nossas.
+
+using Sha512Digest = std::array<std::byte, 64>;
+
+[[nodiscard]] Result<Sha512Digest> sha512(std::span<const std::byte> data);
+
+// PBKDF2-HMAC-SHA512 com saida de `length` bytes (o Oracle pede 64 e 32).
+[[nodiscard]] Result<std::vector<std::byte>> pbkdf2_sha512(
+    std::span<const std::byte> password, std::span<const std::byte> salt,
+    std::uint32_t iterations, std::size_t length);
+
+// AES-CBC com IV ZERO e SEM padding: `data` tem de ser multiplo de 16 bytes,
+// e a chave ter 16, 24 ou 32. IV zero porque o protocolo o fixa -- cada
+// mensagem leva um sal aleatorio no primeiro bloco, que faz o papel dele. O
+// padding fica com quem chama, porque o Oracle usa dois (PKCS#7 e nenhum).
+//
+// Nao e' o `aes128_cbc_*` de base/aes.hpp: aquele cifra as senhas salvas, com
+// IV aleatorio, e so' tem chave de 128 bits.
+[[nodiscard]] Result<std::vector<std::byte>> aes_cbc_zero_iv_encrypt(
+    std::span<const std::byte> key, std::span<const std::byte> data);
+[[nodiscard]] Result<std::vector<std::byte>> aes_cbc_zero_iv_decrypt(
+    std::span<const std::byte> key, std::span<const std::byte> data);
+
 // Bytes aleatorios de qualidade criptografica, para o nonce do SCRAM.
 [[nodiscard]] Result<std::vector<std::byte>> random_bytes(std::size_t count);
 

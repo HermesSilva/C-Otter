@@ -2,6 +2,7 @@
 
 #include "db/ddl.hpp"
 #include "db/catalog_mssql.hpp"
+#include "db/catalog_oracle.hpp"
 #include "db/mssql_object.hpp"
 #include "db/mysql_object.hpp"
 #include "db/catalog_sqlanywhere.hpp"
@@ -467,6 +468,116 @@ ObjectInfo load_object_info(SqlAnywhereCatalog& catalog, Holt& holt,
                 permission.grantable = rs->text(r, 2) == "1";
                 permission.grantor   = rs->is_null(r, 3) ? std::string{}
                                                          : std::string(rs->text(r, 3));
+                info.permissions.push_back(std::move(permission));
+            }
+        } else {
+            note(info, "permissions", rs.error());
+        }
+    }
+    return info;
+}
+
+// --- Oracle -----------------------------------------------------------------------
+
+ObjectInfo load_object_info(OracleCatalog&, Holt& holt, const ObjectRef& ref) {
+    ObjectInfo info;
+
+    // Como ALL_OBJECTS e DBMS_METADATA chamam cada tipo. So' os que este
+    // editor cobre no Oracle; os demais voltam dizendo isso.
+    const char* object_type = nullptr;      // ALL_OBJECTS.OBJECT_TYPE
+    const char* metadata_type = nullptr;    // DBMS_METADATA.GET_DDL
+    bool        grantable = false;
+    switch (ref.type) {
+        case ObjectType::table:
+            object_type = "TABLE"; metadata_type = "TABLE"; grantable = true; break;
+        case ObjectType::view:
+            object_type = "VIEW"; metadata_type = "VIEW"; grantable = true; break;
+        case ObjectType::materialized_view:
+            object_type = "MATERIALIZED VIEW"; metadata_type = "MATERIALIZED_VIEW";
+            grantable = true; break;
+        case ObjectType::sequence:
+            object_type = "SEQUENCE"; metadata_type = "SEQUENCE"; grantable = true; break;
+        case ObjectType::function:
+            object_type = "FUNCTION"; metadata_type = "FUNCTION"; grantable = true; break;
+        case ObjectType::procedure:
+            object_type = "PROCEDURE"; metadata_type = "PROCEDURE"; grantable = true; break;
+        case ObjectType::index:
+            object_type = "INDEX"; metadata_type = "INDEX"; break;
+        case ObjectType::trigger:
+            object_type = "TRIGGER"; metadata_type = "TRIGGER"; break;
+        case ObjectType::data_type:
+            object_type = "TYPE"; metadata_type = "TYPE"; grantable = true; break;
+        default:
+            info.error = "the object editor does not cover this object type on Oracle";
+            return info;
+    }
+
+    const std::string owner = oracle_literal(ref.schema);
+    const std::string name  = oracle_literal(ref.name);
+
+    // As datas ja' formatadas no servidor: o rotulo da coluna e' o da
+    // propriedade.
+    std::string properties =
+        "SELECT o.object_name \"Name\", o.owner \"Owner\", o.object_type \"Type\", "
+        "       o.status \"Status\", "
+        "       TO_CHAR(o.created, 'YYYY-MM-DD HH24:MI:SS') \"Created\", "
+        "       TO_CHAR(o.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS') \"Last DDL\"";
+    if (ref.type == ObjectType::table || ref.type == ObjectType::view ||
+        ref.type == ObjectType::materialized_view) {
+        properties +=
+            ", (SELECT c.comments FROM all_tab_comments c "
+            "    WHERE c.owner = o.owner AND c.table_name = o.object_name "
+            "      AND ROWNUM = 1) \"Comment\"";
+    }
+    properties += "  FROM all_objects o WHERE o.owner = " + owner +
+                  " AND o.object_name = " + name + " AND o.object_type = '" +
+                  object_type + "'";
+
+    if (auto rs = holt.query_internal(properties)) {
+        info.properties = row_as_properties(*rs, ref.type);
+        // Nenhuma edicao por enquanto: os geradores de ALTER sao os do
+        // PostgreSQL, e o SQL deles nao e' o do Oracle (diretiva 6).
+        for (ObjectProperty& property : info.properties) property.edit = ObjectEdit::none;
+        if (info.properties.empty()) {
+            info.error = "the object no longer exists; refresh the tree";
+            return info;
+        }
+    } else {
+        note(info, "properties", rs.error());
+        return info;
+    }
+
+    // O DDL vem pronto do servidor (um CLOB). Sem privilegio sobre o objeto de
+    // outro schema ele recusa (ORA-31603): o erro aparece, o resto continua.
+    if (auto rs = holt.query_internal("SELECT DBMS_METADATA.GET_DDL('" +
+                                      std::string(metadata_type) + "', " + name + ", " +
+                                      owner + ") FROM DUAL")) {
+        if (rs->row_count() > 0) {
+            std::string_view text = rs->text(0, 0);
+            while (!text.empty() && (text.front() == '\n' || text.front() == ' ')) {
+                text.remove_prefix(1);
+            }
+            info.ddl = std::string(text);
+            if (!info.ddl.empty() && info.ddl.back() != '\n') info.ddl.push_back('\n');
+        }
+    } else {
+        note(info, "DDL", rs.error());
+    }
+
+    if (grantable) {
+        info.has_permissions = true;
+        if (auto rs = holt.query_internal(
+                "SELECT p.grantee, p.privilege, p.grantable, p.grantor "
+                "  FROM all_tab_privs p "
+                " WHERE p.table_schema = " + owner + " AND p.table_name = " + name +
+                " ORDER BY p.grantee, p.privilege")) {
+            info.permissions.reserve(rs->row_count());
+            for (std::size_t r = 0; r < rs->row_count(); ++r) {
+                ObjectPermission permission;
+                permission.grantee   = std::string(rs->text(r, 0));
+                permission.privilege = std::string(rs->text(r, 1));
+                permission.grantable = rs->text(r, 2) == "YES";
+                permission.grantor   = std::string(rs->text(r, 3));
                 info.permissions.push_back(std::move(permission));
             }
         } else {

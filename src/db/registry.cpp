@@ -2,6 +2,7 @@
 
 #include "db/drivers/mssql.hpp"
 #include "db/drivers/mysql.hpp"
+#include "db/drivers/oracle.hpp"
 #include "db/drivers/postgres.hpp"
 #include "db/drivers/sqlanywhere.hpp"
 
@@ -11,12 +12,13 @@ namespace otter::db {
 namespace {
 
 // Ordem de exibicao. PostgreSQL primeiro por ser o driver mais completo hoje.
-std::array<Driver*, 4>& drivers() {
-    static std::array<Driver*, 4> list = {
+std::array<Driver*, 5>& drivers() {
+    static std::array<Driver*, 5> list = {
         &postgres_driver(),
         &mysql_driver(),
         &mssql_driver(),
         &sqlanywhere_driver(),
+        &oracle_driver(),
     };
     return list;
 }

@@ -831,6 +831,25 @@ void MainShell::draw_connection_tree(std::size_t conn_index) {
         draw_server_lists_folder();
         return;
     }
+    if (session().is_oracle()) {
+        // O `<tree>` do Oracle no DBeaver comeca em "Schemas"; schema e'
+        // usuario, e nao ha' banco acima dele. As outras raizes de la' --
+        // Global metadata, Storage, Security, Administer -- ainda nao sao
+        // lidas, e por isso nao aparecem vazias (docs/ORACLE-MAP.md).
+        const std::vector<db::SchemaMeta> schemas = session().schemas();
+        const std::string current = session().current_schema();
+
+        ImGui::SetNextItemOpen(true, revealing_here() && reveal_forcing()
+                                         ? ImGuiCond_Always
+                                         : ImGuiCond_Once);
+        if (draw_folder_node(Icon::schema, TR("Schemas"), schemas.size(), true)) {
+            for (const db::SchemaMeta& schema : schemas) {
+                draw_schema_node(schema, Icon::schema, schema.name == current);
+            }
+            ImGui::TreePop();
+        }
+        return;
+    }
 
     // MySQL: "database" e "schema" sao a mesma coisa, e a conexao enxerga
     // todos. schemas() JA' sao os bancos -- um nivel "Schemas" abaixo deles
@@ -1248,12 +1267,29 @@ void MainShell::draw_schema_node(const db::SchemaMeta& schema, Icon icon,
         // No MySQL este no' E' o banco: "schema" e "database" sao o mesmo.
         // No SQL Anywhere e' o dono dos objetos -- um schema, sem nivel de
         // banco acima dele.
-        tracked.type = session().has_database_level() || session().is_sqlanywhere()
+        tracked.type = session().has_database_level() || session().is_sqlanywhere() ||
+                               session().is_oracle()
                            ? db::ObjectType::schema
                            : db::ObjectType::database;
         tracked.name = schema.name;
         nav_track(tracked);
     }
+    if (session().is_oracle()) {
+        // Somente leitura por enquanto: os formularios de criar e alterar
+        // geram o SQL dos outros dialetos. O menu diz isso, em vez de
+        // oferecer um "New table..." que o servidor recusaria (diretiva 6).
+        if (ImGui::BeginPopupContextItem("##schemamenu")) {
+            if (ImGui::MenuItem(TR("Copy name"))) ImGui::SetClipboardText(schema.name.c_str());
+            if (ImGui::MenuItem(TR("Refresh"), "F5", false, !session().busy())) {
+                session().reload_catalog_async();
+            }
+            ImGui::Separator();
+            ImGui::MenuItem(TR("Creating and altering objects is not implemented for "
+                               "Oracle yet"),
+                            nullptr, false, false);
+            ImGui::EndPopup();
+        }
+    } else
     if (ImGui::BeginPopupContextItem("##schemamenu")) {
         const bool can_create =
             session().state() == SessionState::connected && !session().busy();
@@ -1321,6 +1357,7 @@ void MainShell::draw_schema_contents(const db::SchemaMeta& schema) {
     const bool pg = session().is_postgres();
     const bool ms = session().is_mssql();
     const bool sa = session().is_sqlanywhere();
+    const bool ora = session().is_oracle();
 
     draw_relations_folder(schema, db::ObjKind::table, Icon::table, TR("Tables"));
     if (pg) {
@@ -1328,11 +1365,11 @@ void MainShell::draw_schema_contents(const db::SchemaMeta& schema) {
                               Icon::foreign_table, TR("Foreign Tables"));
     }
     draw_relations_folder(schema, db::ObjKind::view, Icon::view, TR("Views"));
-    if (pg || sa) {
+    if (pg || sa || ora) {
         draw_relations_folder(schema, db::ObjKind::materialized_view,
                               Icon::materialized_view, TR("Materialized Views"));
     }
-    if (pg || ms || sa) {
+    if (pg || ms || sa || ora) {
 
         // Todos os indices do schema numa lista so' -- a pasta "virtual" do
         // DBeaver. Dentro de cada tabela continuam os dela.

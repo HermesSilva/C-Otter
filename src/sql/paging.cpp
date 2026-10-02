@@ -67,6 +67,17 @@ bool is_anywhere(const Dialect& dialect) noexcept {
     return dialect.name == "SQL Anywhere";
 }
 
+// O Oracle pagina por "OFFSET n ROWS FETCH NEXT m ROWS ONLY" (12c em diante),
+// sem exigir ORDER BY -- e NAO aceita "AS" antes do apelido de uma
+// subconsulta ("FROM (...) AS x" e' ORA-00933).
+bool is_oracle(const Dialect& dialect) noexcept { return dialect.plsql_units; }
+
+std::string subquery_alias(const Dialect& dialect, std::string_view name) {
+    std::string text = is_oracle(dialect) ? ") " : ") AS ";
+    text += name;
+    return text;
+}
+
 // O que a varredura dos tokens descobre sobre a consulta.
 struct Shape {
     PagingRefusal refusal = PagingRefusal::none;
@@ -329,7 +340,8 @@ PagedQuery build_query(std::string_view sql, const Dialect& dialect,
         // T-SQL so' aceita ORDER BY em subconsulta acompanhado de TOP ou
         // OFFSET: o "OFFSET 0 ROWS" o torna valido sem tirar linha nenhuma.
         if (tsql && shape.outer_order) paged += "\nOFFSET 0 ROWS";
-        paged = "SELECT * FROM (\n" + paged + "\n) AS otter_filter\n WHERE " +
+        paged = "SELECT * FROM (\n" + paged + "\n" +
+                subquery_alias(dialect, "otter_filter") + "\n WHERE " +
                 filter.where_clause(&dialect);
     }
 
@@ -366,6 +378,9 @@ PagedQuery build_query(std::string_view sql, const Dialect& dialect,
         }
         paged += "\nOFFSET " + std::to_string(page * page_size) +
                  " ROWS FETCH NEXT " + std::to_string(requested) + " ROWS ONLY";
+    } else if (!unlimited && is_oracle(dialect)) {
+        if (page > 0) paged += "\nOFFSET " + std::to_string(page * page_size) + " ROWS";
+        paged += "\nFETCH NEXT " + std::to_string(requested) + " ROWS ONLY";
     } else if (!unlimited) {
         paged += "\nLIMIT " + std::to_string(requested);
         if (page > 0) {
@@ -520,8 +535,8 @@ PagedQuery make_count_query(std::string_view sql, const Dialect& dialect,
         inner += "\nOFFSET 0 ROWS";
     }
 
-    std::string counted = "SELECT COUNT(*) FROM (\n" + inner +
-                          "\n) AS otter_count";
+    std::string counted = "SELECT COUNT(*) FROM (\n" + inner + "\n" +
+                          subquery_alias(dialect, "otter_count");
 
     // O filtro entra na MESMA subconsulta, para a contagem bater com o que a
     // grade exibe: contar sem filtrar daria o total da tabela enquanto a

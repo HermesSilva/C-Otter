@@ -39,7 +39,7 @@ runtime cost — no JVM, no OSGi, no JDBC, with native drivers and an immediate-
 |------|----------|
 | Language | C++23, zero dependencies in the core |
 | UI | Dear ImGui + GLFW/OpenGL 3.3, in-house virtualized grid, vector icons |
-| Drivers | In-house wire protocols, no client library: PostgreSQL, MySQL/MariaDB, SQL Server and SQL Anywhere done; SQLite and Oracle to do |
+| Drivers | In-house wire protocols, no client library: PostgreSQL, MySQL/MariaDB, SQL Server and SQL Anywhere done; Oracle as a read-only proof of concept; SQLite to do |
 | Platforms | Windows and Linux — CMake + MSVC/Clang |
 | Build | CMake 4.x + Ninja, fully static link (`/MT`); packages for both systems built by GitHub Actions |
 
@@ -59,8 +59,9 @@ Project terms that show up in the code and the docs:
 
 **In development — the application runs and connects to real databases.**
 
-Four DBMSs, all through protocols written in this project (`lib/`), without libpq,
-libmysqlclient, FreeTDS or ODBC. Several simultaneous connections, SQL editor with
+Four DBMSs, plus Oracle as a read-only proof of concept, all through protocols written in
+this project (`lib/`), without libpq, libmysqlclient, FreeTDS, ODBC or the Oracle client.
+Several simultaneous connections, SQL editor with
 highlighting and autocomplete over real metadata, **editable** virtualized grid with
 paging, transactions, object editor, export and import, three themes and i18n
 (EN + pt-BR). Connections are stored in DBeaver's format; on first run the ones from
@@ -75,23 +76,23 @@ measured by `tools/regen_docs.py` against its `plugin.xml` files — see
 Legend: ✅ done · 🟡 works, with the stated difference · ⬜ missing. "Verified" means run
 against the server, not just compiled.
 
-| | PostgreSQL | MySQL / MariaDB | SQL Server | SQL Anywhere |
-|---|---|---|---|---|
-| Protocol | wire v3 (`lib/pgwire`) | `lib/mywire` | TDS 7.4 (`lib/tdswire`) | TDS 5.0 (`lib/tdswire`) |
-| Authentication | SCRAM-SHA-256, MD5 | `mysql_native_password`, `caching_sha2_password` | SQL Server and Windows (SSPI) | database native |
-| TLS (Windows) | 🟡 implemented, handshake not verified | ✅ | ✅ | ⬜ no encryption |
-| Object tree, against DBeaver's | ✅ 59 of 59 folders | 🟡 24 of 27 nodes | 🟡 21 of 30 folders | 🟡 14 of 17 folders |
-| Query, paging, editable grid | ✅ | ✅ | ✅ | ✅ |
-| Object editor (create, alter, drop) | ✅ 26 of 27 types | ✅ | 🟡 10 of 16 types | ✅ |
-| Permissions (`GRANT` / `REVOKE`) | ✅ | 🟡 per object | ✅ | ✅ |
-| Maintenance tools | ✅ | ✅ | ✅ | ✅ |
-| Backup and restore | ✅ `pg_dump` / `pg_restore` | ✅ `mysqldump` / `mysql` | ✅ `BACKUP` / `RESTORE DATABASE` | 🟡 SQL generated, not executed |
-| Sessions and locks | ✅ | ✅ sessions | ✅ | ✅ |
-| Execution plan (*Explain*) | ✅ | ⬜ not verified | ⬜ | ⬜ |
-| Multiple result sets in a batch | — | — | 🟡 first one only | 🟡 first one only |
-| Verified against | PostgreSQL 18 | MySQL 8.0.46 | SQL Server 2022 | SQL Anywhere 16 |
-| Live suite | `otter_tests_live` | 108 + 111 checks | 187 checks | 337 checks |
-| Full map | [`NAVIGATOR-TREE`](docs/NAVIGATOR-TREE.md), [`OBJECT-EDITOR`](docs/OBJECT-EDITOR.md) | [`MYSQL-MAP`](docs/MYSQL-MAP.md) | [`MSSQL-MAP`](docs/MSSQL-MAP.md) | [`SQLANYWHERE-MAP`](docs/SQLANYWHERE-MAP.md) |
+| | PostgreSQL | MySQL / MariaDB | SQL Server | SQL Anywhere | Oracle (proof of concept) |
+|---|---|---|---|---|---|
+| Protocol | wire v3 (`lib/pgwire`) | `lib/mywire` | TDS 7.4 (`lib/tdswire`) | TDS 5.0 (`lib/tdswire`) | TNS/TTC (`lib/orawire`) |
+| Authentication | SCRAM-SHA-256, MD5 | `mysql_native_password`, `caching_sha2_password` | SQL Server and Windows (SSPI) | database native | password (O5LOGON); no SYSDBA |
+| TLS (Windows) | 🟡 implemented, handshake not verified | ✅ | ✅ | ⬜ no encryption | ⬜ no encryption |
+| Object tree, against DBeaver's | ✅ 59 of 59 folders | 🟡 24 of 27 nodes | 🟡 21 of 30 folders | 🟡 14 of 17 folders | 🟡 12 of 46 folders |
+| Query, paging, editable grid | ✅ | ✅ | ✅ | ✅ | 🟡 grid is read-only |
+| Object editor (create, alter, drop) | ✅ 26 of 27 types | ✅ | 🟡 10 of 16 types | ✅ | ⬜ view only |
+| Permissions (`GRANT` / `REVOKE`) | ✅ | 🟡 per object | ✅ | ✅ | 🟡 listed, not changed |
+| Maintenance tools | ✅ | ✅ | ✅ | ✅ | ⬜ |
+| Backup and restore | ✅ `pg_dump` / `pg_restore` | ✅ `mysqldump` / `mysql` | ✅ `BACKUP` / `RESTORE DATABASE` | 🟡 SQL generated, not executed | ⬜ |
+| Sessions and locks | ✅ | ✅ sessions | ✅ | ✅ | ⬜ |
+| Execution plan (*Explain*) | ✅ | ⬜ not verified | ⬜ | ⬜ | ⬜ |
+| Multiple result sets in a batch | — | — | 🟡 first one only | 🟡 first one only | — |
+| Verified against | PostgreSQL 18 | MySQL 8.0.46 | SQL Server 2022 | SQL Anywhere 16 | Oracle 26ai Free (23.26) |
+| Live suite | `otter_tests_live` | 108 + 111 checks | 187 checks | 337 checks | 67 checks (`spike_oracatalog`) |
+| Full map | [`NAVIGATOR-TREE`](docs/NAVIGATOR-TREE.md), [`OBJECT-EDITOR`](docs/OBJECT-EDITOR.md) | [`MYSQL-MAP`](docs/MYSQL-MAP.md) | [`MSSQL-MAP`](docs/MSSQL-MAP.md) | [`SQLANYWHERE-MAP`](docs/SQLANYWHERE-MAP.md) | [`ORACLE-MAP`](docs/ORACLE-MAP.md) |
 
 #### PostgreSQL — what is missing
 
@@ -152,7 +153,25 @@ against the server, not just compiled.
   maintenance plans and mirroring.
 - `BACKUP DATABASE` and `VALIDATE DATABASE`: SQL checked, not executed.
 
-#### Common to all four
+#### Oracle — proof of concept
+
+A fifth protocol, `lib/orawire` (TNS/TTC), written from Oracle's own open-source thin
+driver because there is no public specification
+([ADR 0027](docs/adr/0027-oracle-wire-protocol.md)). Verified against Oracle AI Database
+26ai Free (23.26) only. Full map in [`ORACLE-MAP`](docs/ORACLE-MAP.md).
+
+- **Works**: password logon (O5LOGON, 12c verifier), queries with every common type
+  including CLOB/BLOB, PL/SQL blocks and scripts ending in `/`, transactions and
+  savepoints, paging, the object tree (12 of DBeaver's 46 folders), and the object editor's
+  properties, DDL, permissions and data.
+- **Read-only in the tree**: no create, alter or drop forms, and the result grid is never
+  editable. The menus say so.
+- **Missing**: TLS (TCPS) and native network encryption — everything but the password
+  travels in clear text; SYSDBA; bind variables; packages, synonyms, security and storage
+  in the tree; JSON and object values (shown as a marker); `DBMS_OUTPUT`; *Explain*.
+- 67 live checks in `spike_oracatalog`; no suite in the build yet.
+
+#### Common to all
 
 - **Linux**: it builds, passes the unit tests and opens, but with **no TLS** and no
   integrated authentication; the live suites have never run there
@@ -160,8 +179,8 @@ against the server, not just compiled.
 - SSH tunnel through the system's `ssh` client: key or agent, no typed password; not
   verified against a real SSH server.
 - Direct transfer between databases, XLSX, and creating the target table on import.
-- Other DBMSs in the driver catalog: SQLite and Oracle are planned; the rest are out of
-  scope for v1, and the screen says which is which.
+- Other DBMSs in the driver catalog: SQLite is planned; the rest are out of scope for v1,
+  and the screen says which is which.
 
 ### Running and releasing
 
@@ -197,7 +216,7 @@ The documents below are written in Portuguese.
 - [`docs/UI-SCOPE.md`](docs/UI-SCOPE.md) — structural gaps and implementation order
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — analysis of DBeaver as an architectural reference
 - [`docs/PLAN.md`](docs/PLAN.md) — phased roadmap · [`docs/EFFORT.md`](docs/EFFORT.md) — effort in person-hours
-- [`docs/adr/`](docs/adr/) — 26 architectural decisions, with the revoked ones marked
+- [`docs/adr/`](docs/adr/) — 27 architectural decisions, with the revoked ones marked
 - [`lang/README.md`](lang/README.md) — how to add a language
 
 ## License

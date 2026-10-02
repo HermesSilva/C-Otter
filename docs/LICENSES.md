@@ -104,6 +104,9 @@ e ao Apache 2.0 para as porções derivadas.
 | ODBC | API do sistema | **Sim** |
 | MySQL (libmysqlclient) | GPL | **Não** — bloqueado |
 | FreeTDS | LGPL | **Não** com link estático — o TDS é próprio (`lib/tdswire`, ADR 0024) |
+| Oracle Instant Client (OCI) | Proprietária | **Não** — só dinâmica; o TNS/TTC é próprio (`lib/orawire`, ADR 0027) |
+| python-oracledb (Oracle) | UPL 1.0 / Apache 2.0 | **Sim** — referência de leitura; dele vem só a tabela de tipos `lib/orawire/data_types.inc`, com a origem no cabeçalho |
+| go-ora | MIT | Referência de leitura; nada copiado |
 | SSPI / Schannel (Windows) | API do sistema | **Sim** — nada é redistribuído |
 | MariaDB Connector/C | LGPL | **Não** com link estático |
 | Qt / QScintilla | LGPL / GPL | **Não** — rejeitado (ADR 0003) |

@@ -111,7 +111,7 @@ constexpr DriverMapping kDriverMappings[] = {
     {"mariadb",    "mysql", ""},   // mesmo protocolo, mesmo driver
     {"sqlite",     "",  "SQLite driver is not implemented yet"},
     {"generic",    "",  "generic JDBC has no equivalent without a JVM"},
-    {"oracle",     "",  "Oracle driver is planned for a later phase"},
+    {"oracle",     "oracle", ""},
     {"mssql",      "sqlserver", ""},
     {"sqlserver",  "sqlserver", ""},
     {"sqlanywhere", "sqlanywhere", ""},
@@ -527,6 +527,11 @@ json::Value profile_to_json(const StoredProfile& stored) {
             "jdbc:sqlserver://" + profile.host + ":" + std::to_string(profile.port) +
             (profile.database.empty() ? std::string{}
                                       : ";databaseName=" + profile.database));
+    } else if (scheme == "oracle") {
+        // A forma "thin" com nome de servico: @//host:porta/servico.
+        config["url"] = json::Value(
+            "jdbc:oracle:thin:@//" + profile.host + ":" + std::to_string(profile.port) +
+            "/" + profile.database);
     } else {
         config["url"] = json::Value(
             "jdbc:" + scheme + "://" + profile.host + ":" +
@@ -979,6 +984,7 @@ ProviderNames provider_for_driver(std::string_view driver_id) noexcept {
     // "Sybase jConnect", do plugin do SQL Server. E' o par que faz um perfil
     // criado aqui abrir la'.
     if (driver_id == "sqlanywhere") return {"mssql", "sybase_jconn"};
+    if (driver_id == "oracle") return {"oracle", "oracle_thin"};
 
     // O padrao e' PostgreSQL, que e' o driver padrao do ConnConfig. Um
     // driver desconhecido gravado como PostgreSQL e' melhor que um provider

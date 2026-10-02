@@ -95,6 +95,37 @@ Result<ConnectionProfile> profile_from_url(std::string_view url) {
         if (!sybase.empty()) url = sybase;
     }
 
+    // O Oracle: "oracle:thin:[usuario/senha]@//host:porta/servico" e a forma
+    // antiga, por SID, "oracle:thin:@host:porta:SID". Tambem reescritas na
+    // comum; o SID vira a propriedade "sid" do driver.
+    std::string oracle;
+    {
+        std::string head(url.substr(0, std::min<std::size_t>(url.size(), 12)));
+        std::transform(head.begin(), head.end(), head.begin(), lower);
+        if (head == "oracle:thin:") {
+            std::string_view tail = url.substr(12);
+            std::string credentials;
+            if (const std::size_t at = tail.find('@'); at != std::string_view::npos) {
+                credentials = std::string(tail.substr(0, at));
+                tail.remove_prefix(at + 1);
+                // "usuario/senha" -> "usuario:senha@", a forma das outras URLs.
+                if (const std::size_t slash = credentials.find('/');
+                    slash != std::string::npos) {
+                    credentials[slash] = ':';
+                }
+                if (!credentials.empty()) credentials += '@';
+            }
+            if (tail.starts_with("//")) {
+                oracle = "oracle://" + credentials + std::string(tail.substr(2));
+            } else if (const std::size_t colon = tail.rfind(':');
+                       colon != std::string_view::npos && tail.find(':') != colon) {
+                oracle = "oracle://" + credentials + std::string(tail.substr(0, colon)) +
+                         "?sid=" + std::string(tail.substr(colon + 1));
+            }
+            if (!oracle.empty()) url = oracle;
+        }
+    }
+
     const std::size_t scheme_end = url.find("://");
     if (scheme_end == std::string_view::npos) {
         return std::unexpected(Error{Errc::invalid_argument,
@@ -118,10 +149,14 @@ Result<ConnectionProfile> profile_from_url(std::string_view url) {
     } else if (scheme == "sqlanywhere") {
         profile.driver_id = "sqlanywhere";
         profile.port      = 2638;
+    } else if (scheme == "oracle") {
+        profile.driver_id = "oracle";
+        profile.port      = 1521;
     } else {
         return std::unexpected(Error{Errc::invalid_argument,
             "no driver for '" + scheme +
-                "': C-Otter connects to PostgreSQL, MySQL, SQL Server and SQL Anywhere"});
+                "': C-Otter connects to PostgreSQL, MySQL, SQL Server, SQL Anywhere "
+                "and Oracle"});
     }
 
     // O SQL Server separa as propriedades com ';' em vez de '?' e '&':

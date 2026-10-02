@@ -292,6 +292,44 @@ const Dialect& sqlanywhere_dialect() {
     return dialect;
 }
 
+const Dialect& oracle_dialect() {
+    static const Dialect dialect = [] {
+        Dialect d;
+        d.name = "Oracle";
+        // Sem aspas, o nome vira MAIUSCULAS -- o contrario do PostgreSQL.
+        d.unquoted_case     = Dialect::FoldCase::upper;
+        d.identifier_quotes = {QuoteStyle::double_quotes};
+        d.plsql_units       = true;
+        d.backslash_escapes = false;
+
+        d.keywords = core_keywords();
+        merge(d.keywords, {
+            "BODY", "BULK", "COLLECT", "CONNECT", "CURSOR", "DECLARE", "ELSIF",
+            "EXCEPTION", "EXECUTE", "EXIT", "FETCH", "FORALL", "FUNCTION", "IF",
+            "IMMEDIATE", "LEVEL", "LOOP", "MERGE", "MINUS", "NOCOPY", "NOWAIT",
+            "PACKAGE", "PIVOT", "PRAGMA", "PRIOR", "PROCEDURE", "PURGE", "RAISE",
+            "RETURN", "RETURNING", "ROWNUM", "SEQUENCE", "START", "SYNONYM",
+            "TRIGGER", "TRUNCATE", "TYPE", "UNPIVOT", "WHILE",
+        });
+
+        d.functions = core_functions();
+        merge(d.functions, {
+            "ADD_MONTHS", "DECODE", "EXTRACT", "GREATEST", "INSTR", "LAST_DAY",
+            "LEAST", "LISTAGG", "LPAD", "MONTHS_BETWEEN", "NVL", "NVL2",
+            "REGEXP_LIKE", "REGEXP_REPLACE", "REGEXP_SUBSTR", "RPAD", "SUBSTR",
+            "SYSDATE", "SYSTIMESTAMP", "SYS_CONTEXT", "SYS_GUID", "TO_CHAR",
+            "TO_CLOB", "TO_DATE", "TO_NUMBER", "TO_TIMESTAMP", "TRUNC", "USER",
+        });
+
+        d.types = {"BFILE", "BINARY_DOUBLE", "BINARY_FLOAT", "BLOB", "BOOLEAN", "CHAR",
+                   "CLOB", "DATE", "FLOAT", "INTEGER", "INTERVAL", "JSON", "LONG",
+                   "NCHAR", "NCLOB", "NUMBER", "NVARCHAR2", "PLS_INTEGER", "RAW",
+                   "ROWID", "TIMESTAMP", "UROWID", "VARCHAR", "VARCHAR2", "XMLTYPE"};
+        return d;
+    }();
+    return dialect;
+}
+
 const Dialect& sqlite_dialect() {
     static const Dialect dialect = [] {
         Dialect d;
@@ -322,6 +360,7 @@ const Dialect& dialect_for(std::string_view driver_id) {
     if (driver_id == "mysql" || driver_id == "mariadb") return mysql_dialect();
     if (driver_id == "mssql" || driver_id == "sqlserver") return mssql_dialect();
     if (driver_id == "sqlanywhere") return sqlanywhere_dialect();
+    if (driver_id == "oracle") return oracle_dialect();
     if (driver_id == "sqlite") return sqlite_dialect();
     return standard_dialect();
 }

@@ -79,3 +79,20 @@ add_library(otter::otter_tdswire ALIAS otter_tdswire)
 target_include_directories(otter_tdswire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(otter_tdswire PUBLIC otter_flags otter::otter_net)
 set_target_properties(otter_tdswire PROPERTIES FOLDER "lib")
+
+# --- otter_orawire: protocolo do Oracle (TNS/TTC) ----------------------------
+#
+# Existe porque o cliente da Oracle (Instant Client) e' proprietario e so' vem
+# como biblioteca dinamica, e o ODPI-C apenas o carrega (ADR 0027). Nao ha'
+# especificacao publica: a referencia e' o driver "thin" de codigo aberto da
+# propria Oracle. Mapa em docs/ORACLE-MAP.md.
+add_library(otter_orawire STATIC
+    orawire/auth.cpp
+    orawire/value.cpp
+    orawire/connection.cpp
+)
+add_library(otter::otter_orawire ALIAS otter_orawire)
+
+target_include_directories(otter_orawire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(otter_orawire PUBLIC otter_flags otter::otter_net)
+set_target_properties(otter_orawire PROPERTIES FOLDER "lib")

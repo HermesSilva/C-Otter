@@ -1506,6 +1506,10 @@ void MainShell::object_node(const db::ObjectRef& ref, bool toggled) {
 }
 
 bool MainShell::can_create_object(db::ObjectType type) const {
+    // Oracle: nenhum formulario de criacao ainda -- os que existem geram o
+    // SQL dos outros dialetos (docs/ORACLE-MAP.md).
+    if (session().is_oracle()) return false;
+
     // O que so' existe num dos dois: schema, extensao, tablespace, politica,
     // materialized view e event trigger sao do PostgreSQL; evento, do MySQL.
     if (session().is_mssql()) {
@@ -1638,6 +1642,20 @@ void MainShell::draw_object_menu(const db::ObjectRef& ref) {
     }
 
     ImGui::Separator();
+
+    if (session().is_oracle()) {
+        // Somente leitura por enquanto: renomear, apagar e as ferramentas
+        // gerariam o SQL de outro dialeto. O menu diz isso (diretiva 6).
+        if (ImGui::MenuItem(TR("Copy name"))) ImGui::SetClipboardText(ref.name.c_str());
+        if (ImGui::MenuItem(TR("Refresh"), "F5", false, can_run)) {
+            session().invalidate_object_info(ref);
+            session().reload_catalog_async();
+        }
+        ImGui::Separator();
+        ImGui::MenuItem(TR("Creating and altering objects is not implemented for Oracle yet"),
+                        nullptr, false, false);
+        return;
+    }
 
     // Criar outro do mesmo tipo, no mesmo lugar.
     create_menu_item(ref.type, ref.schema, ref.parent);

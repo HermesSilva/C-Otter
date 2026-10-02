@@ -1,5 +1,6 @@
 #include "net/socket.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -228,9 +229,20 @@ Result<Socket> Socket::connect(std::string_view host, std::uint16_t port,
             FD_ZERO(&writable);
             FD_SET(s, &writable);
 
+            // Havendo outro endereco a tentar, este nao leva o prazo inteiro.
+            // "localhost" resolve para ::1 e depois 127.0.0.1; uma porta
+            // publicada por um conteiner (Docker no WSL) so' escuta no IPv4, e
+            // o ::1 nem recusa: fica mudo. Com o prazo inteiro, cada conexao
+            // esperava 10 s antes de tentar o endereco que funciona (medido
+            // com o Oracle de teste). O ultimo candidato leva o prazo todo.
+            const std::chrono::milliseconds budget =
+                it->ai_next != nullptr
+                    ? (std::min)(timeout, std::chrono::milliseconds(1500))
+                    : timeout;
+
             timeval tv;
-            tv.tv_sec  = static_cast<long>(timeout.count() / 1000);
-            tv.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+            tv.tv_sec  = static_cast<long>(budget.count() / 1000);
+            tv.tv_usec = static_cast<long>((budget.count() % 1000) * 1000);
 
             const int ready = ::select(static_cast<int>(s) + 1, nullptr, &writable,
                                        nullptr, &tv);

@@ -3228,6 +3228,18 @@ const char* const kPtBr[] = {
         "Renomear conexão",
     "another connection already has this name",
         "outra conexão já tem este nome",
+
+    // --- Oracle (ADR 0027) ---
+    "Database: the SERVICE NAME (for example FREEPDB1 or ORCLPDB1). To connect by "
+    "SID instead, add the driver property \"sid\".\nNot implemented yet for Oracle: "
+    "TLS (TCPS), the SYSDBA/SYSOPER roles and TNS aliases.",
+        "Banco: o NOME DE SERVIÇO (por exemplo FREEPDB1 ou ORCLPDB1). Para conectar "
+        "por SID, acrescente a propriedade de driver \"sid\".\nAinda não implementado "
+        "para o Oracle: TLS (TCPS), os papéis SYSDBA/SYSOPER e apelidos TNS.",
+    "Oracle: only \"sid\" is read -- it connects by SID instead of by service name.",
+        "Oracle: só \"sid\" é lida -- conecta por SID em vez de por nome de serviço.",
+    "Creating and altering objects is not implemented for Oracle yet",
+        "Criar e alterar objetos ainda não está implementado para o Oracle",
 };
 
 } // namespace

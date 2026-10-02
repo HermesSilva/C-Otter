@@ -340,9 +340,10 @@ OTTER_TEST(registry_finds_mysql_and_maps_mariadb_to_it) {
     OTTER_CHECK(otter::db::find_driver("postgresql") != nullptr);
 
     // Driver desconhecido devolve NULO, e nao o primeiro da lista: conectar
-    // a um Oracle falando o protocolo do PostgreSQL daria um erro de
-    // protocolo que nao ajuda ninguem a entender o que houve.
-    OTTER_CHECK_EQ(otter::db::find_driver("oracle"), nullptr);
+    // a um Db2 falando o protocolo do PostgreSQL daria um erro de
+    // protocolo que nao ajuda ninguem a entender o que houve. (Era "oracle"
+    // ate' o Oracle ganhar driver -- ADR 0027.)
+    OTTER_CHECK_EQ(otter::db::find_driver("db2"), nullptr);
     OTTER_CHECK_EQ(otter::db::find_driver(""), nullptr);
 }
 

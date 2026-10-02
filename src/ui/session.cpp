@@ -113,6 +113,8 @@ void Session::connect_async(const db::ConnConfig& config) {
                           ? Engine::mssql
                       : config.driver_id == "sqlanywhere"
                           ? Engine::sqlanywhere
+                      : config.driver_id == "oracle"
+                          ? Engine::oracle
                           : Engine::postgres,
                       std::memory_order_release);
         schemas_.clear();

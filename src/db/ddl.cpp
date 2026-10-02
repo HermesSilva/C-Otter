@@ -91,6 +91,12 @@ namespace {
 // atropelava o outro.
 thread_local QuoteStyle g_dialect = QuoteStyle::double_quotes;
 
+// Oracle: as aspas sao as do padrao (double_quotes), mas o limite de linhas
+// nao e' LIMIT -- e' FETCH FIRST n ROWS ONLY. Um sinal 'a parte, e nao um
+// QuoteStyle novo: os geradores de ALTER e de DML ainda nao tem o ramo do
+// Oracle, e a interface nao os oferece la' (docs/ORACLE-MAP.md).
+thread_local bool g_fetch_first = false;
+
 struct Delimiters { char open; char close; };
 
 Delimiters delimiters_for(QuoteStyle style) noexcept {
@@ -110,6 +116,7 @@ void set_sql_dialect(QuoteStyle style) { g_dialect = style; }
 QuoteStyle sql_dialect() noexcept { return g_dialect; }
 
 void set_sql_dialect_for(std::string_view driver_id) {
+    g_fetch_first = driver_id == "oracle";
     if (driver_id == "mysql" || driver_id == "mariadb") {
         set_sql_dialect(QuoteStyle::backticks);
     } else if (driver_id == "mssql" || driver_id == "sqlserver") {
@@ -327,7 +334,10 @@ std::string generate_select(std::string_view schema, const TableMeta& table,
     }
 
     out += "  FROM " + qualified_name(schema, table.name);
-    if (!top && limit > 0) out += "\n LIMIT " + std::to_string(limit);
+    if (!top && limit > 0) {
+        out += g_fetch_first ? "\n FETCH FIRST " + std::to_string(limit) + " ROWS ONLY"
+                             : "\n LIMIT " + std::to_string(limit);
+    }
     out += ";\n";
     return out;
 }

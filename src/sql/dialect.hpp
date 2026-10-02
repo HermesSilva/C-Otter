@@ -44,6 +44,13 @@ struct Dialect {
     // CREATE PROCEDURE/FUNCTION/TRIGGER/VIEW precisa ser o lote inteiro.
     bool go_batch_separator = false;
 
+    // PL/SQL (Oracle). Uma unidade de codigo -- DECLARE ..., ou CREATE de
+    // procedure, funcao, pacote, trigger ou tipo -- tem ';' por dentro e so'
+    // acaba numa linha com "/" sozinha, a convencao do SQL*Plus (ou no fim do
+    // script). A barra tambem encerra qualquer outro comando. Um bloco
+    // BEGIN ... END anonimo acaba no ';' do END dele, sem precisar da barra.
+    bool plsql_units = false;
+
     // Corpo de funcao delimitado por tag: $$ ... $$ ou $tag$ ... $tag$.
     // Exclusivo do PostgreSQL, e a razao pela qual splitters ingenuos quebram.
     bool dollar_quoted_strings = false;
@@ -82,6 +89,7 @@ struct Dialect {
 [[nodiscard]] const Dialect& mysql_dialect();
 [[nodiscard]] const Dialect& mssql_dialect();
 [[nodiscard]] const Dialect& sqlanywhere_dialect();
+[[nodiscard]] const Dialect& oracle_dialect();
 [[nodiscard]] const Dialect& sqlite_dialect();
 [[nodiscard]] const Dialect& standard_dialect();
 

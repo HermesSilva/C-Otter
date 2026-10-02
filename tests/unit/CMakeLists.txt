@@ -34,6 +34,8 @@ add_executable(otter_tests
     test_native_tools.cpp
     test_object_ddl.cpp
     test_object_info.cpp
+    test_oracle.cpp
+    test_orawire.cpp
     test_paging.cpp
     test_pgwire.cpp
     test_pivot.cpp
@@ -56,6 +58,7 @@ target_link_libraries(otter_tests PRIVATE
     otter::otter_pgwire
     otter::otter_mywire
     otter::otter_tdswire
+    otter::otter_orawire
     otter::otter_ui
 )
 set_target_properties(otter_tests PROPERTIES FOLDER "tests")

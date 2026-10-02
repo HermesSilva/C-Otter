@@ -259,11 +259,122 @@ std::vector<Statement> split_batches(std::string_view script, const Dialect& dia
     return statements;
 }
 
+// --- Oracle: unidades PL/SQL -------------------------------------------------------
+
+bool is_word(const Token& token, std::string_view word) {
+    return (token.kind == TokenKind::keyword || token.kind == TokenKind::identifier) &&
+           iequals(token.text, word);
+}
+
+// O token e' uma "/" sozinha na linha -- o "executa" do SQL*Plus?
+bool is_slash_line(const std::vector<Token>& tokens, std::size_t index) {
+    const Token& token = tokens[index];
+    if (token.kind != TokenKind::operator_token || token.text != "/") return false;
+    if (index > 0 && tokens[index - 1].line == token.line) return false;
+    const std::size_t next = index + 1;
+    return next >= tokens.size() || tokens[next].kind == TokenKind::end_of_input ||
+           tokens[next].line != token.line;
+}
+
+// DECLARE ..., ou CREATE [OR REPLACE] [[NON]EDITIONABLE] de procedure, funcao,
+// pacote, trigger, tipo ou biblioteca: codigo com ';' por dentro.
+bool starts_plsql_unit(const std::vector<Token>& tokens, std::size_t index) {
+    if (is_word(tokens[index], "DECLARE")) return true;
+    if (!is_word(tokens[index], "CREATE")) return false;
+
+    for (std::size_t i = index + 1; i < tokens.size() && i < index + 7; ++i) {
+        const Token& token = tokens[i];
+        for (const std::string_view kind :
+             {"PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE", "LIBRARY"}) {
+            if (is_word(token, kind)) return true;
+        }
+        bool modifier = false;
+        for (const std::string_view word :
+             {"OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE", "AND", "RESOLVE", "FORCE"}) {
+            modifier = modifier || is_word(token, word);
+        }
+        if (!modifier) return false;
+    }
+    return false;
+}
+
+// O script do Oracle (Dialect::plsql_units).
+std::vector<Statement> split_plsql(std::string_view script, const Dialect& dialect) {
+    std::vector<Statement> statements;
+
+    Lexer lexer(script, dialect);
+    const std::vector<Token> tokens = lexer.tokenize_all(/*skip_trivia=*/true);
+
+    const auto emit = [&](std::size_t begin, std::size_t end, std::size_t line, bool atomic) {
+        Statement statement;
+        statement.text   = script.substr(begin, end - begin);
+        statement.offset = begin;
+        statement.line   = line;
+        statement.atomic = atomic;
+        if (!statement.empty()) statements.push_back(statement);
+    };
+
+    std::size_t start = 0;
+    std::size_t start_line = 0;
+    bool fresh = true;      // o proximo token comeca um comando
+    bool unit = false;      // dentro de uma unidade: so' a barra encerra
+    int  depth = 0;         // BEGIN ... END e CASE ... END
+    bool closed_block = false;   // o token anterior foi um END que fechou algo
+
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        const Token& token = tokens[i];
+        if (token.kind == TokenKind::end_of_input) break;
+
+        if (is_slash_line(tokens, i)) {
+            emit(start, token.offset, start_line, unit);
+            start = token.offset + token.text.size();
+            fresh = true;
+            unit  = false;
+            depth = 0;
+            closed_block = false;
+            continue;
+        }
+        if (fresh) {
+            fresh = false;
+            start_line = token.line;
+            unit = starts_plsql_unit(tokens, i);
+        }
+
+        const bool after_end = closed_block;
+        closed_block = false;
+        if (is_word(token, "BEGIN")) {
+            ++depth;
+        } else if (is_word(token, "CASE")) {
+            // "END CASE" fecha o CASE; o CASE que o segue nao abre outro.
+            if (!after_end) ++depth;
+        } else if (is_word(token, "END")) {
+            if (depth > 0) {
+                --depth;
+                closed_block = true;
+            }
+        } else if (after_end && (is_word(token, "IF") || is_word(token, "LOOP"))) {
+            // END IF e END LOOP fecham o que nao foi contado: devolve.
+            ++depth;
+        }
+
+        if (token.kind != TokenKind::semicolon || depth != 0 || unit) continue;
+
+        emit(start, token.offset, start_line, /*atomic=*/false);
+        start = token.offset + token.text.size();
+        fresh = true;
+    }
+
+    // Resto sem terminador -- o caso mais comum no editor.
+    if (start < script.size()) emit(start, script.size(), start_line, unit);
+    return statements;
+}
+
 } // namespace
 
 std::vector<Statement> split_script(std::string_view script,
                                     const Dialect& dialect) {
     if (dialect.go_batch_separator) return split_batches(script, dialect);
+    if (dialect.plsql_units) return split_plsql(script, dialect);
 
     std::vector<Statement> statements;
 
