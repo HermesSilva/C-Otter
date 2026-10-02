@@ -1,7 +1,13 @@
 # C-Otter -- entrega: compila, testa e empacota Windows e Linux.
 #
-#   git tag v0.1.0 && git push origin v0.1.0    -> publica a Release com os dois pacotes
-#   Actions > Release > Run workflow            -> so' gera os pacotes (artefatos do run)
+#   Actions > Release > Run workflow            -> publica a Release vX.Y.Z.N
+#   gh workflow run release.yml                 -> idem, pelo terminal
+#   gh workflow run release.yml -f publish=false -> so' gera os pacotes (artefatos do run)
+#   git tag v0.2.0 && git push origin v0.2.0    -> publica a Release sob a tag v0.2.0
+#
+# N e' o numero de build: o numero deste run, que o GitHub sobe sozinho a cada
+# execucao. Vai no binario (janela About), no nome do pacote e na tag da
+# Release. X.Y.Z continua sendo o VERSION do CMakeLists.txt, mudado 'a mao.
 #
 # O empacotamento vive em tools/package.ps1 e tools/package.sh: o que roda aqui
 # e' o que se roda na maquina para conferir.
@@ -11,9 +17,19 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publicar a Release (desmarcado, so' gera os pacotes)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+# Lido pelo CMake no configure (binario) e pelo tools/package_version.sh (nome
+# do pacote): os dois dizem o mesmo numero porque vem daqui.
+env:
+  OTTER_BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
   windows:
@@ -51,6 +67,8 @@ jobs:
     # exige de quem o roda (2.39 na 24.04), e e' nela que o clang-19 vem do
     # repositorio oficial. Trocar a imagem e' decisao, nao acaso.
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -110,7 +128,7 @@ jobs:
 
   release:
     name: Publicar
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.publish
     needs: [windows, linux]
     runs-on: ubuntu-24.04
     permissions:
@@ -130,14 +148,25 @@ jobs:
           cp dist/c-otter-*-linux-x64.tar.gz  dist/c-otter-linux-x64.tar.gz
           ls -la dist
 
-      # Tag com sufixo (v0.2.0-rc1) sai como pre-release.
+      # Por tag, a Release fica na tag empurrada. Na entrega manual nao ha'
+      # tag: o gh a cria (vX.Y.Z.N) no commit deste run -- e tag criada com o
+      # token do workflow nao dispara outro run. Versao com sufixo
+      # (0.2.0.7-rc1) sai como pre-release.
       - name: Criar a Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.linux.outputs.version }}
         run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+            where="--verify-tag"
+          else
+            tag="v$VERSION"
+            where="--target $GITHUB_SHA"
+          fi
           prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$tag" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "C-Otter $GITHUB_REF_NAME" \
-            --generate-notes --verify-tag $prerelease
+            --title "C-Otter v$VERSION" \
+            --generate-notes $where $prerelease

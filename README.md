@@ -176,10 +176,14 @@ build/linux-release/bin/c-otter
 ```
 
 Each system's package comes out of `tools\package.ps1` and `tools/package.sh`. Releasing
-is pushing a tag: `git tag v0.1.0 && git push origin v0.1.0` triggers
-[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds, tests,
-packages both and creates the Release. The tag must match the `VERSION` in
-`CMakeLists.txt`.
+is running [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds,
+tests, packages both and creates the Release: *Actions → Release → Run workflow*, or
+`gh workflow run release.yml`.
+
+The version is `X.Y.Z.N`: `X.Y.Z` is the `VERSION` in `CMakeLists.txt`, and `N` is the
+build number — the run number of the workflow, so every release gets the next one without
+a commit. The Release is tagged `vX.Y.Z.N`, and *Help → About* shows the same number.
+Pushing a tag `vX.Y.Z` (it must match the `VERSION`) also releases, under that tag.
 
 ### Documentation
 

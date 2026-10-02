@@ -12,6 +12,7 @@
 
 #include "base/i18n.hpp"
 #include "base/paths.hpp"
+#include "base/version.hpp"
 #include "db/app_tools.hpp"
 #include "db/ddl.hpp"
 #include "db/mysql_object.hpp"
@@ -1324,6 +1325,7 @@ std::string MainShell::diagnostics_text() {
 
     line("C-Otter diagnostic info");
     line("=======================");
+    line("Version: " + std::string(version_string()));
     line(std::string("Dear ImGui: ") + IMGUI_VERSION);
 #if defined(_WIN32)
     line("Platform: Windows");

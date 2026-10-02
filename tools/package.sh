@@ -27,6 +27,18 @@ cp "$repo/$build/bin/c-otter" "$stage/"
 strip --strip-unneeded "$stage/c-otter"
 chmod 755 "$stage/c-otter"
 
+# O pacote so' pode exigir o que toda maquina com video ja' tem. A maquina de
+# build tem os pacotes -dev, entao o programa abre nela mesmo dependendo de
+# uma .so que o usuario nao tem (foi a libOpenGL.so.0, do libopengl0): quem
+# pega isso e' a lista do proprio binario, nao o teste de abrir.
+allowed='libc.so.6 libm.so.6 ld-linux-x86-64.so.2 libGL.so.1'
+for lib in $(readelf -d "$stage/c-otter" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+    case " $allowed " in
+        *" $lib "*) ;;
+        *) echo "package.sh: dependencia dinamica fora da lista: $lib" >&2; exit 1 ;;
+    esac
+done
+
 cp "$repo/docs/LICENSES.md"             "$stage/"
 # Os icones embutidos sao os originais do DBeaver (Apache 2.0): o aviso viaja
 # com o binario.

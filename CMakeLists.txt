@@ -92,6 +92,16 @@ option(OTTER_BUILD_UI     "Build the ImGui UI layer"  OFF)
 option(OTTER_SANITIZERS   "Enable ASan/UBSan"         OFF)
 option(OTTER_WERROR       "Treat warnings as errors"  ON)
 
+# Numero de build: o quarto campo da versao (X.Y.Z.N), que sobe sozinho a cada
+# entrega. Quem o da' e' o workflow de Release (github.run_number, pela
+# variavel de ambiente), e nao um arquivo no repositorio: contador versionado
+# exigiria um commit por entrega. Build local fica em 0 e se apresenta "-dev".
+set(OTTER_BUILD_NUMBER "$ENV{OTTER_BUILD_NUMBER}" CACHE STRING
+    "Numero de build (run do workflow de Release); 0 = build local")
+if(NOT OTTER_BUILD_NUMBER MATCHES "^[0-9]+$")
+    set(OTTER_BUILD_NUMBER 0)
+endif()
+
 # ---------------------------------------------------------------------------
 # Flags comuns: warnings agressivos desde o primeiro dia.
 # Ligar -Werror depois do codigo pronto e' caro; ligar agora e' de graca.
@@ -170,7 +180,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 message(STATUS "")
-message(STATUS "  C-Otter ${PROJECT_VERSION} -- every JOIN is an OTTER JOIN")
+message(STATUS "  C-Otter ${PROJECT_VERSION} (build ${OTTER_BUILD_NUMBER}) -- every JOIN is an OTTER JOIN")
 message(STATUS "  compiler : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  build    : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  tests    : ${OTTER_BUILD_TESTS} | spikes: ${OTTER_BUILD_SPIKES} | ui: ${OTTER_BUILD_UI}")

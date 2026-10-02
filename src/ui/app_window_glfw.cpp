@@ -39,6 +39,15 @@ void glfw_error_callback(int code, const char* description) {
     std::fprintf(stderr, "[glfw] erro %d: %s\n", code, description);
 }
 
+// No Wayland o programa nao sabe nem escolhe onde a janela fica -- quem decide
+// e' o compositor -- e o icone vem do arquivo .desktop. O GLFW responde a cada
+// tentativa com o erro 65548, e a posicao e' lida TODO QUADRO: na sessao padrao
+// do Ubuntu eram 115 linhas no terminal em 6 segundos. Quem posiciona, le a
+// posicao ou poe icone pergunta aqui antes.
+bool window_manager_takes_requests() {
+    return glfwGetPlatform() != GLFW_PLATFORM_WAYLAND;
+}
+
 // Latin + Latin-1 + Latin Extended-A cobrem portugues; os demais blocos
 // trazem aspas tipograficas, setas e simbolos usados na grade.
 //
@@ -142,6 +151,8 @@ void load_ui_font(ImGuiIO& io, float scale) {
 // duas orelhas e o focinho. No tamanho da barra de tarefas o que se le' e' a
 // silhueta, nao o detalhe -- o mesmo criterio dos icones da arvore.
 void set_window_icon(GLFWwindow* window) {
+    if (!window_manager_takes_requests()) return;
+
     constexpr int kSize = 32;
     static unsigned char pixels[kSize * kSize * 4];
 
@@ -243,8 +254,10 @@ void track_placement(GLFWwindow* window, WindowPlacement& normal) {
     normal.maximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED) != 0;
     if (normal.maximized) return;
 
-    int x = 0, y = 0, width = 0, height = 0;
-    glfwGetWindowPos(window, &x, &y);
+    // Sem posicao para ler (Wayland), fica a que ja' estava: o tamanho ainda
+    // se grava, e e' o que se consegue restaurar la'.
+    int x = normal.x, y = normal.y, width = 0, height = 0;
+    if (window_manager_takes_requests()) glfwGetWindowPos(window, &x, &y);
     glfwGetWindowSize(window, &width, &height);
     if (width <= 0 || height <= 0) return;
     normal.x      = x;
@@ -321,7 +334,7 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     if (config.placement.saved()) {
         glfwSetWindowSize(impl.window, placement.width, placement.height);
     }
-    if (!areas.empty()) {
+    if (!areas.empty() && window_manager_takes_requests()) {
         int x = placement.x, y = placement.y;
         if (!config.placement.saved()) {
             // Centra com o tamanho que a janela de fato ganhou.

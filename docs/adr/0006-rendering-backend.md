@@ -98,6 +98,7 @@ O que custou, e fica registrado para não se repetir:
 | Clang ≤ 18 não habilita o `<expected>` da libstdc++ | Clang 19+; o configure recusa o compilador, com o motivo |
 | CMake 3.28+ exige `clang-scan-deps` para varrer módulos | `CMAKE_CXX_SCAN_FOR_MODULES OFF` |
 | Busca restrita a `.a` achava a `libm.a` e não achava a `libGL` | Exceção para GLFW e OpenGL: glibc e libGL entram como `.so` |
+| O pacote não abria fora da máquina de build: `libOpenGL.so.0: cannot open shared object file`. O `FindOpenGL` prefere GLVND e liga contra a `libOpenGL` (pacote `libopengl0`), que o Ubuntu desktop não traz; o CI a tinha por causa do `libgl1-mesa-dev`, e por isso o passo "Abrir o programa" passava | `OpenGL_GL_PREFERENCE LEGACY`: liga contra a `libGL.so.1` (`libgl1`). O `tools/package.sh` recusa o pacote se o binário exigir `.so` fora da lista |
 | GLFW compilado com `gcc` e o resto com Clang quebrava o LTO | Presets fixam `CMAKE_C_COMPILER=clang` |
 | Avisos que a MSVC não dá (`-Wformat-security`, `-Wsign-conversion`, `-Wswitch`) | Corrigidos no código; cabeçalhos de terceiros viraram `SYSTEM` |
 

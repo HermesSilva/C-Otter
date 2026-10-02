@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "base/i18n.hpp"
+#include "base/version.hpp"
 #include "db/registry.hpp"
 #include "db/aggregate.hpp"
 #include "db/ddl.hpp"
@@ -7358,7 +7359,8 @@ void MainShell::draw_about_window() {
     if (ImGui::Begin(TR("About C-Otter"), &show_about_,
                      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushStyleColor(ImGuiCol_Text, col(colors().accent_light));
-        ImGui::TextUnformatted("C-Otter 0.1.0");
+        const std::string title = "C-Otter " + std::string(version_string());
+        ImGui::TextUnformatted(title.c_str());
         ImGui::PopStyleColor();
 
         ImGui::TextWrapped(

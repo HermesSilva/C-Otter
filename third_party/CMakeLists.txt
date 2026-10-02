@@ -54,6 +54,14 @@ else()
     # A raiz restringe a busca a ".a" (link estatico total), mas a libGL vem do
     # driver de video da maquina e so' existe como .so: com a glibc, e' a
     # dependencia dinamica legitima, como o opengl32 do Windows.
+    #
+    # LEGACY: o padrao do FindOpenGL (GLVND) liga contra libOpenGL.so.0 +
+    # libGLX.so.0, e a libOpenGL (pacote libopengl0) NAO vem no Ubuntu
+    # desktop -- so' na maquina de build, trazida pelo libgl1-mesa-dev. O
+    # pacote morria em "libOpenGL.so.0: cannot open shared object file". A
+    # libGL.so.1 (libgl1) esta' em toda maquina com video, e e' a mesma que
+    # o GLFW abre por dlopen para criar o contexto.
+    set(OpenGL_GL_PREFERENCE LEGACY)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".so")
     find_package(OpenGL REQUIRED)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ${_otter_library_suffixes})
