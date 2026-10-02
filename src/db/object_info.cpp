@@ -50,13 +50,6 @@ std::string regprocedure(const ObjectRef& ref) {
     return lit(qualified) + "::regprocedure";
 }
 
-bool is_relation(ObjectType type) noexcept {
-    return type == ObjectType::table || type == ObjectType::view ||
-           type == ObjectType::materialized_view ||
-           type == ObjectType::foreign_table || type == ObjectType::sequence ||
-           type == ObjectType::index;
-}
-
 bool is_routine(ObjectType type) noexcept {
     return type == ObjectType::function || type == ObjectType::procedure ||
            type == ObjectType::aggregate;
@@ -520,6 +513,9 @@ std::string pg_properties_query(const ObjectRef& ref) {
                    "       COALESCE(obj_description(l.oid, 'pg_language'), '') AS \"Comment\""
                    "  FROM pg_language l"
                    " WHERE l.lanname = " + lit(ref.name);
+
+        case ObjectType::event:   // so' existe no MySQL
+            break;
     }
     return {};
 }
@@ -750,6 +746,9 @@ std::string pg_ddl_query(const ObjectRef& ref) {
             return "SELECT 'CREATE ' || CASE WHEN l.lanpltrusted THEN 'TRUSTED ' ELSE '' END ||"
                    " 'LANGUAGE ' || quote_ident(l.lanname) || ';'"
                    "  FROM pg_language l WHERE l.lanname = " + lit(ref.name);
+
+        case ObjectType::event:   // so' existe no MySQL
+            break;
     }
     return {};
 }

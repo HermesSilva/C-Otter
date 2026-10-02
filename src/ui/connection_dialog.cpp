@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -183,9 +184,9 @@ void ConnectionDialog::draw(const Feedback& feedback) {
 }
 
 void ConnectionDialog::draw_driver_catalog() {
-    ImGui::TextColored(col4(colors().accent_light), TR("Select the database"));
+    ImGui::TextColored(col4(colors().accent_light), "%s", TR("Select the database"));
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("Choose the driver for the new connection."));
+                       "%s", TR("Choose the driver for the new connection."));
     ImGui::Separator();
 
     // Coluna de categorias, como no DBeaver.
@@ -251,7 +252,7 @@ void ConnectionDialog::draw_driver_catalog() {
 
             ImGui::TableSetColumnIndex(2);
             if (driver.available) {
-                ImGui::TextColored(col4(colors().ok), TR("available"));
+                ImGui::TextColored(col4(colors().ok), "%s", TR("available"));
             } else {
                 ImGui::TextColored(col4(colors().text_dim), "%s", TR(driver.note));
             }
@@ -281,7 +282,7 @@ void ConnectionDialog::draw_driver_catalog() {
     if (!can_advance) {
         ImGui::SameLine();
         ImGui::TextColored(col4(colors().text_dim),
-                           TR("  select an available driver"));
+                           "%s", TR("  select an available driver"));
     }
 }
 
@@ -390,7 +391,7 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
         const float t = static_cast<float>(ImGui::GetTime());
         ImVec4 pulse = col4(colors().data_light);
         pulse.w = 0.4f + 0.6f * std::abs(std::sin(t * 3.0f));
-        ImGui::TextColored(pulse, TR("  * connecting..."));
+        ImGui::TextColored(pulse, "%s", TR("  * connecting..."));
     } else if (feedback.failed) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(col4(colors().error), "%s", feedback.message.c_str());
@@ -438,14 +439,14 @@ void ConnectionDialog::draw_page_tree() {
         // O recuo faz o papel do aninhamento. Um TreeNode de verdade
         // permitiria colapsar, mas o DBeaver abre as categorias por padrao e
         // colapsa-las esconderia justamente o que se quer comparar.
-        if (node.depth > 0) ImGui::Indent(16.0f * node.depth);
+        if (node.depth > 0) ImGui::Indent(16.0f * static_cast<float>(node.depth));
 
         const bool selected = node.selectable && page_ == node.page;
         if (ImGui::Selectable(TR(node.label), selected) && node.selectable) {
             page_ = node.page;
         }
 
-        if (node.depth > 0) ImGui::Unindent(16.0f * node.depth);
+        if (node.depth > 0) ImGui::Unindent(16.0f * static_cast<float>(node.depth));
     }
 }
 
@@ -487,7 +488,7 @@ void ConnectionDialog::draw_page_body() {
 void ConnectionDialog::draw_page_sql_formatting() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Keywords"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Keywords"));
     ImGui::Separator();
 
     const char* kCases[] = {TR("As typed"), TR("UPPERCASE"), TR("lowercase")};
@@ -497,7 +498,7 @@ void ConnectionDialog::draw_page_sql_formatting() {
                    "change what you type."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Layout"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Layout"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
@@ -527,7 +528,7 @@ void ConnectionDialog::draw_page_sql_formatting() {
 void ConnectionDialog::draw_page_sql_processing() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Result set"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Result set"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(140);
@@ -538,7 +539,7 @@ void ConnectionDialog::draw_page_sql_processing() {
                    "smaller comes back faster on a distant server."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Scripts"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Scripts"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Stop on the first error"), &editor.stop_script_on_error);
@@ -565,7 +566,7 @@ void ConnectionDialog::draw_page_sql_processing() {
 void ConnectionDialog::draw_page_sql_code_editor() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Indentation"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Indentation"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
@@ -579,7 +580,7 @@ void ConnectionDialog::draw_page_sql_code_editor() {
                    "previous one."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Display"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Display"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Line numbers"), &editor.show_line_numbers);
@@ -619,7 +620,7 @@ void ConnectionDialog::draw_page_sql_code_editor() {
 void ConnectionDialog::draw_page_sql_completion() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("When to suggest"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("When to suggest"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Suggest while typing"), &editor.complete_on_typing);
@@ -633,7 +634,7 @@ void ConnectionDialog::draw_page_sql_completion() {
                    "typing fast."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Where to suggest"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Where to suggest"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Inside comments"), &editor.complete_in_comments);
@@ -643,7 +644,7 @@ void ConnectionDialog::draw_page_sql_completion() {
                    "identifier."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Behaviour"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Behaviour"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Insert a single match automatically"),
@@ -671,7 +672,7 @@ void ConnectionDialog::draw_page_placeholder(const char* what) {
 }
 
 void ConnectionDialog::draw_page_connection_settings() {
-    ImGui::TextColored(col4(colors().data), TR("Server"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Server"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(320);
@@ -736,7 +737,7 @@ void ConnectionDialog::draw_page_connection_settings() {
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Authentication"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Authentication"));
     ImGui::Separator();
 
     // Passam por TR() na montagem, nao no literal: um array `constexpr` de
@@ -812,7 +813,7 @@ void ConnectionDialog::draw_page_connection_settings() {
         icon_inline(Icon::warning, colors().warn);
         ImGui::SameLine(0.0f, 4.0f);
         ImGui::TextColored(col4(colors().warn),
-                           TR("weak encryption, for DBeaver compatibility"));
+                           "%s", TR("weak encryption, for DBeaver compatibility"));
     }
     ImGui::EndDisabled();
 
@@ -853,7 +854,7 @@ void ConnectionDialog::draw_page_metadata() {
         return;
     }
 
-    ImGui::TextColored(col4(colors().data), TR("Navigator settings"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Navigator settings"));
     ImGui::Separator();
 
     // "Show all databases" mora na pagina principal, abaixo do campo
@@ -868,12 +869,12 @@ void ConnectionDialog::draw_page_metadata() {
     ImGui::EndDisabled();
     if (!profile_.postgres.show_non_default_databases) {
         ImGui::TextColored(col4(colors().text_dim),
-                           TR("Enabled only if \"Show all databases\" is on "
+                           "%s", TR("Enabled only if \"Show all databases\" is on "
                               "(Main page)."));
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Performance"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Performance"));
     ImGui::Separator();
 
     // Ajustes do leitor de metadados JDBC do DBeaver. O C-Otter le' cada
@@ -923,9 +924,9 @@ void ConnectionDialog::draw_page_metadata() {
 }
 
 void ConnectionDialog::draw_page_driver_properties() {
-    ImGui::TextColored(col4(colors().data), TR("Driver properties"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Driver properties"));
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("Parameters passed directly to the driver on connect."));
+                       "%s", TR("Parameters passed directly to the driver on connect."));
 
     // Diz ONDE eles entram, que e' o que decide se um nome vai funcionar.
     // O texto anterior prometia "passados ao driver" e nada acontecia: os
@@ -1006,17 +1007,17 @@ void ConnectionDialog::draw_tab_ssh() {
     // usuario preencher um campo que nao serve (diretiva 6; ADR 0021).
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("The tunnel uses the ssh client of the system (OpenSSH), "
+                       "%s", TR("The tunnel uses the ssh client of the system (OpenSSH), "
                           "with your keys, your agent and your known_hosts."));
     if (profile_.ssh.enabled && profile_.ssh.auth == db::SshAuthType::password) {
         ImGui::TextColored(col4(colors().warn),
-                           TR("Password authentication is not supported by the tunnel: "
+                           "%s", TR("Password authentication is not supported by the tunnel: "
                               "choose 'Public key' or 'SSH agent'."));
     } else if (profile_.ssh.enabled &&
                profile_.ssh.auth == db::SshAuthType::public_key &&
                !profile_.ssh.passphrase.empty()) {
         ImGui::TextColored(col4(colors().warn),
-                           TR("A key with a passphrase needs the SSH agent: add it "
+                           "%s", TR("A key with a passphrase needs the SSH agent: add it "
                               "with ssh-add and choose 'SSH agent'."));
     }
     ImGui::PopTextWrapPos();
@@ -1095,7 +1096,7 @@ void ConnectionDialog::draw_tab_ssl() {
     if (!available) {
         ImGui::TextColored(
             col4(colors().warn),
-            TR("TLS is not available in this build of C-Otter."));
+            "%s", TR("TLS is not available in this build of C-Otter."));
         ImGui::Separator();
     }
 
@@ -1125,7 +1126,7 @@ void ConnectionDialog::draw_tab_ssl() {
         profile_.ssl.mode == db::SslMode::prefer) {
         ImGui::TextColored(
             col4(colors().warn),
-            TR("This mode accepts an unencrypted connection. Use 'require' "
+            "%s", TR("This mode accepts an unencrypted connection. Use 'require' "
                "or stronger to actually require TLS."));
     }
 
@@ -1141,7 +1142,7 @@ void ConnectionDialog::draw_tab_ssl() {
     // validacao vai pela cadeia de certificados do sistema.
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(col4(colors().warn),
-                       TR("Certificate files are saved but not used yet; "
+                       "%s", TR("Certificate files are saved but not used yet; "
                           "validation uses the system certificate store."));
     ImGui::PopTextWrapPos();
 
@@ -1155,7 +1156,7 @@ void ConnectionDialog::draw_tab_proxy() {
     ImGui::Checkbox(TR("Use SOCKS proxy"), &profile_.proxy.enabled);
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("SOCKS5. The host name of the database is resolved by the "
+                       "%s", TR("SOCKS5. The host name of the database is resolved by the "
                           "proxy; user and password are optional."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
@@ -1181,7 +1182,7 @@ void ConnectionDialog::draw_tab_proxy() {
 // No DBeaver, Transactions e' pagina propria (PrefPageTransactions), irma de
 // Initialization dentro de "Connection settings" -- nao uma secao dela.
 void ConnectionDialog::draw_page_transactions() {
-    ImGui::TextColored(col4(colors().data), TR("Transactions"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Transactions"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Auto-commit"), &profile_.auto_commit);
@@ -1193,7 +1194,7 @@ void ConnectionDialog::draw_page_transactions() {
                    "UPDATE, DELETE and DDL."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Isolation"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Isolation"));
     ImGui::Separator();
 
     // O DBeaver so' lista os niveis com a conexao VIVA, porque le' do
@@ -1219,14 +1220,14 @@ void ConnectionDialog::draw_page_transactions() {
 }
 
 void ConnectionDialog::draw_page_initialization() {
-    ImGui::TextColored(col4(colors().data), TR("Session"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Session"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(260);
     input_string(TR("Default schema"), profile_.default_schema, 64);
     help_marker(TR("Sets search_path when connecting."));
 
-    ImGui::Text(TR("Initialization queries"));
+    ImGui::Text("%s", TR("Initialization queries"));
     help_marker(TR("One statement per line. Run in order, right after the "
                    "connection is established."));
     ImGui::SameLine();
@@ -1251,7 +1252,7 @@ void ConnectionDialog::draw_page_initialization() {
 // reformatar. E' uma divergencia deliberada do DBeaver, que tem mascaras por
 // tipo -- e a razao esta' na tela, nao so' aqui.
 void ConnectionDialog::draw_page_data_formats() {
-    ImGui::TextColored(col4(colors().data), TR("Values as the server sends them"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Values as the server sends them"));
     ImGui::Separator();
 
     ImGui::PushTextWrapPos(0.0f);
@@ -1279,7 +1280,7 @@ void ConnectionDialog::draw_page_data_formats() {
 void ConnectionDialog::draw_page_binary_editor() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Hex dump"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Hex dump"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(140);
@@ -1303,7 +1304,7 @@ void ConnectionDialog::draw_page_binary_editor() {
 void ConnectionDialog::draw_page_data_transfer() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Export defaults"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Export defaults"));
     ImGui::Separator();
 
     const char* kFormats[] = {"CSV", "JSON", "Markdown", "SQL INSERT"};
@@ -1332,7 +1333,7 @@ void ConnectionDialog::draw_page_data_transfer() {
 void ConnectionDialog::draw_page_data_editor() {
     db::EditorOptions& editor = profile_.editor;
 
-    ImGui::TextColored(col4(colors().data), TR("Null value"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Null value"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(200);
@@ -1347,7 +1348,7 @@ void ConnectionDialog::draw_page_data_editor() {
     if (editor.null_text.empty()) editor.null_text = "[null]";
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Alignment"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Alignment"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Numbers to the right"), &editor.align_numbers_right);
@@ -1362,7 +1363,7 @@ void ConnectionDialog::draw_page_data_editor() {
 // "por que a conexao caiu" procura em "Erros e tempos limite", nao em
 // "Inicialização" (diretriz 12).
 void ConnectionDialog::draw_page_errors_timeouts() {
-    ImGui::TextColored(col4(colors().data), TR("Timeouts"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Timeouts"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(120);
@@ -1371,7 +1372,7 @@ void ConnectionDialog::draw_page_errors_timeouts() {
                    "connection. Does not limit how long a query may run."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Keep the connection alive"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Keep the connection alive"));
     ImGui::Separator();
 
     ImGui::Checkbox(TR("Keep-alive"), &profile_.keep_alive);
@@ -1412,7 +1413,7 @@ void ConnectionDialog::draw_page_errors_timeouts() {
 }
 
 void ConnectionDialog::draw_page_general() {
-    ImGui::TextColored(col4(colors().data), TR("Identification"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Identification"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(360);
@@ -1427,7 +1428,7 @@ void ConnectionDialog::draw_page_general() {
     help_marker(TR("Groups the connection in the tree. Use / for subfolders."));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Connection type"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Connection type"));
     ImGui::Separator();
 
     for (int i = 0; i < 3; ++i) {

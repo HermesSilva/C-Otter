@@ -1,5 +1,6 @@
 #include "net/socket.hpp"
 
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -8,6 +9,8 @@
 #include <ws2tcpip.h>
 using socket_t  = SOCKET;
 using socklen_t = int;
+// Tamanho em send/recv: int no Winsock, size_t no POSIX.
+using io_size_t = int;
 #define OTTER_INVALID_SOCKET INVALID_SOCKET
 #define OTTER_CLOSE_SOCKET   ::closesocket
 #else
@@ -21,6 +24,7 @@ using socklen_t = int;
 #include <sys/types.h>
 #include <unistd.h>
 using socket_t = int;
+using io_size_t = std::size_t;
 #define OTTER_INVALID_SOCKET (-1)
 #define OTTER_CLOSE_SOCKET   ::close
 #endif
@@ -91,7 +95,7 @@ Result<std::vector<std::byte>> udp_exchange(std::string_view host, std::uint16_t
         // vira erro na leitura em vez de esperar o tempo todo.
         if (::connect(s, it->ai_addr, static_cast<socklen_t>(it->ai_addrlen)) != 0 ||
             ::send(s, reinterpret_cast<const char*>(request.data()),
-                   static_cast<int>(request.size()), 0) < 0) {
+                   static_cast<io_size_t>(request.size()), 0) < 0) {
             last_error = last_error_message();
             OTTER_CLOSE_SOCKET(s);
             continue;
@@ -108,7 +112,7 @@ Result<std::vector<std::byte>> udp_exchange(std::string_view host, std::uint16_t
         if (ready > 0) {
             std::vector<std::byte> buffer(65536);
             const auto received = ::recv(s, reinterpret_cast<char*>(buffer.data()),
-                                         static_cast<int>(buffer.size()), 0);
+                                         static_cast<io_size_t>(buffer.size()), 0);
             if (received >= 0) {
                 buffer.resize(static_cast<std::size_t>(received));
                 OTTER_CLOSE_SOCKET(s);
@@ -342,7 +346,7 @@ Status Socket::write_all(std::span<const std::byte> data) {
 
     std::size_t sent = 0;
     while (sent < data.size()) {
-        const auto chunk = static_cast<int>(
+        const auto chunk = static_cast<io_size_t>(
             std::min<std::size_t>(data.size() - sent, 1 << 20));
 
         const auto written = ::send(
@@ -364,7 +368,7 @@ Result<std::size_t> Socket::read_some(std::span<std::byte> buffer) {
 
     const auto got = ::recv(to_native(handle_),
                             reinterpret_cast<char*>(buffer.data()),
-                            static_cast<int>(buffer.size()), 0);
+                            static_cast<io_size_t>(buffer.size()), 0);
 
     if (got < 0) {
 #ifdef _WIN32

@@ -8,6 +8,7 @@
 
 #include "db/sparkline.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <utility>

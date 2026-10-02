@@ -68,7 +68,7 @@ std::int32_t MessageReader::read_int32() {
     if (remaining() < 4) { overflow_ = true; return 0; }
     std::uint32_t value = 0;
     for (int i = 0; i < 4; ++i) {
-        value = (value << 8) | static_cast<std::uint32_t>(body_[position_ + i]);
+        value = (value << 8) | static_cast<std::uint32_t>(body_[position_ + static_cast<std::size_t>(i)]);
     }
     position_ += 4;
     return static_cast<std::int32_t>(value);

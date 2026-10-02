@@ -1,0 +1,132 @@
+# C-Otter -- entrega: compila, testa e empacota Windows e Linux.
+#
+#   git tag v0.1.0 && git push origin v0.1.0    -> publica a Release com os dois pacotes
+#   Actions > Release > Run workflow            -> so' gera os pacotes (artefatos do run)
+#
+# O empacotamento vive em tools/package.ps1 e tools/package.sh: o que roda aqui
+# e' o que se roda na maquina para conferir.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versao do pacote
+        id: version
+        shell: bash
+        run: echo "version=$(bash tools/package_version.sh)" >> "$GITHUB_OUTPUT"
+
+      # build.cmd carrega o vcvars64 (o preset usa Ninja + cl.exe), compila o
+      # win-release e roda o otter_tests.exe; o codigo de saida e' o dos testes.
+      - name: Compilar e testar
+        shell: cmd
+        run: build.cmd test
+
+      - name: Empacotar
+        shell: pwsh
+        run: tools\package.ps1 -Version '${{ steps.version.outputs.version }}'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-otter-windows-x64
+          path: |
+            build/dist/*.zip
+            build/dist/*.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64
+    # Fixo, e nao ubuntu-latest: a glibc da imagem e' a minima que o binario
+    # exige de quem o roda (2.39 na 24.04), e e' nela que o clang-19 vem do
+    # repositorio oficial. Trocar a imagem e' decisao, nao acaso.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versao do pacote
+        id: version
+        run: echo "version=$(bash tools/package_version.sh)" >> "$GITHUB_OUTPUT"
+
+      # Clang 19: ate' o 18 ele nao habilita o <expected> da libstdc++
+      # (docs/adr/0006, atualizacao de 2026-10-02). xvfb e mesa-dri sao so'
+      # para o passo "Abrir o programa".
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-19 ninja-build pkg-config libssl-dev \
+            libgl1-mesa-dev xorg-dev libwayland-dev libwayland-bin \
+            libxkbcommon-dev wayland-protocols \
+            xvfb libgl1-mesa-dri
+
+      # Os presets dizem "clang"/"clang++", que na imagem apontam para o 18.
+      - name: Compilar
+        run: |
+          cmake --preset linux-release \
+            -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
+          cmake --build build/linux-release
+
+      - name: Testar
+        run: build/linux-release/bin/otter_tests
+
+      - name: Empacotar
+        run: bash tools/package.sh '${{ steps.version.outputs.version }}'
+
+      # Build limpo nao prova que abre (diretiva 2). Roda o binario DO PACOTE
+      # num display virtual: tem de continuar vivo ate' o timeout derruba'-lo
+      # (124). Qualquer outro codigo e' o programa saindo sozinho.
+      - name: Abrir o programa
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          tar -C "$RUNNER_TEMP/smoke" -xzf build/dist/*.tar.gz
+          cd "$RUNNER_TEMP"/smoke/c-otter-*
+          code=0
+          OTTER_SCRIPT_DIR="$RUNNER_TEMP/smoke/scripts" LIBGL_ALWAYS_SOFTWARE=1 \
+            xvfb-run -a timeout 10 ./c-otter || code=$?
+          echo "codigo de saida: $code"
+          test "$code" -eq 124
+          test -f .C-Otter/settings.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-otter-linux-x64
+          path: |
+            build/dist/*.tar.gz
+            build/dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publicar
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Tag com sufixo (v0.2.0-rc1) sai como pre-release.
+      - name: Criar a Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "C-Otter $GITHUB_REF_NAME" \
+            --generate-notes --verify-tag $prerelease

@@ -83,6 +83,30 @@ O usuário não usa Linux. Consequências:
 Se o Linux entrar no escopo depois, o trabalho restante é o backend GTK do Scintilla e a
 verificação da cadeia de build — não a reescrita da UI.
 
+### Atualização — 2026-10-02: os presets `linux-*` compilam
+
+A pedido do usuário a cadeia de build foi verificada (Ubuntu 24.04 no WSL, Clang 19,
+OpenSSL 3.0). `linux-debug` e `linux-release` compilam do zero com `-Werror`, os 733
+testes unitários passam, e o programa abre num display virtual (Xvfb). O Scintilla saiu no
+ADR 0007, então o problema do GTK deixou de existir.
+
+O que custou, e fica registrado para não se repetir:
+
+| Achado | Correção |
+|---|---|
+| `crypto_openssl.cpp` listado no CMake e inexistente | Escrito sobre a API EVP |
+| Clang ≤ 18 não habilita o `<expected>` da libstdc++ | Clang 19+; o configure recusa o compilador, com o motivo |
+| CMake 3.28+ exige `clang-scan-deps` para varrer módulos | `CMAKE_CXX_SCAN_FOR_MODULES OFF` |
+| Busca restrita a `.a` achava a `libm.a` e não achava a `libGL` | Exceção para GLFW e OpenGL: glibc e libGL entram como `.so` |
+| GLFW compilado com `gcc` e o resto com Clang quebrava o LTO | Presets fixam `CMAKE_C_COMPILER=clang` |
+| Avisos que a MSVC não dá (`-Wformat-security`, `-Wsign-conversion`, `-Wswitch`) | Corrigidos no código; cabeçalhos de terceiros viraram `SYSTEM` |
+
+Continua **sem garantia de entrega**: não há CI Linux, as suítes ao vivo não rodaram lá, e
+faltam TLS (`tls_openssl.cpp` é esboço) e a autenticação integrada do SQL Server.
+
+Pacotes para compilar: `clang-19 ninja-build pkg-config libssl-dev libgl1-mesa-dev xorg-dev
+libwayland-dev libwayland-bin libxkbcommon-dev wayland-protocols`.
+
 ## Consequências
 
 - `app_window_win32.cpp` → `app_window_glfw.cpp`; D3D11 sai

@@ -218,7 +218,7 @@ void decrypt_block(std::uint8_t* state, const RoundKeys& keys) {
 
         for (std::size_t i = 0; i < kAesBlockSize; ++i) state[i] = kInvSbox[state[i]];
 
-        add_round_key(state, keys.data() + round * kAesBlockSize);
+        add_round_key(state, keys.data() + static_cast<std::size_t>(round) * kAesBlockSize);
 
         if (round != 0) {
             for (std::size_t c = 0; c < 4; ++c) {

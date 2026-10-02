@@ -2,6 +2,7 @@
 
 #include "base/i18n.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <span>
@@ -165,8 +166,8 @@ OTTER_TEST(i18n_pt_br_keys_are_english) {
         // UTF-8: todo byte de caractere acentuado tem o bit alto ligado.
         // ASCII puro e' o que se espera de uma chave em ingles.
         bool has_high_byte = false;
-        for (const unsigned char c : key) {
-            if (c > 0x7F) {
+        for (const char c : key) {
+            if (static_cast<unsigned char>(c) > 0x7F) {
                 has_high_byte = true;
                 break;
             }

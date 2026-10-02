@@ -12,11 +12,37 @@ project(C-Otter
 # C++23 (e nao 20) porque std::expected -- o mecanismo de erro do nucleo, ver
 # ADR 0001 #4 -- so' existe a partir do C++23. A alternativa seria escrever um
 # expected proprio; subir o padrao custa menos e ambos os toolchains-alvo ja'
-# suportam: MSVC 19.4x (VS 2022 17.10+) e Clang 17+.
+# suportam: MSVC 19.4x (VS 2022 17.10+) e Clang 19+.
+#
+# Clang 19, e nao 17: ate' o 18 ele anuncia __cpp_concepts = 201907, e o
+# <expected> da libstdc++ (a biblioteca padrao do Linux) se desliga abaixo de
+# 202002. O sintoma sao milhares de "no template named 'expected'", por isso a
+# checagem abaixo recusa o compilador logo no configure, dizendo o motivo.
 # ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# O projeto nao usa modulos C++20. Sem isto o CMake 3.28+ varre cada fonte
+# atras de `import` -- com Clang, exige o clang-scan-deps (pacote 'a parte) e o
+# build morre em "CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS-NOTFOUND". Vem ANTES da
+# checagem abaixo, e vai junto para o projeto de teste dela: la' a varredura
+# falharia e a checagem acusaria o compilador errado.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES CMAKE_CXX_SCAN_FOR_MODULES)
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+    #include <expected>
+    std::expected<int, int> f() { return 1; }
+    int main() { return *f() - 1; }
+" OTTER_HAS_STD_EXPECTED)
+if(NOT OTTER_HAS_STD_EXPECTED)
+    message(FATAL_ERROR
+        "std::expected indisponivel com ${CMAKE_CXX_COMPILER_ID} "
+        "${CMAKE_CXX_COMPILER_VERSION}. No Linux use Clang 19+ ou GCC 13+ "
+        "(o Clang ate' o 18 nao habilita o <expected> da libstdc++).")
+endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -91,6 +117,10 @@ else()
         -Wshadow -Wconversion -Wsign-conversion
         -Wnon-virtual-dtor -Wold-style-cast -Woverloaded-virtual
         -Wnull-dereference -Wdouble-promotion
+        # Vem com o -Wextra e acusa `Meta{a, b}` quando a struct tem mais
+        # campos. Aqui eles tem inicializador de membro, e omiti-los e' o
+        # proposito: o campo novo nao obriga a reescrever cada chamada.
+        -Wno-missing-field-initializers
         $<$<BOOL:${OTTER_WERROR}>:-Werror>
     )
 endif()

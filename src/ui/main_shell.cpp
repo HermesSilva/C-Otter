@@ -1232,7 +1232,7 @@ void MainShell::draw_plan_window() {
             icon_inline(Icon::warning, p.warn);
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(col4(p.warn), TR(
+            ImGui::TextColored(col4(p.warn), "%s", TR(
                 "ANALYZE executes the query. Writes are rolled back, but the "
                 "work is done and the time is real."));
             ImGui::PopTextWrapPos();
@@ -1247,7 +1247,7 @@ void MainShell::draw_plan_window() {
         ImGui::Separator();
 
         if (session().busy()) {
-            ImGui::TextColored(col4(p.text_dim), TR("  explaining..."));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("  explaining..."));
             ImGui::End();
             return;
         }
@@ -2405,7 +2405,7 @@ void MainShell::draw_users_folder() {
         // ausência de contas -- todo servidor tem ao menos uma. Dizer isso
         // evita que o usuário conclua o contrário.
         ImGui::TextColored(col4(p.text_dim),
-                           TR("no access to the user list"));
+                           "%s", TR("no access to the user list"));
     }
 
     for (const db::UserMeta& user : users) {
@@ -2460,7 +2460,7 @@ void MainShell::draw_users_folder() {
             }
 
             if (user.grants_loaded && user.grants.empty()) {
-                ImGui::TextColored(col4(p.text_dim), TR("no grants"));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("no grants"));
             }
 
             for (const std::string& grant : user.grants) {
@@ -2516,7 +2516,7 @@ void MainShell::draw_server_info_folder() {
             if (!matches_filter(variable.name)) continue;
             if (++shown > 200) {
                 ImGui::TextColored(col4(p.text_dim),
-                                   TR("... and more; use the filter"));
+                                   "%s", TR("... and more; use the filter"));
                 break;
             }
 
@@ -2891,7 +2891,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             session().load_columns_async(schema.name, table.name);
         }
         if (!table.columns_loaded) {
-            ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("  loading..."));
         }
 
         for (const db::ColumnMeta& column : table.columns) {
@@ -3099,7 +3099,7 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
 
         if (table.partitions_loaded && table.partitions.empty()) {
-            ImGui::TextColored(col4(p.text_dim), TR("not partitioned"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("not partitioned"));
         }
 
         std::int64_t largest_partition = 0;
@@ -3302,7 +3302,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         // de gerar algo pobre, o menu diz o que falta.
         if (!relation.columns_loaded) {
             ImGui::TextColored(col4(colors().text_dim),
-                               TR("expand the table first"));
+                               "%s", TR("expand the table first"));
         }
 
         if (ImGui::MenuItem("SELECT")) {
@@ -3346,7 +3346,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
             // Sem as colunas não dá para montar um MODIFY completo no MySQL.
             // Dizer o que falta é melhor que oferecer um menu que gera erro.
             ImGui::TextColored(col4(colors().text_dim),
-                               TR("expand the table first"));
+                               "%s", TR("expand the table first"));
         }
 
         ImGui::BeginDisabled(!relation.columns_loaded);
@@ -3385,7 +3385,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         if (ImGui::BeginMenu(TR("Drop index"))) {
             if (!relation.indexes_loaded) {
                 ImGui::TextColored(col4(colors().text_dim),
-                                   TR("expand Indexes first"));
+                                   "%s", TR("expand Indexes first"));
             }
             for (const db::IndexMeta& index : relation.indexes) {
                 // Índice de chave primária ou única não se remove sozinho: a
@@ -3415,7 +3415,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         if (ImGui::BeginMenu(TR("Drop constraint"))) {
             if (!relation.constraints_loaded) {
                 ImGui::TextColored(col4(colors().text_dim),
-                                   TR("expand Constraints first"));
+                                   "%s", TR("expand Constraints first"));
             }
             for (const db::ConstraintMeta& constraint : relation.constraints) {
                 if (ImGui::MenuItem(constraint.name.c_str())) {
@@ -3433,7 +3433,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         if (ImGui::BeginMenu(TR("Drop foreign key"))) {
             if (!relation.keys_loaded) {
                 ImGui::TextColored(col4(colors().text_dim),
-                                   TR("expand Foreign keys first"));
+                                   "%s", TR("expand Foreign keys first"));
             }
             for (const db::ForeignKeyMeta& key : relation.foreign_keys) {
                 if (ImGui::MenuItem(key.name.c_str())) {
@@ -3508,7 +3508,7 @@ void MainShell::draw_view_definition(const db::SchemaMeta& schema,
     }
 
     if (view.definition.empty()) {
-        ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("  loading..."));
         ImGui::TreePop();
         return;
     }
@@ -3691,7 +3691,7 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
             }
 
             if (routine.definition.empty()) {
-                ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("  loading..."));
             } else {
                 draw_sql_body("##routinedef", routine.definition);
             }
@@ -3719,7 +3719,7 @@ void MainShell::draw_events_folder(const db::SchemaMeta& schema) {
         // Lista vazia é ambígua no MySQL: pode não haver evento, ou o
         // scheduler pode estar desligado. Dizer as duas possibilidades evita
         // que o usuário conclua a errada.
-        ImGui::TextColored(col4(p.text_dim), TR("no events (or the scheduler "
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("no events (or the scheduler "
                                                 "is off)"));
     }
 
@@ -4928,7 +4928,7 @@ void MainShell::draw_pivot_table(SqlDocument& document, const db::ResultSet& rs)
     ImGui::Separator();
 
     if (pivot.rows.empty()) {
-        ImGui::TextColored(col4(p.text_dim), TR("nothing to pivot"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("nothing to pivot"));
         return;
     }
 
@@ -4995,7 +4995,7 @@ void MainShell::draw_pivot_table(SqlDocument& document, const db::ResultSet& rs)
                                with_alpha(p.accent, 0.12f));
 
         ImGui::TableSetColumnIndex(0);
-        ImGui::TextColored(col4(p.text_bright), TR("Total"));
+        ImGui::TextColored(col4(p.text_bright), "%s", TR("Total"));
 
         for (std::size_t i = 0; i < pivot.totals.size(); ++i) {
             const int index = static_cast<int>(spec.rows.size() + i);
@@ -5017,7 +5017,7 @@ void MainShell::draw_group_bar(SqlDocument& document, const db::ResultSet& rs) {
 
     // Colunas de agrupamento, cada uma removivel.
     if (!spec.group_by.empty()) {
-        ImGui::TextColored(col4(p.text_dim), TR("Grouped by"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("Grouped by"));
 
         for (std::size_t i = 0; i < spec.group_by.size(); ++i) {
             const std::size_t column = spec.group_by[i];
@@ -5132,7 +5132,7 @@ void MainShell::draw_group_panel(SqlDocument& document,
                                    with_alpha(p.accent, 0.25f));
 
             ImGui::TableSetColumnIndex(0);
-            ImGui::TextColored(col4(p.text_bright), TR("Total"));
+            ImGui::TextColored(col4(p.text_bright), "%s", TR("Total"));
 
             for (std::size_t i = 0; i < groups.totals.size(); ++i) {
                 ImGui::TableSetColumnIndex(
@@ -5276,7 +5276,7 @@ void MainShell::draw_ddl_forms() {
             if (db::sql_dialect() == db::QuoteStyle::backticks &&
                 !column_form_.existing.empty()) {
                 ImGui::Separator();
-                ImGui::TextColored(col4(p.text_dim), TR("Position"));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("Position"));
 
                 ImGui::RadioButton(TR("last"), &column_form_.position, 0);
                 ImGui::SameLine();
@@ -5290,11 +5290,11 @@ void MainShell::draw_ddl_forms() {
                             "##after",
                             column_form_.after_index <
                                     static_cast<int>(column_form_.existing.size())
-                                ? column_form_.existing[column_form_.after_index].c_str()
+                                ? column_form_.existing[static_cast<std::size_t>(column_form_.after_index)].c_str()
                                 : "")) {
                         for (int i = 0;
                              i < static_cast<int>(column_form_.existing.size()); ++i) {
-                            if (ImGui::Selectable(column_form_.existing[i].c_str(),
+                            if (ImGui::Selectable(column_form_.existing[static_cast<std::size_t>(i)].c_str(),
                                                   column_form_.after_index == i)) {
                                 column_form_.after_index = i;
                             }
@@ -5321,7 +5321,7 @@ void MainShell::draw_ddl_forms() {
                 if (column_form_.position == 2 &&
                     column_form_.after_index <
                         static_cast<int>(column_form_.existing.size())) {
-                    column.after = column_form_.existing[column_form_.after_index];
+                    column.after = column_form_.existing[static_cast<std::size_t>(column_form_.after_index)];
                 }
 
                 db::TableAlteration wanted;
@@ -5344,7 +5344,7 @@ void MainShell::draw_ddl_forms() {
 
             if (!valid) {
                 ImGui::SameLine();
-                ImGui::TextColored(col4(p.text_dim), TR("(name and type)"));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("(name and type)"));
             }
         }
         ImGui::End();
@@ -5372,7 +5372,7 @@ void MainShell::draw_ddl_forms() {
                              sizeof create_table_.comment);
 
             ImGui::Spacing();
-            ImGui::TextColored(col4(p.text_dim), TR("Columns"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("Columns"));
 
             // Tabela de edição: nome, tipo, nulo, chave, e o botão de remover.
             // Uma tabela e não linhas soltas porque as colunas precisam estar
@@ -5483,7 +5483,7 @@ void MainShell::draw_ddl_forms() {
             if (!valid) {
                 ImGui::SameLine();
                 ImGui::TextColored(col4(p.text_dim),
-                                   TR("(every column needs a name and a type)"));
+                                   "%s", TR("(every column needs a name and a type)"));
             }
         }
         ImGui::End();
@@ -5513,7 +5513,7 @@ void MainShell::draw_ddl_forms() {
             }
 
             ImGui::Spacing();
-            ImGui::TextColored(col4(p.text_dim), TR("Query"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("Query"));
 
             const float footer = ImGui::GetFrameHeightWithSpacing() * 1.6f;
             ImGui::InputTextMultiline("##viewsql", create_view_.definition,
@@ -5574,7 +5574,7 @@ void MainShell::draw_ddl_forms() {
             }
 
             ImGui::Separator();
-            ImGui::TextColored(col4(p.text_dim), TR("Columns"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("Columns"));
 
             // A ORDEM importa num índice composto: ela decide que consultas
             // ele atende. A lista segue a ordem da tabela, e quem quiser outra
@@ -5617,7 +5617,7 @@ void MainShell::draw_ddl_forms() {
             if (!valid) {
                 ImGui::SameLine();
                 ImGui::TextColored(col4(p.text_dim),
-                                   TR("(name and one column)"));
+                                   "%s", TR("(name and one column)"));
             }
         }
         ImGui::End();
@@ -5827,7 +5827,7 @@ void MainShell::draw_bar_menu(SqlDocument& document, const db::ResultSet& rs,
     ImGui::EndDisabled();
 
     if (!numeric) {
-        ImGui::TextColored(col4(p.text_dim), TR("(numeric columns only)"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("(numeric columns only)"));
     }
 }
 
@@ -5875,7 +5875,7 @@ void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
     ImGui::EndDisabled();
 
     if (!numeric) {
-        ImGui::TextColored(col4(p.text_dim), TR("(numeric columns only)"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("(numeric columns only)"));
     }
 
     ImGui::Separator();
@@ -5888,7 +5888,7 @@ void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
     // sem repetir a regra em cada coluna.
     if (!rs.is_null(0, column)) {
         ImGui::Separator();
-        ImGui::TextColored(col4(p.text_dim), TR("Highlight rows where"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("Highlight rows where"));
 
         // Os valores distintos desta coluna, até um limite. Com alta
         // cardinalidade a lista seria inútil e enorme -- e é justamente onde
@@ -5909,7 +5909,7 @@ void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
 
         if (distinct.size() > kMaxDistinct) {
             ImGui::TextColored(col4(p.text_dim),
-                               TR("too many distinct values"));
+                               "%s", TR("too many distinct values"));
         } else {
             for (const std::string& value : distinct) {
                 ImGui::PushID(value.c_str());
@@ -5985,7 +5985,7 @@ void MainShell::draw_column_header_menu(SqlDocument& document,
     // Filtrar exige refazer a consulta, o que so' vale para resultado
     // paginado -- um resultado completo ja' esta' inteiro na tela.
     if (!document.paged()) {
-        ImGui::TextColored(col4(p.text_dim), TR("filtering needs a paged result"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("filtering needs a paged result"));
         ImGui::EndPopup();
         return;
     }
@@ -6304,7 +6304,7 @@ void MainShell::draw_export_window() {
             ImGui::Checkbox(TR("One INSERT per row"),
                             &export_options_.one_statement_per_row);
         } else {
-            ImGui::TextColored(col4(p.text_dim), TR("no options"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no options"));
         }
 
         ImGui::Separator();
@@ -6320,7 +6320,7 @@ void MainShell::draw_export_window() {
 
         const std::string text = db::export_to_string(preview, export_options_);
 
-        ImGui::TextColored(col4(p.text_dim), TR("Preview"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("Preview"));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, col(p.bg_darkest));
         if (ImGui::BeginChild("##preview", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2.4f),
                               ImGuiChildFlags_Borders,
@@ -6469,7 +6469,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
 
         ImGui::SameLine();
         if (rs.row_count() == 0) {
-            ImGui::TextColored(col4(p.text_dim), TR("no more rows"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no more rows"));
         } else {
             ImGui::TextColored(col4(p.text), TR("rows %zu-%zu"), first, last);
         }
@@ -6543,7 +6543,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
             document.paged_sql(), active_dialect(), 0);
         if (probe.refusal == sql::PagingRefusal::already_limited) {
             ImGui::SameLine();
-            ImGui::TextColored(col4(p.text_dim), TR("  |  your LIMIT"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("  |  your LIMIT"));
         }
     }
 }
@@ -6605,7 +6605,7 @@ void MainShell::draw_record_view(SqlDocument& document, const db::ResultSet& rs)
     const Palette& p = colors();
 
     if (rs.row_count() == 0) {
-        ImGui::TextColored(col4(p.text_dim), TR("no rows"));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("no rows"));
         return;
     }
 
@@ -6694,10 +6694,10 @@ void MainShell::draw_grid_panel() {
             // DBeaver. Desenhar a mesma grade aqui tambem daria duas grades do
             // mesmo documento disputando o teclado.
             ImGui::TextColored(col4(colors().text_dim),
-                               TR("the data of this object is in its Data tab"));
+                               "%s", TR("the data of this object is in its Data tab"));
         } else if (document == nullptr) {
             ImGui::TextColored(col4(colors().text_dim),
-                               TR("run a query to see the result"));
+                               "%s", TR("run a query to see the result"));
         } else {
             // O documento pode ter varios resultados: as abas.
             draw_result_tabs(*document);
@@ -6712,7 +6712,7 @@ void MainShell::draw_grid_panel() {
 void MainShell::draw_grid_view(SqlDocument& document) {
     if (!document.result().has_value()) {
         ImGui::TextColored(col4(colors().text_dim),
-                           TR("run a query to see the result"));
+                           "%s", TR("run a query to see the result"));
         // Um erro da última execução aparece mesmo sem resultado.
         if (!document.status().empty()) {
             ImGui::TextColored(col4(colors().error), "%s",
@@ -6786,7 +6786,7 @@ void MainShell::draw_grid_view(SqlDocument& document) {
     ImGui::Separator();
 
     if (rs.column_count() == 0) {
-        ImGui::TextColored(col4(colors().ok), TR("command executed"));
+        ImGui::TextColored(col4(colors().ok), "%s", TR("command executed"));
         if (rs.affected_rows() >= 0) {
             ImGui::SameLine();
             ImGui::TextColored(col4(colors().text_dim),
@@ -7087,7 +7087,7 @@ void MainShell::draw_query_log_panel() {
         const std::vector<db::QueryLog> log = session().query_log();
 
         if (log.empty()) {
-            ImGui::TextColored(col4(colors().text_dim), TR("no queries yet"));
+            ImGui::TextColored(col4(colors().text_dim), "%s", TR("no queries yet"));
             ImGui::End();
             return;
         }
@@ -7158,7 +7158,7 @@ void MainShell::draw_query_log_panel() {
 
                 ImGui::TableSetColumnIndex(2);
                 ImGui::TextColored(col4(entry.failed ? colors().error : colors().ok),
-                                   entry.failed ? TR("error") : "ok");
+                                   "%s", entry.failed ? TR("error") : "ok");
 
                 ImGui::TableSetColumnIndex(3);
                 // Uma linha so': quebras de linha do SQL viram espaco.
@@ -7709,7 +7709,7 @@ void MainShell::draw_import_window() {
 
         if (import_candidates_.empty()) {
             ImGui::TextColored(col4(p.text_dim),
-                               TR("No saved connections of DBeaver, pgAdmin or SQL "
+                               "%s", TR("No saved connections of DBeaver, pgAdmin or SQL "
                                   "Server Management Studio were found on this machine."));
             ImGui::End();
             return;
@@ -7775,10 +7775,10 @@ void MainShell::draw_import_window() {
 
                 ImGui::TableNextColumn();
                 if (stored.supported && import_actions_[i] == import_nothing) {
-                    ImGui::TextColored(col4(p.text_dim), TR("already here"));
+                    ImGui::TextColored(col4(p.text_dim), "%s", TR("already here"));
                 } else if (stored.supported && import_actions_[i] == import_password) {
                     ImGui::TextColored(col4(p.ok),
-                                       TR("already here without a password: adds the password"));
+                                       "%s", TR("already here without a password: adds the password"));
                 } else if (stored.supported && import_actions_[i] == import_group) {
                     ImGui::TextColored(col4(p.ok), TR("already here: moves to the group %s"),
                                        stored.profile.folder.c_str());
@@ -7791,9 +7791,9 @@ void MainShell::draw_import_window() {
                     // Dizer se a senha veio junto evita a surpresa de
                     // importar e descobrir que ainda falta digitar.
                     if (!stored.profile.password.empty()) {
-                        ImGui::TextColored(col4(p.ok), TR("with password"));
+                        ImGui::TextColored(col4(p.ok), "%s", TR("with password"));
                     } else {
-                        ImGui::TextColored(col4(p.text_dim), TR("no password"));
+                        ImGui::TextColored(col4(p.text_dim), "%s", TR("no password"));
                     }
                 } else {
                     icon_inline(Icon::warning, p.warn);
@@ -8001,7 +8001,7 @@ void MainShell::draw_icon_gallery() {
         const Palette& p = colors();
 
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(col4(p.text_dim), TR(
+        ImGui::TextColored(col4(p.text_dim), "%s", TR(
             "Every object type needs its own drawing. Two icons that look alike "
             "at tree size are a defect."));
         ImGui::PopTextWrapPos();
@@ -8036,7 +8036,7 @@ void MainShell::draw_icon_gallery() {
                 // que a confusao entre dois icones aparece.
                 icon_inline(entry.icon, p.text_dim);
                 ImGui::SameLine(0.0f, 4.0f);
-                ImGui::TextColored(col4(p.text_dim), TR("tree size"));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("tree size"));
             }
             ImGui::EndTable();
         }

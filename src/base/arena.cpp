@@ -12,7 +12,9 @@ constexpr std::size_t align_up(std::size_t value, std::size_t align) noexcept {
     return (value + align - 1) & ~(align - 1);
 }
 
-constexpr bool is_power_of_two(std::size_t v) noexcept {
+// So' e' chamada dentro de assert: em Release (NDEBUG) fica sem uso, e o Clang
+// acusa -Wunused-function em namespace anonimo.
+[[maybe_unused]] constexpr bool is_power_of_two(std::size_t v) noexcept {
     return v != 0 && (v & (v - 1)) == 0;
 }
 

@@ -628,6 +628,11 @@ Result<std::vector<CatalogItem>> PostgresCatalog::load_list(
             }
             break;
         }
+
+        // As demais listas sao de outros SGBDs (SQL Server, MySQL, SQL
+        // Anywhere), lidas pelos catalogos deles; aqui nao ha' consulta.
+        default:
+            break;
     }
 
     OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));

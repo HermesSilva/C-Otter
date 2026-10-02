@@ -13,7 +13,16 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+
+# O GLFW procura a libm e a librt com find_library. Com a busca restrita a ".a"
+# (raiz) ele acha a libm.a, que nao liga contra a glibc dinamica: o link morre
+# em "undefined reference to _dl_x86_cpu_features". A glibc entra como .so.
+set(_otter_library_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+if(NOT WIN32)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".so")
+endif()
 add_subdirectory(glfw EXCLUDE_FROM_ALL)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ${_otter_library_suffixes})
 set_target_properties(glfw PROPERTIES FOLDER "third_party")
 
 # --- Dear ImGui (branch docking) ---------------------------------------------
@@ -29,7 +38,9 @@ add_library(imgui STATIC
     imgui/backends/imgui_impl_opengl3.cpp
 )
 
-target_include_directories(imgui PUBLIC
+# SYSTEM: os cabecalhos de terceiros sao incluidos pelo NOSSO codigo, e sem
+# isto os avisos deles (milhares de -Wold-style-cast) caem no nosso -Werror.
+target_include_directories(imgui SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
 )
@@ -40,7 +51,12 @@ target_link_libraries(imgui PUBLIC glfw)
 if(WIN32)
     target_link_libraries(imgui PUBLIC opengl32)
 else()
+    # A raiz restringe a busca a ".a" (link estatico total), mas a libGL vem do
+    # driver de video da maquina e so' existe como .so: com a glibc, e' a
+    # dependencia dinamica legitima, como o opengl32 do Windows.
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".so")
     find_package(OpenGL REQUIRED)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_otter_library_suffixes})
     target_link_libraries(imgui PUBLIC OpenGL::GL)
 endif()
 
@@ -60,7 +76,7 @@ add_library(texteditor STATIC
     texteditor/extras/TrieAutoComplete.cpp
 )
 
-target_include_directories(texteditor PUBLIC
+target_include_directories(texteditor SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/texteditor
     ${CMAKE_CURRENT_SOURCE_DIR}/texteditor/extras
 )
@@ -82,7 +98,7 @@ set_target_properties(texteditor PROPERTIES FOLDER "third_party")
 # 239e102ec2c691f2902e20ace2ed36ee4a35cfe6 de github.com/memononen/nanosvg.
 add_library(nanosvg STATIC nanosvg/nanosvg_impl.cpp)
 
-target_include_directories(nanosvg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/nanosvg)
+target_include_directories(nanosvg SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/nanosvg)
 
 if(MSVC)
     target_compile_options(nanosvg PRIVATE /W0)

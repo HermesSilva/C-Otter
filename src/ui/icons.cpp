@@ -1326,8 +1326,8 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
     // 16 px desenhada em 15,6 borra.
     const int pixels = static_cast<int>(size * 1.12f + 0.5f);
     if (const ImTextureID texture = icon_texture(icon, pixels)) {
-        const ImVec2 min(static_cast<float>(static_cast<int>(center.x - pixels * 0.5f + 0.5f)),
-                         static_cast<float>(static_cast<int>(center.y - pixels * 0.5f + 0.5f)));
+        const ImVec2 min(static_cast<float>(static_cast<int>(center.x - static_cast<float>(pixels) * 0.5f + 0.5f)),
+                         static_cast<float>(static_cast<int>(center.y - static_cast<float>(pixels) * 0.5f + 0.5f)));
         const ImVec2 max(min.x + static_cast<float>(pixels),
                          min.y + static_cast<float>(pixels));
 

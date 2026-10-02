@@ -219,7 +219,7 @@ OTTER_TEST(icons_dbeaver_originals_all_rasterize) {
         for (const int pixels : {16, 18, 24, 32}) {
             const std::vector<unsigned char> rgba = rasterize_icon(asset.icon, pixels);
             const bool sized =
-                rgba.size() == static_cast<std::size_t>(pixels) * pixels * 4;
+                rgba.size() == static_cast<std::size_t>(pixels) * static_cast<std::size_t>(pixels) * 4;
             if (!sized) {
                 std::printf("      sem imagem: %s em %d px\n",
                             kIconNames[static_cast<std::size_t>(asset.icon)], pixels);

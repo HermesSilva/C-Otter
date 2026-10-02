@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
         const otter::db::ColumnMeta* n = column_named(after, "nome");
         check(n != nullptr && n->nullable, "DROP NOT NULL");
         check(n != nullptr && n->comment == "nome revisto", "comentario trocado");
-        check(n != nullptr && n->type_name.find("character varying(50)") == 0 ||
+        check((n != nullptr && n->type_name.find("character varying(50)") == 0) ||
                   (n != nullptr && n->type_name.find("varchar(50)") == 0),
               "tipo sobreviveu");
         const otter::db::ColumnMeta* v = column_named(after, "valor");

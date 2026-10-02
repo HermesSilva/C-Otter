@@ -11,6 +11,7 @@
 
 #include "db/pivot.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 

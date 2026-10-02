@@ -323,9 +323,20 @@ private:
     };
     void draw_list_folder(Icon folder_icon, const char* label,
                           db::CatalogList list, Icon item_icon,
+                          const std::string& a, const std::string& b,
+                          const std::string& c, const ListOptions& options);
+    // Sobrecarga em vez de `const ListOptions& options = {}`: os
+    // inicializadores de membro de uma struct aninhada so' valem com a classe
+    // de fora completa, e um argumento padrao na declaracao vem antes disso.
+    // O MSVC aceita; GCC e Clang recusam. O corpo de funcao membro ja' ve^ a
+    // classe completa.
+    void draw_list_folder(Icon folder_icon, const char* label,
+                          db::CatalogList list, Icon item_icon,
                           const std::string& a = {}, const std::string& b = {},
-                          const std::string& c = {},
-                          const ListOptions& options = {});
+                          const std::string& c = {}) {
+        draw_list_folder(folder_icon, label, list, item_icon, a, b, c,
+                         ListOptions{});
+    }
 
     // Enquanto a subarvore de uma conexao e' desenhada, ELA e' a corrente:
     // session() devolve a sessao dela. Devolve a anterior, para restaurar.

@@ -28,11 +28,22 @@ const IconAsset* find_asset(Icon icon) noexcept {
     return nullptr;
 }
 
+// Contas de tamanho em size_t desde o primeiro fator: `int * int` estoura
+// antes de ser promovido, e misturar os dois e' conversao de sinal implicita.
+constexpr std::size_t rgba_bytes(int side) noexcept {
+    return static_cast<std::size_t>(side) * static_cast<std::size_t>(side) * 4;
+}
+
+constexpr std::size_t pixel_offset(int x, int y, int side) noexcept {
+    return (static_cast<std::size_t>(y) * static_cast<std::size_t>(side) +
+            static_cast<std::size_t>(x)) * 4;
+}
+
 // Reamostra por MEDIA de area. Vizinho mais proximo serrilharia ao reduzir o
 // PNG de 32 para um tamanho intermediario (20, 24).
 std::vector<unsigned char> resample(const unsigned char* source, int source_size,
                                     int pixels) {
-    std::vector<unsigned char> out(static_cast<std::size_t>(pixels) * pixels * 4);
+    std::vector<unsigned char> out(rgba_bytes(pixels));
     const double step = static_cast<double>(source_size) / pixels;
 
     for (int y = 0; y < pixels; ++y) {
@@ -51,7 +62,7 @@ std::vector<unsigned char> resample(const unsigned char* source, int source_size
             for (int sy = y0; sy < y1; ++sy) {
                 for (int sx = x0; sx < x1; ++sx) {
                     const unsigned char* p =
-                        source + (static_cast<std::size_t>(sy) * source_size + sx) * 4;
+                        source + pixel_offset(sx, sy, source_size);
                     const double alpha = p[3] / 255.0;
                     r += p[0] * alpha;
                     g += p[1] * alpha;
@@ -61,7 +72,7 @@ std::vector<unsigned char> resample(const unsigned char* source, int source_size
                 }
             }
 
-            unsigned char* q = out.data() + (static_cast<std::size_t>(y) * pixels + x) * 4;
+            unsigned char* q = out.data() + pixel_offset(x, y, pixels);
             if (a > 0.0) {
                 q[0] = static_cast<unsigned char>(r / a + 0.5);
                 q[1] = static_cast<unsigned char>(g / a + 0.5);
@@ -138,7 +149,7 @@ std::vector<unsigned char> rasterize_icon(Icon icon, int pixels) {
 
         if (size == pixels) {
             return std::vector<unsigned char>(
-                source, source + static_cast<std::size_t>(size) * size * 4);
+                source, source + rgba_bytes(size));
         }
         return resample(source, size, pixels);
     }
@@ -152,7 +163,7 @@ std::vector<unsigned char> rasterize_icon(Icon icon, int pixels) {
     const float side = (std::max)(image->width, image->height);
     if (side > 0.0f) {
         if (NSVGrasterizer* rasterizer = nsvgCreateRasterizer()) {
-            out.assign(static_cast<std::size_t>(pixels) * pixels * 4, 0);
+            out.assign(rgba_bytes(pixels), 0);
             nsvgRasterize(rasterizer, image, 0.0f, 0.0f,
                           static_cast<float>(pixels) / side, out.data(), pixels,
                           pixels, pixels * 4);

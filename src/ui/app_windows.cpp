@@ -209,7 +209,7 @@ void MainShell::draw_app_windows() {
         app_.submit = false;
 
         ImGui::Separator();
-        if (ImGui::BeginChild("##results", ImVec2(500.0f, std::min(16, std::max(count, 1)) *
+        if (ImGui::BeginChild("##results", ImVec2(500.0f, static_cast<float>(std::min(16, std::max(count, 1))) *
                                                               ImGui::GetFrameHeight()))) {
             for (int i = 0; i < count; ++i) {
                 const PickItem& item = items[static_cast<std::size_t>(i)];

@@ -1641,14 +1641,14 @@ void MainShell::draw_output_panel() {
             !target.reports_server_output()) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim),
-                               TR("this driver does not report server output; "
+                               "%s", TR("this driver does not report server output; "
                                   "only @echo lines appear"));
         }
         ImGui::Separator();
 
         const std::vector<std::string> lines = target.server_output();
         if (lines.empty()) {
-            ImGui::TextColored(col4(p.text_dim), TR("no server output yet"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no server output yet"));
         }
 
         ImFont* mono = mono_font();
@@ -1682,10 +1682,10 @@ void MainShell::draw_variables_panel() {
         SqlDocument* document = active_document();
 
         ImGui::TextColored(col4(p.text_dim),
-                           TR("@set name = value defines; ${name} uses it in a query"));
+                           "%s", TR("@set name = value defines; ${name} uses it in a query"));
 
         if (document == nullptr || document->variables().empty()) {
-            ImGui::TextColored(col4(p.text_dim), TR("no variables in this script"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no variables in this script"));
         } else if (ImGui::BeginTable("##vars", 3,
                                      ImGuiTableFlags_RowBg |
                                          ImGuiTableFlags_BordersInnerV)) {
@@ -1723,7 +1723,7 @@ void MainShell::draw_outline_panel() {
         SqlDocument* document = active_document();
 
         if (document == nullptr) {
-            ImGui::TextColored(col4(p.text_dim), TR("no script open"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no script open"));
             ImGui::End();
             return;
         }
@@ -1741,7 +1741,7 @@ void MainShell::draw_outline_panel() {
         }
 
         if (outline_.empty()) {
-            ImGui::TextColored(col4(p.text_dim), TR("the script has no statements"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("the script has no statements"));
         }
 
         const std::size_t cursor_line =
@@ -1826,7 +1826,7 @@ void MainShell::draw_terminal_panel() {
         if (ImGui::BeginChild("##termlines", ImVec2(0.0f, -input_height))) {
             if (terminal_lines_.empty()) {
                 ImGui::TextColored(col4(p.text_dim),
-                                   TR("type a statement and press Enter"));
+                                   "%s", TR("type a statement and press Enter"));
             }
             ImGuiListClipper clipper;
             clipper.Begin(static_cast<int>(terminal_lines_.size()));
@@ -1962,14 +1962,14 @@ void MainShell::draw_morph_dialog() {
 
     SqlDocument* document = active_document();
 
-    ImGui::TextColored(col4(colors().data), TR("Source"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Source"));
     ImGui::SetNextItemWidth(260);
     ImGui::InputText(TR("Column delimiter"), morph_source_, sizeof morph_source_);
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("\\t and \\n stand for tab and line break"));
+                       "%s", TR("\\t and \\n stand for tab and line break"));
 
     ImGui::Spacing();
-    ImGui::TextColored(col4(colors().data), TR("Target"));
+    ImGui::TextColored(col4(colors().data), "%s", TR("Target"));
     ImGui::SetNextItemWidth(260);
     ImGui::InputText(TR("Result delimiter"), morph_target_, sizeof morph_target_);
     ImGui::SetNextItemWidth(260);
@@ -2014,7 +2014,7 @@ void MainShell::draw_morph_dialog() {
         if (preview.size() > 400) preview = preview.substr(0, 400) + "...";
 
         ImGui::Spacing();
-        ImGui::TextColored(col4(colors().data), TR("Preview"));
+        ImGui::TextColored(col4(colors().data), "%s", TR("Preview"));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 480.0f);
         ImGui::TextUnformatted(preview.c_str());
         ImGui::PopTextWrapPos();
@@ -2149,10 +2149,10 @@ void MainShell::draw_delete_script_confirm() {
     if (has_file) {
         ImGui::TextColored(col4(colors().warn), "%s", document->file_path().c_str());
         ImGui::TextColored(col4(colors().text_dim),
-                           TR("The file is removed from disk. This cannot be undone."));
+                           "%s", TR("The file is removed from disk. This cannot be undone."));
     } else {
         ImGui::TextColored(col4(colors().text_dim),
-                           TR("The script was never saved; the tab is closed."));
+                           "%s", TR("The script was never saved; the tab is closed."));
     }
     ImGui::Spacing();
 

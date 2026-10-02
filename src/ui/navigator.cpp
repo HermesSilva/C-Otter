@@ -168,7 +168,7 @@ void MainShell::draw_navigator_panel() {
         ImGui::Indent(root_pull);
 
         if (total == 0) {
-            ImGui::TextColored(col4(p.text_dim), TR("no connection"));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("no connection"));
         }
 
         // Botao direito na area vazia: "Create > Connection" e "Create > New
@@ -801,7 +801,7 @@ void MainShell::draw_connection_node(std::size_t conn_index,
         if (connected) {
             draw_connection_tree(conn_index);
         } else if (state == SessionState::connecting) {
-            ImGui::TextColored(col4(p.text_dim), TR("  connecting..."));
+            ImGui::TextColored(col4(p.text_dim), "%s", TR("  connecting..."));
         } else if (state == SessionState::failed) {
             ImGui::PushStyleColor(ImGuiCol_Text, col(p.error));
             ImGui::TextWrapped("%s", session().status_message().c_str());
@@ -1033,18 +1033,18 @@ void MainShell::draw_databases_folder(std::size_t root_index) {
                 draw_database_contents();
             } else if (!db.allow_connect) {
                 ImGui::TextColored(col4(p.text_dim),
-                                   TR("this database does not accept connections"));
+                                   "%s", TR("this database does not accept connections"));
             } else if (child_index == kNone) {
                 // Cada banco do PostgreSQL e' um catalogo isolado: navegar
                 // nele exige uma conexao propria, aberta so' agora que o
                 // usuario pediu (ADR 0018).
                 tree_requests_.open_database = db.name;
                 tree_requests_.open_database_root = root_id;
-                ImGui::TextColored(col4(p.text_dim), TR("  connecting..."));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("  connecting..."));
             } else if (child_connected) {
                 draw_database_contents();
             } else if (child_state == SessionState::connecting) {
-                ImGui::TextColored(col4(p.text_dim), TR("  connecting..."));
+                ImGui::TextColored(col4(p.text_dim), "%s", TR("  connecting..."));
             } else if (child_state == SessionState::disconnected) {
                 // A sessao existe e nunca conectou: e' a de um script reaberto
                 // ao iniciar (ui/script_session.cpp). Um botao, e nao conectar
@@ -1692,7 +1692,7 @@ void MainShell::draw_list_folder(Icon folder_icon, const char* label,
 
     if (!state.loaded) {
         if (!session().busy()) session().load_list_async(list, a, b, c);
-        ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
+        ImGui::TextColored(col4(p.text_dim), "%s", TR("  loading..."));
     }
 
     // A recusa do servidor vai para a TELA: uma pasta vazia sem explicacao
@@ -1715,7 +1715,7 @@ void MainShell::draw_list_folder(Icon folder_icon, const char* label,
         // tudo a cada quadro pesa, e ninguem acha nada rolando.
         if (++shown > 300) {
             ImGui::TextColored(col4(p.text_dim),
-                               TR("... and more; use the filter"));
+                               "%s", TR("... and more; use the filter"));
             break;
         }
 
@@ -1967,7 +1967,7 @@ void MainShell::draw_erase_connection_confirm() {
     ImGui::TextUnformatted(TRF("Delete the connection \"%s\"?",
                                erase_candidate_.effective_name().c_str()));
     ImGui::TextColored(col4(colors().text_dim),
-                       TR("The saved password is removed too. Open scripts are kept."));
+                       "%s", TR("The saved password is removed too. Open scripts are kept."));
     ImGui::Spacing();
 
     if (ImGui::Button(TR("Delete"))) {
