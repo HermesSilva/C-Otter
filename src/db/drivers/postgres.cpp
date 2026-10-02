@@ -83,6 +83,13 @@ public:
 
     Status cancel() override { return conn_.cancel_current_query(); }
 
+    [[nodiscard]] std::vector<std::string> take_server_output() override {
+        return conn_.take_notices();
+    }
+    [[nodiscard]] bool reports_server_output() const noexcept override {
+        return true;
+    }
+
     // --- Transacoes ---------------------------------------------------------
     //
     // O PostgreSQL nao tem um "modo autocommit" no protocolo: ele esta' sempre
@@ -198,6 +205,10 @@ public:
     }
 
     [[nodiscard]] std::string current_schema() const override { return schema_; }
+
+    [[nodiscard]] Result<ResultSet> query_internal(std::string_view sql) override {
+        return run(sql, /*internal=*/true);
+    }
 
 private:
     // Abre transacao quando estamos em modo manual e nao ha' uma aberta.
@@ -321,7 +332,54 @@ private:
         }
 
         record(QueryLog{std::string(sql), elapsed, rows, internal, false, {}});
+        track_search_path(sql);
         return builder.take();
+    }
+
+    // `SET search_path TO x, ...` muda o schema corrente, e a barra de status
+    // seguia dizendo "public": o campo era fixo. O primeiro nome da lista e'
+    // o schema em que um CREATE sem qualificar cai -- e' ele que se mostra.
+    void track_search_path(std::string_view sql) {
+        constexpr std::string_view kPrefix = "set search_path";
+        std::size_t i = 0;
+        while (i < sql.size() && std::isspace(static_cast<unsigned char>(sql[i])) != 0) ++i;
+        if (sql.size() - i < kPrefix.size()) return;
+        for (std::size_t k = 0; k < kPrefix.size(); ++k) {
+            if (std::tolower(static_cast<unsigned char>(sql[i + k])) != kPrefix[k]) return;
+        }
+        i += kPrefix.size();
+
+        // Pula " TO " ou " = ".
+        while (i < sql.size() && std::isspace(static_cast<unsigned char>(sql[i])) != 0) ++i;
+        if (i < sql.size() && sql[i] == '=') {
+            ++i;
+        } else if (i + 1 < sql.size() &&
+                   std::tolower(static_cast<unsigned char>(sql[i])) == 't' &&
+                   std::tolower(static_cast<unsigned char>(sql[i + 1])) == 'o') {
+            i += 2;
+        } else {
+            return;
+        }
+        while (i < sql.size() && std::isspace(static_cast<unsigned char>(sql[i])) != 0) ++i;
+        if (i >= sql.size()) return;
+
+        std::string name;
+        if (sql[i] == '"') {
+            for (++i; i < sql.size(); ++i) {
+                if (sql[i] == '"') {
+                    if (i + 1 < sql.size() && sql[i + 1] == '"') { name += '"'; ++i; continue; }
+                    break;
+                }
+                name += sql[i];
+            }
+        } else {
+            while (i < sql.size() && sql[i] != ',' && sql[i] != ';' &&
+                   std::isspace(static_cast<unsigned char>(sql[i])) == 0) {
+                name += static_cast<char>(std::tolower(static_cast<unsigned char>(sql[i])));
+                ++i;
+            }
+        }
+        if (!name.empty() && name != "default") schema_ = std::move(name);
     }
 
     pgwire::Connection conn_;
@@ -347,6 +405,11 @@ public:
         params.password = config.password;
         params.timeout  = std::chrono::duration_cast<std::chrono::milliseconds>(
             config.connect_timeout);
+
+        params.proxy.host     = config.proxy_host;
+        params.proxy.port     = config.proxy_port;
+        params.proxy.user     = config.proxy_user;
+        params.proxy.password = config.proxy_password;
 
         // `require` implica exigir: se o servidor nao oferecer TLS, a conexao
         // falha em vez de cair em claro sem avisar.

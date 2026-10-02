@@ -833,13 +833,247 @@ quando o código de apoio existe no núcleo.
 | Métrica | Valor |
 |---|---|
 | Comandos do DBeaver | 281 |
-| Implementados no C-Otter | **7** |
-| Cobertura de comandos | **2.5%** |
+| Implementados no C-Otter | **191** |
+| Cobertura de comandos | **68.0%** |
 | Atalhos do DBeaver | 147 |
-| Atalhos no C-Otter | **6** (Ctrl+Enter, Ctrl+Espaço, Ctrl+F, Ctrl+A, Ctrl+Z/Y, Ctrl+Shift+N) |
-| Cobertura de atalhos | **4.1%** |
+| Atalhos no C-Otter | **116** (perfil DBeaver; ver `docs/EDITOR-COMMANDS.md`) |
+| Cobertura de atalhos | **78.9%** |
 | Diálogos do DBeaver | 151 |
-| Diálogos no C-Otter | **2** (Conexão, Sobre) |
-| Páginas de preferências | 56 → **0** |
-| Assistentes | 112 → **0** |
-| Barras de ferramentas | 6 → **0** |
+| Diálogos, páginas e assistentes no C-Otter | ver `docs/ELEMENTS.md` e `docs/OBJECT-EDITOR.md` |
+
+## Comandos que faltam
+
+Os comandos do DBeaver sem ação no C-Otter, por plugin. A coluna Tecla traz o
+atalho do DBeaver, quando há.
+
+### core (11)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Desconectar | `folder.disconnect` |  |
+| Desconectar do projeto | `core.disconnectProject` |  |
+| Exibir EULA | `core.eula.showPopup` |  |
+| Sincronizar | `core.connection.synchronize` |  |
+| org.jkiss.dbeaver.core.commit.menu | `core.commit.menu` |  |
+| org.jkiss.dbeaver.core.menu.newConnection | `core.menu.newConnection` |  |
+| org.jkiss.dbeaver.core.menu.select.connection | `core.menu.select.connection` |  |
+| org.jkiss.dbeaver.core.menu.select.schema | `core.menu.select.schema` |  |
+| org.jkiss.dbeaver.core.menu.txn | `core.menu.txn` |  |
+| org.jkiss.dbeaver.core.menu.txn.log | `core.menu.txn.log` |  |
+| org.jkiss.dbeaver.core.rollback.menu | `core.rollback.menu` |  |
+
+### ui.navigator (11)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Atualizar projeto | `core.project.refresh` |  |
+| Criar link de arquivo | `core.resource.link.file` |  |
+| Criar link para pasta | `core.resource.link.folder` |  |
+| Criar nova pasta | `core.resource.create.folder` |  |
+| Criar novo arquivo | `core.resource.create.file` |  |
+| Criar projeto | `core.project.create` |  |
+| Definir projeto ativo | `core.project.active` |  |
+| Navegue daqui | `core.navigator.open.browser` |  |
+| Selecionar projeto ativo | `core.project.select` |  |
+| Tipo de objeto de filtro de navegador | `navigator.filter.object.type` |  |
+| org.jkiss.dbeaver.navigator.filter.object.type.menu | `navigator.filter.object.type.menu` |  |
+
+### ui.app.devtools (10)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Connection - Stress Test | `test.connection.stressTest` |  |
+| Connection - Validate | `test.connection.validate` |  |
+| Node - Validate | `test.object.validate` |  |
+| Redshift - Test | `test.redshift.runConcurrent` |  |
+| Show auth code dialog | `test.showAuthCodeDialog` |  |
+| Show colors | `test.showColors` |  |
+| Show dialog | `test.dialog` |  |
+| Show forms | `test.showForms` |  |
+| Show icons | `test.showIcons` |  |
+| Show notification | `test.showNotification` |  |
+
+### tasks.ui.view (8)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Agrupar por | `task.group` |  |
+| Copiar tarefa | `task.copy` |  |
+| Criar nova tarefa ... | `task.create` |  |
+| Criar novo diretório de tarefas | `folder.task.create` |  |
+| Editar tarefa | `task.edit` | `Enter, F4` |
+| Executar tarefa | `task.run` |  |
+| Renomear diretório | `folder.rename` |  |
+| org.jkiss.dbeaver.menu.tasks | `menu.tasks` |  |
+
+### ui.editors.erd (8)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Alternar ferramenta de mão | `erd.toggleHand` | `TAB` |
+| Criar diagrama | `erd.diagram.create` |  |
+| ERD: Focalizar na borda | `erd.focus.outline` | `ALT+3` |
+| ERD: Focalizar na paleta | `erd.focus.palette` | `ALT+2` |
+| ERD: Focalizar no diagrama | `erd.focus.diagram` | `ALT+1` |
+| ERD: Focalizar nos parâmetros | `erd.focus.parameter` | `ALT+4` |
+| Salvar diagrama como ... | `erd.diagram.saveAs` |  |
+| Visualizar diagrama | `erd.diagram.view` | `CTRL+SHIFT+ENTER` |
+
+### team.git.ui (6)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Atualizar alterações a partir do Git | `git.commands.update` | `CTRL+SHIFT+U` |
+| Compartilhar o projeto no Git | `git.commands.share` |  |
+| Criar projeto a partir do Git | `git.commands.projectFromGit` |  |
+| Enviar alterações para o Git | `git.commands.commit` | `CTRL+SHIFT+K` |
+| Exibir histórico do Git | `git.commands.showHistory` |  |
+| org.jkiss.dbeaver.menu.git | `menu.git` |  |
+
+### ui.app.standalone (6)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Experimentar DBeaver PRO | `core.try.pro` |  |
+| Minimize Window | `ui.window.minimize` | `COMMAND+M` |
+| Mostrar "Dica do dia" | `ext.ui.tipoftheday.showPopup` |  |
+| Release notes | `ui.versionUpdate.releaseNotes` |  |
+| Update | `ui.versionUpdate` |  |
+| org.jkiss.dbeaver.ui.versionUpdate.menu | `ui.versionUpdate.menu` |  |
+
+### ui.editors.sql (6)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Abrir script SQL | `core.sql.editor.defaultCommand` |  |
+| Comando padrão de abrir | `core.sql.editor.open.default` |  |
+| Exibir painéis nas abas de resultado | `ui.editors.sql.toggle.extraPanels` |  |
+| Exibir resultados em uma ou múltiplas abas | `ui.editors.sql.multipleResultsPerTab` |  |
+| Switch presentation to | `ui.editors.sql.switch.presentation` |  |
+| org.jkiss.dbeaver.menu.sql.open | `menu.sql.open` |  |
+
+### ui.editors.data (4)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Alternar disposição de painéis | `core.resultset.grid.toggleLayout` |  |
+| Maximizar/restaurar painéis | `core.resultset.grid.togglePanelMaximize` |  |
+| org.jkiss.dbeaver.resultset.export.pulldown | `resultset.export.pulldown` |  |
+| org.jkiss.dbeaver.resultset.save.pulldown | `resultset.save.pulldown` |  |
+
+### ext.oracle.ui (3)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Compile | `ext.oracle.code.compile` | `CTRL+F9` |
+| Go to source code | `ext.oracle.code.package.navigate` |  |
+| Run | `ext.oracle.job.run` |  |
+
+### ui.dashboard (3)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Criar dashboard | `ui.dashboard.create` |  |
+| Excluir dashboard | `ui.dashboard.delete` |  |
+| org.jkiss.dbeaver.menu.dashboards | `menu.dashboards` |  |
+
+### debug.ui (2)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Depurar o objeto de banco de dados mais recente | `debug.ui.command.debugConfigurationMenu` |  |
+| org.jkiss.dbeaver.debug.ui.menu.pulldown | `debug.ui.menu.pulldown` |  |
+
+### ext.db2.ui (2)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Recuperar erros de messagem do SQL... | `ext.db2.ui.showError` |  |
+| Reorganizar Tabela... | `ext.db2.ui.reorgTable` |  |
+
+### ext.exasol.ui (2)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Exportar Tabela(s) | `ext.exasol.ui.exportTable` |  |
+| Importar  Tabela(s) | `ext.exasol.ui.importTable` |  |
+
+### ui.ai (2)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| AI assistant | `ui.ai.showCompletion` | `CTRL+I` |
+| AI configuration | `ui.ai.configuration` |  |
+
+### cmp.simple.ui (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Comparação de estrutura simples | `core.compare.simple` |  |
+
+### ext.cubrid.ui (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| OID Navigator | `cubrid.OIDNavigator` |  |
+
+### ext.postgresql.ui (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Foreign data wrappers configurator | `ext.postgresql.ui.fdw` |  |
+
+### ui.app.config (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Show Product Configuration... | `ui.app.config.showWizard` |  |
+
+### ui.config.sample (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Criar banco de dados de exemplo | `ext.sample.database.commands.create` |  |
+
+### ui.editors.connection (1)
+
+| Comando | ID | Tecla |
+|---|---|---|
+| Mudar driver de conexão | `core.migrate.connection` |  |
+
+## Atalhos que faltam
+
+| Sequência | Comando | Contexto | Plugin |
+|---|---|---|---|
+| `ALT+1` | `erd.focus.diagram` | window | ui.editors.erd |
+| `ALT+2` | `erd.focus.palette` | window | ui.editors.erd |
+| `ALT+3` | `erd.focus.outline` | window | ui.editors.erd |
+| `ALT+4` | `erd.focus.parameter` | window | ui.editors.erd |
+| `COMMAND+M` | `ui.window.minimize` | window | ui.app.standalone |
+| `CTRL+1` | `org.eclipse.jdt.ui.edit.text.java.correction.assist.proposals` | sql | ui.app.standalone |
+| `CTRL+ALT+SHIFT+F` | `org.eclipse.text.quicksearch.commands.quicksearchCommand` | window | ui.app.standalone |
+| `CTRL+ALT+SPACE` | `org.eclipse.ui.edit.text.contentAssist.contextInformation` | sql | ui.app.standalone |
+| `CTRL+F9` | `ext.oracle.code.compile` |  | ext.oracle |
+| `CTRL+I` | `ui.ai.showCompletion` | window | ui.ai |
+| `CTRL+O` | `org.eclipse.ui.edit.text.openLocalFile` |  | ui.app.standalone |
+| `CTRL+SHIFT+ARROW_DOWN` | `org.eclipse.ui.edit.text.moveLineDown` | sql | ui.app.standalone |
+| `CTRL+SHIFT+ARROW_UP` | `org.eclipse.ui.edit.text.moveLineUp` | sql | ui.app.standalone |
+| `CTRL+SHIFT+ENTER` | `erd.diagram.view` | window | ui.editors.erd |
+| `CTRL+SHIFT+J` | `org.eclipse.ui.edit.text.join.lines` | sql | ui.app.standalone |
+| `CTRL+SHIFT+K` | `git.commands.commit` |  | team.git.ui |
+| `CTRL+SHIFT+SPACE` | `org.eclipse.ui.edit.text.hippieCompletion` | sql | ui.app.standalone |
+| `CTRL+SHIFT+U` | `git.commands.update` |  | team.git.ui |
+| `CTRL+SPACE` | `org.eclipse.ui.edit.text.contentAssist.proposals` | sql | ui.app.standalone |
+| `Enter` | `task.edit` |  | tasks.ui.view |
+| `F1` | `org.eclipse.ui.help.dynamicHelp` | window | ui.app.standalone |
+| `F4` | `task.edit` |  | tasks.ui.view |
+| `M1+Enter` | `com.dbeaver.ai.chat.sendPrompt` | chat | ui.ai |
+| `M1+L` | `com.dbeaver.ai.chat.focusPrompt` | chat | ui.ai |
+| `M1+M2+DEL` | `com.dbeaver.ai.chat.deleteConversation` | chat | ui.ai |
+| `M1+M2+F` | `com.dbeaver.ai.chat.openFilters` | chat | ui.ai |
+| `M1+M2+M` | `com.dbeaver.ai.chat.focusChat` | chat | ui.ai |
+| `M1+M2+S` | `com.dbeaver.ai.chat.openSettings` | chat | ui.ai |
+| `M1+N` | `com.dbeaver.ai.chat.newConversation` | chat | ui.ai |
+| `M1+U` | `com.dbeaver.ai.chat.attach` | chat | ui.ai |
+| `TAB` | `erd.toggleHand` | window | ui.editors.erd |
+

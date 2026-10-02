@@ -7,123 +7,135 @@ das 90 classes `Postgre*.java` do modelo.
 
 ---
 
-## O que a árvore do C-Otter ainda não faz (observado pelo usuário, 2026-09-21)
+## Uma árvore só (ADR 0018, 2026-09-30)
 
-Comparando com uma captura da árvore do DBeaver, três diferenças estruturais
-além dos nós faltantes:
+Eram dois painéis — **Raft** (conexões) e **Navigator** (schemas da conexão
+ativa). O DBeaver tem um, o *Database Navigator*, com a conexão na raiz. O
+usuário, comparando com uma captura dele: *"a árvore de objeto está muito
+diferente do DBeaver, nele não há duas seções"*.
 
-| Diferença | DBeaver | C-Otter hoje |
-|---|---|---|
-| **Nó raiz da conexão** | `postgres  localhost:5432` no topo, com os bancos dentro | os schemas penduram na raiz do painel; o host só aparece no painel de cima |
-| **Pasta `Databases`** | agrupa os bancos do servidor | ausente — não há onde listar outros bancos |
-| **Tamanho da tabela** | coluna à direita (`72K`, `112K`) | ✅ **já existia** (`32 kB`, `40 kB`) — eu havia afirmado que faltava, e estava errado |
+Agora é um painel, com a forma do `<tree>` do `plugin.xml` de cada driver.
+Implementação em `src/ui/navigator.cpp`; decisão e alternativas no ADR 0018.
 
-Das três, **só duas faltam**: o nó raiz da conexão e a pasta `Databases`. O
-tamanho da tabela já é exibido — verificado na tela em 2026-09-21, com as 67
-tabelas do `public` mostrando `32 kB`, `40 kB`, `48 kB` ao lado do nome.
+| Diferença apontada | Estado |
+|---|---|
+| Nó raiz da conexão, com `host:porta` ao lado | ✅ |
+| Pasta `Databases`, com a coluna de tamanho | ✅ |
+| Outros bancos do servidor (`Show all databases`) | ✅ uma sessão por banco, aberta ao expandir |
+| Nós de servidor: Roles, Extensions, Storage, System Info, Administer | ✅ |
+| Tamanho da tabela em coluna alinhada à direita (`72K`, `112K`) | ✅ era texto solto depois do nome (`24 kB`), cortado pela borda |
 
 ## A árvore completa do DBeaver (PostgreSQL)
 
+Todas as **59 pastas** do `<tree>` estão na árvore. Verificado contra o
+PostgreSQL 18.2 (`otter_tests_live`, 145 verificações) e na tela.
+
 ```
-Connection                            🟡 sem o nó raiz nomeado
-└── Databases                         ⬜ pasta ausente: os schemas penduram direto
-    └── Database                      🟡 (só o conectado)
-        ├── Schemas                   ✅
-        │   └── Schema                ✅
-        │       ├── Tables            ✅
-        │       │   └── Table         ✅
-        │       │       ├── Columns           ✅
-        │       │       ├── Constraints       ✅  PK, UNIQUE, CHECK, EXCLUDE
-        │       │       │   └── Constraint Columns
-        │       │       ├── Foreign Keys      ✅  com ON UPDATE/DELETE
-        │       │       │   └── FK Columns
-        │       │       ├── Indexes           ✅  método, tamanho, INVALID
-        │       │       │   └── Index Columns
-        │       │       ├── References        ✅  FKs que apontam para cá
-        │       │       ├── Dependencies      ⬜
-        │       │       ├── Partitions        ⬜
-        │       │       ├── Table Children    ⬜  herança
-        │       │       ├── Triggers          ✅  timing, eventos, habilitado
-        │       │       ├── Rules             ⬜
-        │       │       └── Policies          ⬜  RLS
-        │       ├── Foreign Tables    ⬜
-        │       ├── Views             ✅  pasta propria
-        │       │   └── View
-        │       │       ├── Columns          ✅
-        │       │       ├── Definition       ✅  pg_get_viewdef, copiar/abrir
-        │       │       ├── Dependencies     ⬜
-        │       │       ├── Triggers         ✅
-        │       │       └── Rules            ⬜
-        │       ├── Materialized Views ✅  pasta propria
-        │       │   └── Materialized View
-        │       │       ├── Columns          ✅
-        │       │       ├── Indexes          ✅
-        │       │       ├── Definition       ✅
-        │       │       └── Dependencies     ⬜
-        │       ├── Indexes (do schema) ⬜
-        │       ├── Sequences         ✅  last_value, owned_by
-        │       ├── Procedures/Functions ✅  assinatura, retorno, linguagem
-        │       │   ├── Definition         ✅  pg_get_functiondef
-        │       │   └── Parameters         ⬜
-        │       ├── Data Types        ✅  enum, domain, composto, range
-        │       │   ├── Enum values        ✅  na ordem de enumsortorder
-        │       │   └── Attributes         ✅  campos do composto
-        │       └── Aggregates        ⬜
-        ├── Event Triggers            ⬜
-        ├── Extensions                ⬜
-        ├── Storage                   ⬜
-        │   └── Tablespaces
-        ├── Foreign Data Wrappers     ➖
-        │   ├── Foreign Servers
-        │   └── User Mappings
-        ├── Settings                  ⬜
-        ├── Roles                     ⬜
-        │   └── Role → Members / Belongs to
-        ├── Administer → Jobs         ➖  pgAgent
-        │   └── Job → Steps / Schedules
-        └── Information               ⬜
-            ├── Access Methods        ➖
-            ├── Operator Classes      ➖
-            ├── Operator Families     ➖
-            ├── Encodings             ⬜
-            ├── Collations            ⬜
-            ├── Languages             ⬜
-            └── Available Extensions  ⬜
+Connection                            ✅  nome + host:porta; expandir conecta
+├── Databases                         ✅  barra de tamanho proporcional ao maior
+│   └── Database                      ✅  sessão própria por banco (ADR 0018)
+│       ├── Schemas                   ✅
+│       │   └── Schema                ✅
+│       │       ├── Tables            ✅  particionada incluída; partições não
+│       │       │   └── Table         ✅
+│       │       │       ├── Columns           ✅
+│       │       │       ├── Constraints       ✅  PK, UNIQUE, CHECK, EXCLUDE
+│       │       │       │   └── Constraint columns   🟡 no detalhe, não como nó
+│       │       │       ├── Foreign Keys      ✅  com ON UPDATE/DELETE
+│       │       │       │   └── FK columns           🟡 no detalhe
+│       │       │       ├── Indexes           ✅  método, tamanho, INVALID
+│       │       │       │   └── Index columns        🟡 no tooltip
+│       │       │       ├── Dependencies      ✅  o que depende da tabela
+│       │       │       ├── References        ✅  FKs que apontam para cá
+│       │       │       ├── Partitions        ✅  limites, método, tamanho
+│       │       │       ├── Child tables      ✅  só quando há herança
+│       │       │       ├── Triggers          ✅  timing, eventos, habilitado
+│       │       │       ├── Rules             ✅
+│       │       │       └── Policies          ✅  RLS: comando, roles, USING
+│       │       ├── Foreign Tables    ✅  Columns, Constraints, Dependencies
+│       │       ├── Views             ✅
+│       │       │   └── View → Columns, Dependencies, Triggers, Rules   ✅ (+ Definition)
+│       │       ├── Materialized Views ✅
+│       │       │   └── → Columns, Indexes, Dependencies                ✅ (+ Definition)
+│       │       ├── Indexes (do schema) ✅
+│       │       ├── Functions         ✅  assinatura, retorno, linguagem
+│       │       │   ├── Function parameters ✅  nome, tipo, IN/OUT
+│       │       │   └── Dependencies        ✅ (+ Definition; agregada inclusive)
+│       │       ├── Sequences         ✅  last_value, owned_by
+│       │       ├── Data types        ✅  enum, domain, composto, range
+│       │       │   └── Attributes         ✅
+│       │       └── Aggregate functions ✅
+│       ├── Event Triggers            ✅  evento, função, [off]
+│       ├── Extensions                ✅  versão, schema
+│       ├── Storage                   ✅
+│       │   └── Tablespaces           ✅
+│       ├── System Info               ✅
+│       │   ├── Foreign data wrappers ✅
+│       │   ├── Foreign servers       ✅
+│       │   │   └── User Mappings     ✅
+│       │   └── Settings              ✅  ~350 parâmetros; alterado sai marcado
+│       └── Roles                     ✅  usuário × grupo, por ícone
+│           └── Role → Members / Roles ✅
+├── Administer                        ✅
+│   ├── Session Manager               🟡 abre a consulta numa aba; sem "kill"
+│   ├── Lock Manager                  🟡 idem (PostgreSQL 9.6+)
+│   └── Jobs → Steps / Schedules      🟡 consulta escrita; NÃO verificada — sem pgAgent no servidor de teste
+└── System Info                       ✅
+    ├── Access Methods                ✅
+    │   ├── Operator classes          ✅
+    │   └── Operator families         ✅
+    ├── Encodings                     ✅
+    ├── Collations                    ✅
+    ├── Languages                     ✅
+    └── Available Extensions          ✅  instalada × disponível, por ícone
 ```
 
 ## Contagem
 
-| | DBeaver | C-Otter |
+Denominador: o `<tree>` do DBeaver, contado no `plugin.xml` (diretiva 4).
+
+| | DBeaver | C-Otter | |
+|---|---|---|---|
+| Pastas (`<folder>`) | **59** | **59** | 100% |
+| Listas de itens (`<items>`) | **62** | **55** | 89% — as 7 que faltam são as sublistas de colunas de constraint, FK, índice e referência, mostradas no detalhe |
+| Editores abertos pela árvore | 2 | 0 | Session Manager e Lock Manager abrem uma aba de resultado |
+| Classes de modelo `Postgre*` | 90 | 8 structs | os tipos que só listam usam `CatalogItem` (ADR 0018) |
+
+As outras três árvores têm mapa próprio, com a mesma contagem: MySQL em
+`docs/MYSQL-MAP.md` (21 de 27 nós), SQL Server em `docs/MSSQL-MAP.md` (21 de 30 pastas,
+mais 2 parciais) e SQL Anywhere em `docs/SQLANYWHERE-MAP.md` (14 de 17 pastas da árvore
+genérica do DBeaver, mais 2 parciais — e, fora da conta, as pastas do Sybase Central).
+
+O que a árvore **mostra** está completo; o que o DBeaver **faz** a partir dela
+(editor de propriedades de cada objeto, criar/alterar role, extensão,
+tablespace) não — ver `docs/DDL-WRITE.md`.
+
+## Opções que mudam a árvore
+
+| Opção | Onde (igual ao DBeaver) | Estado |
 |---|---|---|
-| Tipos de nó na árvore | **~70** | **21** |
-| Classes de modelo `Postgre*` | **90** | 5 structs |
+| Show all databases | página principal, abaixo de Database | ✅ lida, gravada com a chave do DBeaver |
+| Show template databases | página Metadata | ✅ |
+| Show databases not available for connection | página Metadata | ✅ |
+| Navigator view (Simple / Advanced / Custom) | página General | ⬜ a árvore é sempre a Advanced |
 
-## Ordem de implementação
+As três primeiras existiam como caixas **que nenhum código lia nem gravava**
+(diretiva 6). A chave é `@dbeaver-show-non-default-db@` em
+`provider-properties`, conferida num `data-sources.json` real.
 
-Por valor de uso, não por ordem na árvore.
+## Defeitos que só apareceram na tela
 
-**Concluídos em 2026-09-21** (validados pelo `spikes/catalog` contra o ERP_TID):
-
-| Item | Detalhe exposto |
-|------|-----------------|
-| ✅ Constraints | PK, UNIQUE, CHECK, EXCLUDE, com `pg_get_constraintdef` no tooltip |
-| ✅ Foreign Keys | Origem → destino, `ON UPDATE`/`ON DELETE` |
-| ✅ **References** | Quem aponta para esta tabela — responde "o que depende disto?" |
-| ✅ Indexes | Método (btree/gin/...), tamanho, UNIQUE, e **INVALID** em vermelho |
-| ✅ Sequences | `last_value`, incremento, `owned_by` |
-| ✅ Functions/Procedures | Assinatura, retorno, linguagem |
-| ✅ Triggers | Timing, eventos, estado habilitado |
-
-**Pendentes:**
-
-| # | Item | Por quê |
-|---|------|---------|
-| 1 | **Partições e herança** | |
-| 2 | **Dependencies** | Grafo de dependências |
-| 3 | **Rules e Policies (RLS)** | |
-| 4 | Roles, Extensions, Settings, Tablespaces | Nível de servidor |
-| 5 | Parâmetros de rotina | Sub-pasta de cada função |
-| 6 | Encodings, Collations, Languages | Referência |
+| Defeito | Causa |
+|---|---|
+| Tabela particionada sumia da árvore | a pasta filtrava por `kind == table` |
+| Partições listadas também em Tables | faltava `NOT relispartition` |
+| Árvore recuava um nível depois de um nó aberto | `EndGroup` restaura o indent e engole o do `TreePush` |
+| Janela do editor nascia flutuando sobre a grade | o `layout.ini` guarda o id do nó de docking, que mudou com a saída do Raft |
+| Tamanho da tabela cortado e desalinhado | texto solto depois do nome, em vez de coluna |
+| "Ver dados" abria a aba e não executava | o pedido de colunas ocupava a sessão no instante da consulta |
+| Dependência sem nome | o `pg_depend` aponta para `pg_policy`, que a consulta do DBeaver não junta |
+| Script do banco ERP caía na janela do MySQL | ao fechar a sessão do banco, as abas iam para a conexão ativa |
+| Árvore não mostrava a tabela recém-criada | depois do DDL só a tabela era invalidada, não a lista |
 
 ## Decisões de design
 
@@ -133,12 +145,35 @@ descobrir que está vazio.
 **Carregamento tardio por nó.** Cada pasta consulta o catálogo só quando expandida. Hoje
 isso vale para colunas; passa a valer para todos.
 
-**Ícone próprio por tipo de nó — requisito, não enfeite.**
+**Ícones: os originais do DBeaver (ADR 0019, 2026-09-30).**
 
-Cada tipo de objeto precisa de um ícone **sugestivo, elegante e futurista**, distinguível de
-relance. Reaproveitar um desenho genérico para dois tipos diferentes é dívida a pagar.
+A árvore usa os ícones do próprio DBeaver — quem vem de lá reconhece o nó antes de ler o
+rótulo. A pasta de cada tipo segue o `icon="#..."` do `<tree>` do `plugin.xml`, resolvido
+pelo `DBIcon.java`:
 
-**Dívida quitada em 2026-09-21.** Nenhum tipo de objeto compartilha desenho.
+| Pasta | `icon=` no DBeaver | Arquivo |
+|---|---|---|
+| Databases | `#folder_database` | `folder_database.svg` |
+| Schemas | `#folder_schema` | `folder_schema.svg` |
+| Tables, Partitions, Child tables | `#folder_table` | `folder_table.svg` |
+| Foreign Tables | `#folder_link` | `folder_link.svg` |
+| Views, Materialized Views | `#folder_view` | `folder_view.svg` |
+| Columns | `#columns` | `columns.svg` |
+| Constraints | `#constraints` | `folder_constraint.svg` |
+| Roles, User mappings | `#folder_user` | `folder_user.svg` |
+| Extensions, Administer | `#folder_admin` | `folder_admin.svg` |
+| Storage, System Info | `#folder_info` | `folder_info.svg` |
+| Indexes, Functions, Sequences, Data types, Triggers, References... | `#indexes`, `#procedures`... | `folder.svg` — o id não existe no `DBIcon`, e o DBeaver cai na pasta comum |
+
+Conferido na tela contra a captura do DBeaver, nos temas escuro e claro. O conjunto antigo
+continua disponível em *Help → Icons → C-Otter*; a tabela abaixo descreve esse conjunto.
+
+**Distâncias da linha** (pedido do usuário, 2026-09-30): metade do espaço entre a borda do
+painel e a seta dos itens raiz, metade entre a seta e o ícone, metade entre o ícone e o
+título. Os números ficam em `tree_arrow_gap()` / `tree_label_gap()` (`src/ui/icons.cpp`).
+
+**O conjunto C-Otter: um desenho por tipo.** Nenhum tipo de objeto compartilha desenho
+(dívida quitada em 2026-09-21).
 
 | Nó | Ícone | Desenho |
 |----|-------|---------|
@@ -214,8 +249,12 @@ o da coluna só sobre o tipo, o do índice só sobre o tamanho. Sete linhas tinh
 defeito e foram corrigidas juntas — ele só apareceu ao passar o mouse na aplicação
 rodando, nunca no build.
 
-**Pasta vazia fica escondida.** Um schema sem views não mostra `Views (0)`. O zero
-ocuparia uma linha para dizer que não há nada.
+**Pasta vazia aparece, com `(0)`.** Era escondida, sob o argumento de que o
+zero ocuparia uma linha para dizer que não há nada. O DBeaver mostra Tables,
+Views e Materialized Views sempre no mesmo lugar; escondida, quem procura
+"Views" onde está acostumado não acha, e não sabe se o schema não tem views ou
+se o programa não as mostra (diretiva 12). Continua fora o que o **SGBD** não
+tem — `Sequences` num MySQL, por exemplo.
 
 **Cada tipo de relação tem as pastas que faz sentido ter.** Extraído do `<tree>` do
 `plugin.xml` do DBeaver, não estimado:

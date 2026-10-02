@@ -139,10 +139,23 @@ Verificado contra **MySQL 8.0.46 real** em 2026-09-21:
   com a coluna nova aparecendo na posição certa. E o caminho destrutivo, com
   o `DROP COLUMN` em vermelho e o "Eu entendo" barrando o botão.
 
-**Não verificado contra PostgreSQL.** O perfil local se perdeu ao reimportar e
-não tinha senha salva; o `pg_hba.conf` exige `scram-sha-256` e alterá-lo seria
-mexer na configuração do servidor do usuário. A geração está coberta por 20
-testes unitários, mas o **efeito** no servidor não foi observado.
+Verificado contra **PostgreSQL 18.2 real** em 2026-09-30:
+
+- `spikes/alter_live_pg` (`spike_alter_live_pg.exe`) — **81 verificações, 0
+  falhas**. Usa o perfil PostgreSQL salvo e o schema `otter_test` das fixtures.
+  Prova no servidor: `CREATE TABLE` com `COMMENT ON` separado; `int → bigint`
+  num `serial` sem perder o `nextval`; `DROP NOT NULL`/`DROP DEFAULT`/comentário
+  um atributo por comando; `RENAME COLUMN` preservando o `DEFAULT`; **DDL
+  transacional** (erro no meio, `ROLLBACK` desfaz o `ALTER` anterior); índice
+  com `USING hash` antes das colunas; `CONCURRENTLY` fora de transação e
+  válido; `DROP INDEX` qualificado pelo schema; recusa do índice da PK antes do
+  servidor; UNIQUE, CHECK e FK que **restringem**, FK com `ON DELETE CASCADE`
+  que cascateia; `CREATE OR REPLACE VIEW` preservando o `GRANT`; sequence com
+  `CYCLE`; trigger que chama função e **dispara**.
+- O mesmo spike cobre a **gravação da grade** no PostgreSQL (`UPDATE` com
+  aspas no literal, `NULL` de verdade, `DELETE` pela chave, `INSERT` usando o
+  `serial`), o `EXPLAIN ANALYZE` envolto em `BEGIN`/`ROLLBACK` sobre um
+  `DELETE` — as linhas sobrevivem — e `SAVEPOINT`/`ROLLBACK TO`.
 
 ### A diferença que mais custa aqui
 

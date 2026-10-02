@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <string>
 
 namespace otter::db {
@@ -257,7 +258,10 @@ public:
     // No MySQL o banco corrente FAZ o papel do schema: nao existe nivel
     // intermediario. Devolver "public" aqui, como no PostgreSQL, apontaria
     // para um schema que nao existe.
-    [[nodiscard]] std::string current_schema() const override { return database_; }
+    [[nodiscard]] std::string current_schema() const override {
+        const std::lock_guard<std::mutex> lock(database_mutex_);
+        return database_;
+    }
 
     // Propriedades do driver como variaveis de sessao.
     //
@@ -288,6 +292,10 @@ public:
                 "SET @@" + quote_identifier(name) + " = " + quoted_value));
         }
         return {};
+    }
+
+    [[nodiscard]] Result<ResultSet> query_internal(std::string_view sql) override {
+        return run(sql, /*internal=*/true);
     }
 
 private:
@@ -381,11 +389,21 @@ private:
         }
 
         record(QueryLog{std::string(sql), elapsed, rows, internal, false, {}});
+
+        // Sem isto o banco corrente ficava o do perfil para sempre: a aba e a
+        // barra de status diziam um banco enquanto as consultas iam a outro.
+        // A barra de status le' current_schema() a cada quadro, de outra
+        // thread: daqui a escrita passa pelo mutex.
+        if (std::string target = mysql_use_target(sql); !target.empty()) {
+            const std::lock_guard<std::mutex> lock(database_mutex_);
+            database_ = std::move(target);
+        }
         return builder.take();
     }
 
     mywire::Connection conn_;
     std::string        database_;
+    mutable std::mutex database_mutex_;
     bool               auto_commit_ = true;
 
     friend class MysqlDriver;
@@ -409,6 +427,11 @@ public:
         params.password = config.password;
         params.timeout  = std::chrono::duration_cast<std::chrono::milliseconds>(
             config.connect_timeout);
+
+        params.proxy.host     = config.proxy_host;
+        params.proxy.port     = config.proxy_port;
+        params.proxy.user     = config.proxy_user;
+        params.proxy.password = config.proxy_password;
 
         // `require` implica exigir: se o servidor nao oferecer TLS, a conexao
         // falha em vez de cair em claro sem avisar.
@@ -449,6 +472,42 @@ public:
 Driver& mysql_driver() {
     static MysqlDriver driver;
     return driver;
+}
+
+std::string mysql_use_target(std::string_view sql) {
+    const auto is_space = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    };
+    std::size_t i = 0;
+    while (i < sql.size() && is_space(sql[i])) ++i;
+    if (sql.size() - i < 4) return {};
+    const auto lower = [](char c) {
+        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    };
+    if (lower(sql[i]) != 'u' || lower(sql[i + 1]) != 's' || lower(sql[i + 2]) != 'e' ||
+        !is_space(sql[i + 3])) {
+        return {};
+    }
+    i += 4;
+    while (i < sql.size() && is_space(sql[i])) ++i;
+
+    std::string name;
+    if (i < sql.size() && sql[i] == '`') {
+        // Crase dobrada dentro do nome e' uma crase do nome.
+        for (++i; i < sql.size(); ++i) {
+            if (sql[i] == '`') {
+                if (i + 1 < sql.size() && sql[i + 1] == '`') { name.push_back('`'); ++i; continue; }
+                ++i;
+                break;
+            }
+            name.push_back(sql[i]);
+        }
+    } else {
+        while (i < sql.size() && !is_space(sql[i]) && sql[i] != ';') name.push_back(sql[i++]);
+    }
+    // So' espaco e um ';' depois do nome: "USE a; SELECT 1" nao e' um USE so'.
+    while (i < sql.size() && (is_space(sql[i]) || sql[i] == ';')) ++i;
+    return i == sql.size() ? name : std::string{};
 }
 
 } // namespace otter::db

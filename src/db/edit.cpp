@@ -3,6 +3,7 @@
 #include "db/ddl.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace otter::db {
@@ -55,9 +56,16 @@ std::string literal_for(const ColumnInfo& info, std::string_view value,
     if (is_null) return "NULL";
 
     switch (info.kind) {
-        case DataKind::boolean:
-            return (value == "t" || value == "true" || value == "TRUE")
-                       ? "TRUE" : "FALSE";
+        case DataKind::boolean: {
+            const bool on = value == "t" || value == "true" || value == "TRUE" ||
+                            value == "1";
+            // O `bit` do SQL Server nao conhece TRUE/FALSE: e' 1 ou 0.
+            if (sql_dialect() == QuoteStyle::brackets ||
+                sql_dialect() == QuoteStyle::anywhere) {
+                return on ? "1" : "0";
+            }
+            return on ? "TRUE" : "FALSE";
+        }
         case DataKind::integer:
         case DataKind::floating:
         case DataKind::numeric:
@@ -67,6 +75,21 @@ std::string literal_for(const ColumnInfo& info, std::string_view value,
             return value.empty() ? "NULL" : std::string(value);
         default:
             break;
+    }
+
+    if (sql_dialect() == QuoteStyle::brackets || sql_dialect() == QuoteStyle::anywhere) {
+        // varbinary nao aceita literal de texto: 0x... vai cru. So' digitos
+        // hexadecimais passam -- o resto cai no literal citado, e o servidor
+        // recusa dizendo por que.
+        if (info.kind == DataKind::binary && value.size() >= 2 &&
+            (value.substr(0, 2) == "0x" || value.substr(0, 2) == "0X") &&
+            std::all_of(value.begin() + 2, value.end(), [](char c) {
+                return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+            })) {
+            return std::string(value);
+        }
+        // Com N quando ha' algo fora do ASCII (ver quote_literal).
+        return quote_literal(value);
     }
 
     std::string out = "'";
@@ -79,6 +102,11 @@ std::string literal_for(const ColumnInfo& info, std::string_view value,
 }
 
 } // namespace
+
+std::string sql_literal(const ColumnInfo& info, std::string_view value,
+                        bool is_null) {
+    return literal_for(info, value, is_null);
+}
 
 std::string_view to_string(EditRefusal refusal) noexcept {
     switch (refusal) {
@@ -230,6 +258,21 @@ void EditBuffer::set_null(std::size_t row, std::size_t column) {
     edits_[{row, column}] = std::move(edit);
 }
 
+void EditBuffer::set_default(std::size_t row, std::size_t column) {
+    CellEdit edit;
+    edit.row        = row;
+    edit.column     = column;
+    edit.is_default = true;
+    edits_[{row, column}] = std::move(edit);
+}
+
+void EditBuffer::revert_row(std::size_t row) {
+    for (auto it = edits_.begin(); it != edits_.end();) {
+        it = it->second.row == row ? edits_.erase(it) : std::next(it);
+    }
+    deleted_.erase(row);
+}
+
 void EditBuffer::clear() {
     // Limpa TUDO. Um "Descartar" que deixasse exclusoes ou insercoes
     // pendentes seria pior que nenhum: o usuario acharia que desfez e a
@@ -270,8 +313,9 @@ void EditBuffer::copy_cell_from(const ResultSet& rs, std::size_t from_row,
     // editada, e' o valor EDITADO que o usuario ve' -- e copiar o valor do
     // banco faria aparecer na tela um numero que nao esta' em lugar nenhum.
     if (const CellEdit* pending = find(from_row, column); pending != nullptr) {
-        if (pending->is_null) set_null(to_row, column);
-        else                  set(to_row, column, pending->value);
+        if (pending->is_default)   set_default(to_row, column);
+        else if (pending->is_null) set_null(to_row, column);
+        else                       set(to_row, column, pending->value);
         return;
     }
 
@@ -295,8 +339,9 @@ bool EditBuffer::is_deleted(std::size_t row) const {
     return deleted_.contains(row);
 }
 
-std::size_t EditBuffer::add_row() {
+std::size_t EditBuffer::add_row(std::size_t anchor) {
     insertions_.emplace_back();
+    insertions_.back().anchor = anchor;
     return insertions_.size() - 1;
 }
 
@@ -368,7 +413,9 @@ Result<std::vector<std::string>> generate_updates(const ResultSet& rs,
             first = false;
 
             sql += quote_if_needed(info.name) + " = " +
-                   literal_for(info, edit->value, edit->is_null);
+                   (edit->is_default
+                        ? std::string("DEFAULT")
+                        : literal_for(info, edit->value, edit->is_null));
         }
 
         sql += "\n WHERE ";

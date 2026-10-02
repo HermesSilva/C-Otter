@@ -7,13 +7,14 @@
 # --- otter_net: socket e criptografia ----------------------------------------
 set(OTTER_NET_SOURCES
     net/socket.cpp
+    net/socks.cpp
     net/crypto_common.cpp
 )
 
 if(WIN32)
-    list(APPEND OTTER_NET_SOURCES net/crypto_win32.cpp net/tls_win32.cpp)
+    list(APPEND OTTER_NET_SOURCES net/crypto_win32.cpp net/tls_win32.cpp net/sspi_win32.cpp)
 else()
-    list(APPEND OTTER_NET_SOURCES net/crypto_openssl.cpp net/tls_openssl.cpp)
+    list(APPEND OTTER_NET_SOURCES net/crypto_openssl.cpp net/tls_openssl.cpp net/sspi_stub.cpp)
 endif()
 
 add_library(otter_net STATIC ${OTTER_NET_SOURCES})
@@ -62,5 +63,19 @@ target_include_directories(otter_mywire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(otter_mywire PUBLIC otter_flags otter::otter_net)
 set_target_properties(otter_mywire PROPERTIES FOLDER "lib")
 
-# Fase 3:
-#   add_library(otter_tds ...)      # SQL Server
+# --- otter_tdswire: protocolo do SQL Server (TDS 7.4) ------------------------
+#
+# Existe porque o FreeTDS e' LGPL e o driver da Microsoft exige ODBC instalado
+# (ADR 0002 e ADR 0024). Mapa do protocolo em docs/MSSQL-MAP.md.
+add_library(otter_tdswire STATIC
+    tdswire/value.cpp
+    tdswire/browser.cpp
+    tdswire/connection.cpp
+    # TDS 5.0, o ramo da Sybase: SQL Anywhere (ADR 0026, docs/SQLANYWHERE-MAP.md).
+    tdswire/tds5.cpp
+)
+add_library(otter::otter_tdswire ALIAS otter_tdswire)
+
+target_include_directories(otter_tdswire PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(otter_tdswire PUBLIC otter_flags otter::otter_net)
+set_target_properties(otter_tdswire PROPERTIES FOLDER "lib")

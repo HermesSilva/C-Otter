@@ -215,6 +215,9 @@ public:
 	inline void Copy() const { copy(); }
 	inline void Paste() { if (!config.readOnly) paste(); }
 	inline void Undo() { if (!config.readOnly) undo(); }
+	// C-Otter: "Move lines up/down" do Eclipse como comando (Ctrl+Shift+setas).
+	inline void MoveLinesUp() { if (!config.readOnly) moveUpLines(); }
+	inline void MoveLinesDown() { if (!config.readOnly) moveDownLines(); }
 	inline void Redo() { if (!config.readOnly) redo(); }
 	inline bool CanUndo() const { return !config.readOnly && transactions.canUndo(); };
 	inline bool CanRedo() const { return !config.readOnly && transactions.canRedo(); };

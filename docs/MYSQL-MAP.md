@@ -88,13 +88,12 @@ O valor `0xFB` **dentro de uma linha** é NULL; fora dela, na primeira posição
 
 ## 2. Árvore de objetos
 
-Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **21 implementados**.
+Extraída do `<tree>` do `plugin.xml`. 27 tipos de nó, **24 implementados**.
 
-Cobertura contra o DBeaver (diretiva 4): **21 / 27 = 78%** da árvore MySQL.
+Cobertura contra o DBeaver (diretiva 4): **24 / 27 = 89%** da árvore MySQL.
 
-Faltam: Packages (só MariaDB), Administer, User privileges, Plugins, e os dois
-nós "virtuais" de índice e trigger no nível do banco -- que só repetem o que
-já aparece dentro de cada tabela.
+Faltam: Packages (só MariaDB) e os dois nós "virtuais" de índice e trigger no
+nível do banco -- que só repetem o que já aparece dentro de cada tabela.
 
 | Nó | Caminho | Estado |
 |---|---|:---:|
@@ -117,14 +116,19 @@ já aparece dentro de cada tabela.
 | ⠀⠀├ Triggers (virtual, do banco) | `triggers` | ⬜ |
 | ⠀⠀└ Events | `events` | ✅ |
 | Users → Grants | `users` | ✅ |
-| Administer | — | ⬜ |
+| Administer → Session Manager | — | ✅ |
 | System Info | — | ✅ |
 | ├ Session status / Global status | `sessionStatus` | ✅ |
 | ├ Session variables / Global variables | `sessionVariables` | ✅ |
 | ├ Engines | `engines` | ✅ |
 | ├ Charsets → Collations | `charsets` | ✅ |
-| ├ User privileges | `privileges` | ⬜ |
-| └ Plugins | `plugins` | ⬜ |
+| ├ User privileges | `privileges` | ✅ |
+| └ Plugins | `plugins` | ✅ |
+
+**Na árvore única (ADR 0018):** a conexão é a raiz, com `Databases`, `Users`
+e `System Info` dentro — a forma do `<tree>` acima. Verificado na tela com o
+MySQL 8.0.46 em 2026-09-30, ao lado de uma conexão PostgreSQL na mesma árvore.
+`Administer` (Session Manager), `User privileges` e `Plugins` entraram em 2026-10-01.
 
 **Diferença estrutural para o PostgreSQL:** lá a hierarquia é
 `banco → schema → objeto`; aqui é `banco → objeto`, sem schema. No MySQL
@@ -156,7 +160,49 @@ armadilhas:
 
 ---
 
-## 4. Estado
+## 4. Editor de objeto, ferramentas e cliente nativo (2026-10-01)
+
+Pedido do usuário: *"Faça o perfil MySQL chegar ao ponto que está o PostgreSQL."*
+Mapa do plugin `org.jkiss.dbeaver.ext.mysql` (`edit/`, `tasks/`, `ui/`), com o estado
+no C-Otter. Regras em `src/db/mysql_object.{hpp,cpp}`; a tela é a MESMA do PostgreSQL
+(`src/ui/object_editor.cpp`): os geradores genéricos (`generate_object_rename`,
+`generate_grant`...) desviam para os do MySQL pelo dialeto da conexão em uso.
+
+| DBeaver | O que é | C-Otter |
+|---|---|:---:|
+| `MySQLDatabaseManager` + `MySQLCreateDatabaseDialog` | Create database (nome, charset, collation), Drop | ✅ |
+| `MySQLTableManager` | Create (formulário), Rename (`RENAME TABLE`), Comment, Drop | ✅ |
+| `MySQLTableColumnManager`, `IndexManager`, `ConstraintManager`, `ForeignKeyManager` | Create (formulários de `db/alter.hpp`), Drop; Rename de índice | ✅ |
+| `MySQLViewManager` | Create, Rename, Drop, fonte por `CREATE OR REPLACE` | ✅ |
+| `MySQLProcedureManager` + `ProcedureConfigurator` | Create (esqueleto no editor), Comment, Drop, fonte por `DROP` + `CREATE` | ✅ |
+| `MySQLTriggerManager` + `TriggerConfigurator` | Create (esqueleto), Drop, fonte por `DROP` + `CREATE` | ✅ |
+| `MySQLEventManager` + `EventConfigurator` | Create (esqueleto), Rename, Comment, Drop, fonte | ✅ |
+| `MySQLSequenceManager` (MariaDB 10.3+) | Create, Drop | 🟡 gerado; **não conferido** — não há MariaDB na máquina de teste |
+| `MySQLUserManager` + `UserEditorGeneral` | Create user (nome, host, senha), Rename, Drop, trocar senha | ✅ |
+| `MySQLUserEditorGeneral` — limites (max queries/updates/connections) | editar | 🟡 mostrados, somente leitura |
+| `MySQLUserEditorPrivileges` | matriz global e por schema | 🟡 por OBJETO, na aba Permissions de tabela, view e banco (`GRANT`/`REVOKE`, `WITH GRANT OPTION`); a conta mostra o `SHOW GRANTS` |
+| `MySQLToolTableAnalyze/Check/Optimize/Repair` | com as opções do combo | ✅ o resultado (Table, Op, Msg_type, Msg_text) abre numa aba |
+| `MySQLToolTableTruncate` | Truncate | ✅ |
+| `MySQLDatabaseExportHandler` | Dump database (mysqldump) | ✅ método, DROP, chaves, inserts estendidos, eventos, rotinas, comentários, hex, sem dados |
+| `MySQLScriptExecuteHandler` | Execute script / Restore (mysql) | ✅ também em *SQL Editor → Execute SQL script natively* |
+| `MySQLSessionEditor` | Session Manager, Kill Query / Kill Connection | ✅ a lista é uma aba de resultado (ADR 0018) |
+| `MySQLCommandChangeUser` | senha da própria conta | ✅ `ALTER USER USER()` |
+| Privilégios de rotina na aba Permissions | lista | ⬜ o `GRANT ... ON PROCEDURE` é gerado e testado; falta a lista (exige ler `mysql.procs_priv`) |
+| Engine, charset, auto-increment da tabela | editar no formulário | ⬜ somente leitura; por SQL |
+
+Verificado contra o **MySQL 8.0.46** local em 2026-10-01:
+
+- `otter_tests_mysql_object_live` — **111 verificações, 0 falhas**: cada gerador
+  executado num banco de rascunho (`otter_scratch`) e o efeito lido do
+  `information_schema`; mysqldump e mysql rodados de verdade.
+- Na aplicação, pelo canal de comandos (`build/my_flow.ps1`): criar banco, renomear
+  tabela, comentar, criar conta, `GRANT` pela aba Permissions, `CHECK TABLE`,
+  mysqldump, restore e os dois `DROP` — efeito lido do servidor em cada passo.
+
+**Não conferido:** MariaDB (sequences, packages); o clique direito e as teclas na
+árvore; os diálogos nativos de "Browse".
+
+## 5. Estado
 
 | Etapa | Estado |
 |---|:---:|
@@ -203,6 +249,13 @@ Nenhum destes quebrava o build, e nenhum apareceria num teste unitário:
 | Ícone do cadeado lendo como **envelope** na barra de status | `PathArcTo(π, 0)` desenha a metade de BAIXO; a alça caía dentro da caixa. O intervalo certo é `π → 2π`, como em `draw_role` |
 | `require` falhando com "aperto de mão TLS (0x00090320)" | o MySQL pede certificado de cliente de forma OPCIONAL; `SEC_I_INCOMPLETE_CREDENTIALS` não é erro, e o passo seguinte do laço responde "não tenho" |
 | `not a socket` na primeira consulta **depois** de um TLS bem-sucedido | o `TlsChannel` guardava um `Socket*`, e a `Connection` é movida para dentro do `Holt` |
+
+### Defeitos que só apareceram no servidor (2026-10-01)
+
+| Sintoma | Causa |
+|---|---|
+| "Save" do fonte de uma procedure a recriava em OUTRO banco | `SHOW CREATE PROCEDURE` devolve o nome **sem o banco**: o `DROP` apagava em `otter_scratch` e o `CREATE` criava no banco corrente da sessão. `qualify_create` põe o banco no nome — e, no trigger, também na tabela do `ON`. Pego pelo teste ao vivo; o unitário passava |
+| Com PostgreSQL e MySQL abertos juntos, o menu de uma tabela do MySQL gerava `ALTER TABLE "t"` | o dialeto do SQL gerado era um global definido ao conectar: ficava com o da ÚLTIMA conexão aberta. Agora é por thread, e o thread de UI o decide pela conexão em uso (`MainShell::draw`, `push_tree_connection`, `draw_connection_editor`) |
 
 ### Aberto, não corrigido
 

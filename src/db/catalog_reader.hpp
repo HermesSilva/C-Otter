@@ -13,6 +13,7 @@
 #pragma once
 
 #include "db/catalog.hpp"
+#include "db/object_info.hpp"
 
 #include <cstdint>
 
@@ -29,6 +30,8 @@ enum class ServerInfoKind : std::uint8_t {
     global_variables,
     engines,
     charsets,
+    privileges,   // SHOW PRIVILEGES: o que o servidor sabe conceder
+    plugins,      // SHOW PLUGINS
 };
 
 class CatalogReader {
@@ -114,6 +117,29 @@ public:
     [[nodiscard]] virtual Result<std::vector<UserMeta>> load_users() = 0;
     [[nodiscard]] virtual Result<std::vector<std::string>> load_grants(
         std::string_view user, std::string_view host) = 0;
+
+    // --- Arvore unica (ADR 0018) ----------------------------------------------
+
+    // O servidor tem BANCOS acima dos schemas, cada um exigindo conexao
+    // propria? PostgreSQL sim. No MySQL nao: o que load_schemas devolve JA'
+    // sao os bancos, e uma conexao enxerga todos.
+    [[nodiscard]] virtual bool has_database_level() const noexcept = 0;
+
+    // Os bancos do servidor. Vazio onde has_database_level() e' falso.
+    [[nodiscard]] virtual Result<std::vector<DatabaseMeta>> load_databases(
+        bool templates, bool unavailable) = 0;
+
+    // Uma das listas da arvore -- ver CatalogList. Um SGBD que nao tem a
+    // lista devolve vazio.
+    [[nodiscard]] virtual Result<std::vector<CatalogItem>> load_list(
+        CatalogList list, std::string_view a, std::string_view b,
+        std::string_view c) = 0;
+
+    // --- Editor de objeto (db/object_info.hpp) --------------------------------
+
+    // Propriedades, DDL, permissoes e estatisticas de UM objeto. Nao e'
+    // Result: cada parte falha sozinha, e `error` diz qual.
+    [[nodiscard]] virtual ObjectInfo load_object_info(const ObjectRef& ref) = 0;
 
 protected:
     CatalogReader() = default;

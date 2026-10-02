@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 #include <string>
 #include <string_view>
 
@@ -63,6 +64,23 @@ private:
 
     static constexpr std::uintptr_t kInvalid = static_cast<std::uintptr_t>(-1);
 };
+
+// Uma porta TCP livre em 127.0.0.1, escolhida pelo sistema. Para o tunel
+// SSH, que precisa dizer ao `ssh` em que porta local escutar.
+//
+// Ha' uma janela entre devolver a porta e alguem usa-la em que outro
+// processo pode pega-la; o `ssh` falha nesse caso (ExitOnForwardFailure), e o
+// erro chega ao usuario -- raro o bastante para nao valer um protocolo de
+// reserva.
+[[nodiscard]] Result<std::uint16_t> free_local_port();
+
+// Um datagrama UDP de ida e a resposta (ate' 64 KiB). Para protocolos de
+// pergunta e resposta unicas -- o SQL Server Browser (UDP 1434), que diz em
+// que porta TCP uma instancia nomeada escuta. Sem resposta dentro de
+// `timeout`, `timeout`: UDP nao avisa quando ninguem esta' ouvindo.
+[[nodiscard]] Result<std::vector<std::byte>> udp_exchange(
+    std::string_view host, std::uint16_t port, std::span<const std::byte> request,
+    std::chrono::milliseconds timeout);
 
 // Inicializacao da pilha de rede (Winsock exige; POSIX nao faz nada).
 // Idempotente e thread-safe.

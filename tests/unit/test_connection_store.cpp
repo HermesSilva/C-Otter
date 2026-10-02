@@ -8,6 +8,7 @@
 
 #include "db/connection_store.hpp"
 
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -659,4 +660,308 @@ OTTER_TEST(store_reads_no_isolation_as_server_default) {
     auto back = load_profiles(dir.location());
     OTTER_CHECK(back.has_value());
     OTTER_CHECK_EQ(back->front().profile.isolation_level, -1);
+}
+
+// --- Nome unico ------------------------------------------------------------------
+
+OTTER_TEST(unique_name_keeps_a_free_name) {
+    OTTER_CHECK_EQ(unique_name("ERP", {"MySQL", "Teste"}), std::string{"ERP"});
+}
+
+OTTER_TEST(unique_name_appends_the_smallest_free_counter) {
+    OTTER_CHECK_EQ(unique_name("ERP", {"ERP"}), std::string{"ERP_1"});
+    OTTER_CHECK_EQ(unique_name("ERP", {"ERP", "ERP_1"}), std::string{"ERP_2"});
+    // Buraco na sequencia: o menor livre, nao o maior + 1.
+    OTTER_CHECK_EQ(unique_name("ERP", {"ERP", "ERP_2"}), std::string{"ERP_1"});
+}
+
+OTTER_TEST(make_names_unique_renames_only_the_repeats) {
+    // O caso real: tres "MySQL de teste" no Raft, indistinguiveis.
+    std::vector<StoredProfile> profiles(4);
+    profiles[0].profile.name = "MySQL de teste";
+    profiles[1].profile.name = "MySQL de teste";
+    profiles[2].profile.name = "localhost";
+    profiles[3].profile.name = "MySQL de teste";
+
+    OTTER_CHECK_EQ(make_names_unique(profiles), std::size_t{2});
+    OTTER_CHECK_EQ(profiles[0].profile.name, std::string{"MySQL de teste"});
+    OTTER_CHECK_EQ(profiles[1].profile.name, std::string{"MySQL de teste_1"});
+    OTTER_CHECK_EQ(profiles[2].profile.name, std::string{"localhost"});
+    OTTER_CHECK_EQ(profiles[3].profile.name, std::string{"MySQL de teste_2"});
+
+    // Idempotente: rodar de novo (a cada inicializacao) nao renomeia nada.
+    OTTER_CHECK_EQ(make_names_unique(profiles), std::size_t{0});
+}
+
+OTTER_TEST(make_names_unique_does_not_collide_with_a_later_suffixed_name) {
+    // "x_1" legitimo DEPOIS do segundo "x": o renomeado nao pode virar "x_1".
+    std::vector<StoredProfile> profiles(3);
+    profiles[0].profile.name = "x";
+    profiles[1].profile.name = "x";
+    profiles[2].profile.name = "x_1";
+
+    make_names_unique(profiles);
+    OTTER_CHECK_EQ(profiles[1].profile.name, std::string{"x_2"});
+    OTTER_CHECK_EQ(profiles[2].profile.name, std::string{"x_1"});
+}
+
+OTTER_TEST(make_names_unique_compares_the_displayed_name) {
+    // Sem nome, o Raft exibe "banco@host". Dois iguais confundem do mesmo jeito.
+    std::vector<StoredProfile> profiles(2);
+    profiles[0].profile.database = "ERP";
+    profiles[0].profile.host     = "localhost";
+    profiles[1].profile.database = "ERP";
+    profiles[1].profile.host     = "localhost";
+    profiles[1].profile.port     = 5433;
+
+    OTTER_CHECK_EQ(make_names_unique(profiles), std::size_t{1});
+    OTTER_CHECK(profiles[0].profile.name.empty());
+    OTTER_CHECK_EQ(profiles[1].profile.effective_name(),
+                   std::string{"ERP@localhost_1"});
+}
+
+// --- Opcoes da arvore do PostgreSQL ------------------------------------------------
+
+OTTER_TEST(store_round_trips_the_postgres_navigator_options) {
+    // "Show all databases" era uma caixa que nao era gravada: marcar, fechar
+    // e reabrir devolvia desmarcada, e a arvore nunca listava os outros bancos.
+    const TempDir dir("pg-navigator-options");
+
+    StoredProfile stored;
+    stored.provider  = "postgresql";
+    stored.driver    = "postgres-jdbc";
+    stored.supported = true;
+    stored.profile.host     = "localhost";
+    stored.profile.database = "postgres";
+    stored.profile.user     = "postgres";
+    stored.profile.postgres.show_non_default_databases = true;
+    stored.profile.postgres.show_template_databases    = true;
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+
+    const PostgresOptions& options = back->front().profile.postgres;
+    OTTER_CHECK(options.show_non_default_databases);
+    OTTER_CHECK(options.show_template_databases);
+    OTTER_CHECK(!options.show_unavailable_databases);
+}
+
+OTTER_TEST(store_reads_show_all_databases_as_dbeaver_writes_it) {
+    // A chave e o valor-texto sao os do DBeaver: um perfil importado de la'
+    // precisa chegar com a opcao ligada.
+    const TempDir dir("pg-navigator-import");
+    dir.write("data-sources.json", R"({
+        "connections": {
+            "postgres-jdbc-1": {
+                "provider": "postgresql",
+                "driver": "postgres-jdbc",
+                "name": "postgres",
+                "configuration": {
+                    "host": "localhost",
+                    "port": "5432",
+                    "database": "postgres",
+                    "provider-properties": {
+                        "@dbeaver-show-non-default-db@": "true",
+                        "@dbeaver-show-template-db@": "true",
+                        "@dbeaver-show-unavailable-db@": "false"
+                    }
+                }
+            }
+        }
+    })");
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+
+    const PostgresOptions& options = back->front().profile.postgres;
+    OTTER_CHECK(options.show_non_default_databases);
+    OTTER_CHECK(options.show_template_databases);
+    OTTER_CHECK(!options.show_unavailable_databases);
+}
+
+OTTER_TEST(store_legacy_import_copies_once_and_keeps_the_original) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "otter-test-legacy-import";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+
+    const auto location = [](const fs::path& directory) {
+        otter::db::StoreLocation where;
+        where.directory    = directory.string();
+        where.data_sources = (directory / "data-sources.json").string();
+        where.credentials  = (directory / "credentials-config.json").string();
+        return where;
+    };
+    const auto from = location(root / "antigo");
+    const auto to   = location(root / "novo" / ".C-Otter");
+    const auto write = [](const std::string& path, const char* text) {
+        std::ofstream(path, std::ios::binary) << text;
+    };
+    const auto read = [](const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+
+    // Nada no lugar antigo: nada a fazer, e nada e' criado.
+    OTTER_CHECK(!otter::db::import_legacy_store(from, to));
+    OTTER_CHECK(!fs::exists(to.directory));
+
+    fs::create_directories(from.directory);
+    write(from.data_sources, "{\"connections\":{}}");
+    write(from.credentials, "segredo");
+
+    OTTER_CHECK(otter::db::import_legacy_store(from, to));
+    OTTER_CHECK_EQ(read(to.data_sources), std::string{"{\"connections\":{}}"});
+    OTTER_CHECK_EQ(read(to.credentials), std::string{"segredo"});
+    // Copia, nao move.
+    OTTER_CHECK(fs::exists(from.data_sources));
+    OTTER_CHECK(fs::exists(from.credentials));
+
+    // Com conexoes ja' na pasta nova, o antigo nunca as sobrescreve.
+    write(to.data_sources, "novo");
+    OTTER_CHECK(!otter::db::import_legacy_store(from, to));
+    OTTER_CHECK_EQ(read(to.data_sources), std::string{"novo"});
+
+    fs::remove_all(root, ec);
+}
+
+// Os campos de "Initialization", keep-alive, tunel SSH e proxy existiam no
+// dialogo e NAO eram gravados: sumiam ao fechar o programa (diretiva 6).
+OTTER_TEST(store_round_trips_initialization_and_network) {
+    const TempDir dir("init-network");
+
+    StoredProfile stored;
+    stored.provider  = "postgresql";
+    stored.driver    = "postgres-jdbc";
+    stored.supported = true;
+
+    ConnectionProfile& in = stored.profile;
+    in.name     = "com tunel";
+    in.host     = "db.interno";
+    in.database = "erp";
+    in.user     = "ana";
+    in.password = "segredo";
+    in.save_password = true;
+    in.default_schema          = "vendas";
+    in.bootstrap_queries       = "SET statement_timeout = 5000\nSET TimeZone = 'UTC'";
+    in.ignore_bootstrap_errors = true;
+    in.auto_commit             = false;
+    in.read_only               = true;
+    in.keep_alive              = true;
+    in.keep_alive_interval     = std::chrono::seconds(45);
+    in.close_idle_connections  = true;
+    in.close_idle_interval     = std::chrono::seconds(900);
+    in.postgres.session_role   = "relatorio";
+
+    in.ssh.enabled  = true;
+    in.ssh.host     = "bastion.example";
+    in.ssh.port     = 2222;
+    in.ssh.user     = "deploy";
+    in.ssh.auth     = SshAuthType::public_key;
+    in.ssh.private_key_path = "C:/keys/id_ed25519";
+    in.ssh.passphrase       = "frase";
+    in.ssh.save_password    = true;
+    in.ssh.keep_alive       = std::chrono::seconds(30);
+
+    in.proxy.enabled  = true;
+    in.proxy.host     = "proxy.example";
+    in.proxy.port     = 1081;
+    in.proxy.user     = "px";
+    in.proxy.password = "pw";
+
+    OTTER_CHECK(save_profiles(dir.location(), {stored}).has_value());
+
+    // As senhas nao podem estar no arquivo de conexoes, so' no cifrado.
+    std::string plain;
+    {
+        std::ifstream file(dir.location().data_sources, std::ios::binary);
+        plain.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    }
+    OTTER_CHECK(plain.find("segredo") == std::string::npos);
+    OTTER_CHECK(plain.find("frase") == std::string::npos);
+    OTTER_CHECK(plain.find("\"pw\"") == std::string::npos);
+    OTTER_CHECK(plain.find("\"bootstrap\"") != std::string::npos);
+    OTTER_CHECK(plain.find("\"ssh_tunnel\"") != std::string::npos);
+
+    auto back = load_profiles(dir.location());
+    OTTER_CHECK(back.has_value());
+    OTTER_CHECK_EQ(back->size(), std::size_t{1});
+    const ConnectionProfile& out = back->front().profile;
+
+    OTTER_CHECK_EQ(out.default_schema, std::string{"vendas"});
+    OTTER_CHECK_EQ(out.bootstrap_queries,
+                   std::string{"SET statement_timeout = 5000\nSET TimeZone = 'UTC'"});
+    OTTER_CHECK(out.ignore_bootstrap_errors);
+    OTTER_CHECK(!out.auto_commit);
+    OTTER_CHECK(out.read_only);
+    OTTER_CHECK(out.keep_alive);
+    OTTER_CHECK(out.keep_alive_interval == std::chrono::seconds(45));
+    OTTER_CHECK(out.close_idle_connections);
+    OTTER_CHECK(out.close_idle_interval == std::chrono::seconds(900));
+    OTTER_CHECK_EQ(out.postgres.session_role, std::string{"relatorio"});
+
+    OTTER_CHECK(out.ssh.enabled);
+    OTTER_CHECK_EQ(out.ssh.host, std::string{"bastion.example"});
+    OTTER_CHECK_EQ(out.ssh.port, std::uint16_t{2222});
+    OTTER_CHECK_EQ(out.ssh.user, std::string{"deploy"});
+    OTTER_CHECK(out.ssh.auth == SshAuthType::public_key);
+    OTTER_CHECK_EQ(out.ssh.private_key_path, std::string{"C:/keys/id_ed25519"});
+    OTTER_CHECK_EQ(out.ssh.passphrase, std::string{"frase"});
+    OTTER_CHECK(out.ssh.keep_alive == std::chrono::seconds(30));
+
+    OTTER_CHECK(out.proxy.enabled);
+    OTTER_CHECK_EQ(out.proxy.host, std::string{"proxy.example"});
+    OTTER_CHECK_EQ(out.proxy.port, std::uint16_t{1081});
+    OTTER_CHECK_EQ(out.proxy.user, std::string{"px"});
+    OTTER_CHECK_EQ(out.proxy.password, std::string{"pw"});
+}
+
+// --- Pastas ------------------------------------------------------------------------------
+
+OTTER_TEST(store_writes_the_folder_list_the_way_dbeaver_does) {
+    // O DBeaver grava uma entrada por CAMINHO em "folders", os ancestrais
+    // incluidos. A lista saia sempre vazia: uma conexao em "Clientes/Producao"
+    // nao declarava pasta nenhuma.
+    TempDir dir("store-folders");
+
+    StoredProfile nested;
+    nested.provider        = "postgresql";
+    nested.driver          = "postgres-jdbc";
+    nested.profile.name    = "producao";
+    nested.profile.host    = "db1";
+    nested.profile.folder  = "Clientes/Producao";
+    StoredProfile flat = nested;
+    flat.profile.name   = "teste";
+    flat.profile.host   = "db2";
+    flat.profile.folder = "Testes";
+    StoredProfile loose = nested;
+    loose.profile.name   = "solta";
+    loose.profile.host   = "db3";
+    loose.profile.folder.clear();
+
+    OTTER_CHECK(static_cast<bool>(save_profiles(dir.location(), {nested, flat, loose})));
+
+    std::ifstream in(dir.location().data_sources, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    const std::string folders = text.substr(text.find("\"folders\""),
+                                            text.find("\"connections\"") - text.find("\"folders\""));
+    OTTER_CHECK(folders.find("\"Clientes\"") != std::string::npos);
+    OTTER_CHECK(folders.find("\"Clientes/Producao\"") != std::string::npos);
+    OTTER_CHECK(folders.find("\"Testes\"") != std::string::npos);
+
+    // E o caminho de cada conexao volta inteiro na releitura.
+    auto profiles = load_profiles(dir.location());
+    OTTER_CHECK(profiles.has_value());
+    OTTER_CHECK_EQ(profiles->size(), std::size_t{3});
+    for (const StoredProfile& stored : *profiles) {
+        if (stored.profile.name == "producao") {
+            OTTER_CHECK_EQ(stored.profile.folder, std::string("Clientes/Producao"));
+        }
+        if (stored.profile.name == "solta") OTTER_CHECK(stored.profile.folder.empty());
+    }
 }

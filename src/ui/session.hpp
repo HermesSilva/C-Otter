@@ -7,11 +7,14 @@
 #pragma once
 
 #include "db/catalog_reader.hpp"
+#include "db/export.hpp"
 #include "db/plan.hpp"
+#include "db/ssh_tunnel.hpp"
 #include "db/holt.hpp"
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <array>
@@ -98,6 +101,10 @@ public:
     [[nodiscard]] std::string secure_channel() const;
     [[nodiscard]] std::string database_name() const;
 
+    // A porta local do tunel SSH desta conexao, ou 0 se nao ha' tunel. Quem
+    // fala com o servidor por fora do Holt (pg_dump) precisa ir por ela.
+    [[nodiscard]] std::uint16_t tunnel_port() const;
+
     // Pastas que o SGBD conectado oferece. Uma pasta que ele NAO tem nao deve
     // aparecer vazia: "Sequences (0)" num MySQL sugere que ele poderia ter
     // uma, e manda o usuario procurar o que nao existe.
@@ -117,7 +124,13 @@ public:
         global_variables,
         engines,
         charsets,
+        privileges,
+        plugins,
     };
+
+    // Acesso pelo enum, para os conjuntos que nao ganharam metodo proprio.
+    [[nodiscard]] std::vector<db::ServerVariable> server_info(ServerInfo what) const;
+    [[nodiscard]] bool server_info_loaded(ServerInfo what) const noexcept;
 
     // O SGBD tem essas informacoes? So' o MySQL, por enquanto -- no
     // PostgreSQL o equivalente sao as views pg_stat_*, com outra forma.
@@ -147,6 +160,95 @@ public:
     [[nodiscard]] bool engines_loaded() const noexcept;
     [[nodiscard]] bool charsets_loaded() const noexcept;
 
+    // --- Arvore unica (ADR 0018) ---------------------------------------------
+
+    // O servidor tem BANCOS acima dos schemas (PostgreSQL)? Decide a forma
+    // da arvore: `Databases -> banco -> Schemas -> schema` ou, no MySQL,
+    // `Databases -> banco`, em que schemas() ja' sao os bancos.
+    [[nodiscard]] bool has_database_level() const noexcept {
+        return has_database_level_;
+    }
+
+    // Qual SGBD esta' do outro lado. has_database_level() nao basta para
+    // decidir o que a tela oferece: PostgreSQL e SQL Server tem os dois o
+    // nivel de banco, e quase nada mais em comum (VACUUM, CASCADE, PUBLIC,
+    // CREATE OR REPLACE...). Vale desde connect_async, pelo driver do perfil.
+    enum class Engine : std::uint8_t { postgres, mysql, mssql, sqlanywhere };
+    [[nodiscard]] Engine engine() const noexcept {
+        return engine_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] bool is_postgres() const noexcept { return engine() == Engine::postgres; }
+    [[nodiscard]] bool is_mysql() const noexcept { return engine() == Engine::mysql; }
+    [[nodiscard]] bool is_mssql() const noexcept { return engine() == Engine::mssql; }
+    [[nodiscard]] bool is_sqlanywhere() const noexcept {
+        return engine() == Engine::sqlanywhere;
+    }
+
+    // Quais bancos listar. Chamado ANTES de connect_async, com as opcoes do
+    // perfil ("Show template databases", "Show inaccessible databases").
+    void set_database_listing(bool templates, bool unavailable);
+
+    // Os bancos do servidor, lidos ao conectar. Vazio no MySQL.
+    [[nodiscard]] std::vector<db::DatabaseMeta> databases() const;
+
+    // Uma das listas da arvore (roles, extensoes, dependencias...).
+    //
+    // `error` preenchido = a consulta falhou. A lista fica marcada como
+    // carregada mesmo assim: sem privilegio o servidor recusa sempre, e
+    // repetir a cada quadro martelaria o servidor com um erro ja' conhecido.
+    struct ListState {
+        bool                         loaded = false;
+        std::string                  error;
+        std::vector<db::CatalogItem> items;
+    };
+    [[nodiscard]] ListState list(db::CatalogList list, std::string_view a = {},
+                                 std::string_view b = {},
+                                 std::string_view c = {}) const;
+    void load_list_async(db::CatalogList list, std::string a = {},
+                         std::string b = {}, std::string c = {});
+
+    // --- Exportar a consulta inteira ------------------------------------------
+    //
+    // A grade guarda uma pagina; exportar "o resultado" de uma tabela de dois
+    // milhoes de linhas e' ler o servidor aos poucos e gravar cada pedaco. No
+    // PostgreSQL, por cursor (memoria limitada, uma leitura consistente); onde
+    // nao ha' cursor de servidor, por LIMIT/OFFSET.
+    struct TransferState {
+        bool        running = false;
+        bool        finished = false;   // terminou (com ou sem erro) e nao foi lido
+        bool        cancelled = false;
+        std::size_t rows = 0;
+        std::string path;
+        std::string error;
+    };
+    void export_query_async(std::string sql, db::ExportOptions options,
+                            std::string path);
+    [[nodiscard]] TransferState transfer_state() const;
+    // Para no proximo pedaco. O arquivo parcial fica no disco, e o estado diz
+    // que foi cancelado -- quem pediu para parar quer saber o que sobrou.
+    void cancel_transfer() noexcept {
+        transfer_cancel_.store(true, std::memory_order_release);
+    }
+    void clear_transfer();
+
+    // --- Editor de objeto (db/object_info.hpp) -------------------------------
+    //
+    // Propriedades, DDL, permissoes e estatisticas de um objeto. Guardado por
+    // objeto: trocar de aba e voltar nao refaz as quatro consultas.
+    struct ObjectState {
+        bool           loaded = false;
+        db::ObjectInfo info;
+    };
+    [[nodiscard]] ObjectState object_info(const db::ObjectRef& ref) const;
+    void load_object_info_async(db::ObjectRef ref);
+    // "Refresh" do editor, e o que roda depois de alterar o objeto.
+    void invalidate_object_info(const db::ObjectRef& ref);
+
+    // Rele' schemas, tabelas e bancos, e descarta as listas. E' o "Refresh"
+    // (F5) do no' da conexao, e o que roda depois de um DDL: sem isto uma
+    // tabela recem-criada nao aparecia na arvore ate' reconectar.
+    void reload_catalog_async();
+
     // O que o driver suporta. Vazio enquanto nao ha' conexao.
     //
     // Guardado em vez de perguntado ao Holt a cada quadro: o Holt vive atras
@@ -155,9 +257,23 @@ public:
         return capabilities_;
     }
     [[nodiscard]] std::vector<db::SchemaMeta> schemas() const;
+
+    // UMA relacao do modelo, com o que ja' foi carregado dela. Para quem
+    // precisa de uma so' a cada quadro: schemas() copia o catalogo inteiro.
+    [[nodiscard]] std::optional<db::TableMeta> table(std::string_view schema,
+                                                     std::string_view name) const;
     [[nodiscard]] std::vector<db::ForeignKeyMeta> foreign_keys() const;
     [[nodiscard]] std::optional<db::ResultSet> take_result();
     [[nodiscard]] std::vector<db::QueryLog> query_log() const;
+
+    // Saida do servidor (painel "Show server output"): os NOTICE de cada
+    // comando, na ordem, com o texto dos `@echo` do script no meio.
+    [[nodiscard]] std::vector<std::string> server_output() const;
+    [[nodiscard]] bool reports_server_output() const noexcept {
+        return reports_server_output_;
+    }
+    void append_output(std::string line);
+    void clear_server_output();
 
     // Esvazia o log. E' so' o historico de diagnostico -- nao toca em nada do
     // servidor nem no resultado exibido, entao nao pede confirmacao.
@@ -220,6 +336,29 @@ public:
     void commit_async();
     void rollback_async();
 
+    // Uma instrucao avulsa que nao produz grade (SET search_path, SET ...
+    // READ ONLY): o resultado e' so' a mensagem de estado.
+    void run_statement_async(std::string sql, std::string success_message);
+
+    // Keep-alive: um `SELECT 1` interno. Se falhar, a conexao passa a
+    // `failed` com a mensagem -- e' assim que se descobre que o firewall a
+    // derrubou, em vez de na proxima consulta do usuario.
+    void ping_async();
+
+    // --- Dashboard (db/app_tools.hpp) ------------------------------------------
+    //
+    // Uma leitura de cada grafico: a primeira linha da consulta, uma serie
+    // por coluna. `serial` muda a cada leitura concluida.
+    struct Sample {
+        std::vector<std::pair<std::string, double>> values;
+        std::string error;
+    };
+    void sample_async(std::vector<std::pair<std::string, std::string>> queries);
+    [[nodiscard]] std::map<std::string, Sample> samples() const;
+    [[nodiscard]] std::size_t sample_serial() const noexcept {
+        return sample_serial_.load(std::memory_order_acquire);
+    }
+
 private:
     void join_worker();
 
@@ -239,6 +378,10 @@ private:
 
     mutable std::mutex mutex_;
     std::unique_ptr<db::Holt> holt_;
+
+    // O tunel SSH desta conexao, quando o perfil pede um. Vive enquanto a
+    // conexao viver: o banco e' alcancado pela porta local dele.
+    std::unique_ptr<db::SshTunnel> tunnel_;
 
     std::atomic<SessionState> state_{SessionState::disconnected};
     std::atomic<bool>         busy_{false};
@@ -265,12 +408,38 @@ private:
     bool has_server_info_ = false;
     bool has_users_       = false;
     bool users_loaded_    = false;
+
+    bool reports_server_output_ = false;
+    std::vector<std::string> server_output_;
+
+    // Recolhe do Holt o que o servidor disse no ultimo comando. Chamado pelo
+    // worker, com o mutex ja' tomado.
+    void collect_output_locked(db::Holt& holt);
+
+    bool has_database_level_ = false;
+    std::atomic<Engine> engine_{Engine::postgres};
+    bool list_templates_     = false;
+    bool list_unavailable_   = false;
+    std::vector<db::DatabaseMeta> databases_;
+
+    // As listas genericas, pela chave lista+escopo. Mapa e nao um campo por
+    // lista: o escopo (schema, tabela, role) multiplica as entradas, e so'
+    // as pastas que o usuario abriu chegam a existir.
+    std::map<std::string, ListState> lists_;
+    std::map<std::string, ObjectState> objects_;   // por ObjectRef::key()
+
+    std::map<std::string, Sample> samples_;
+    std::atomic<std::size_t>      sample_serial_{0};
+
+    TransferState            transfer_;
+    std::atomic<std::size_t> transfer_rows_{0};
+    std::atomic<bool>        transfer_cancel_{false};
     std::vector<db::UserMeta> users_;
 
     // Os seis conjuntos, indexados pelo enum. Array em vez de seis membros:
     // o codigo que carrega e o que le' ficam com um indice, nao com um
     // switch de seis casos em cada ponto.
-    static constexpr std::size_t kServerInfoCount = 6;
+    static constexpr std::size_t kServerInfoCount = 8;
     std::array<std::vector<db::ServerVariable>, kServerInfoCount> server_info_;
     std::array<bool, kServerInfoCount> server_info_loaded_{};
 

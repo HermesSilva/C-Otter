@@ -1,4 +1,5 @@
 #include "ui/connection_dialog.hpp"
+#include "ui/hint.hpp"
 #include "net/tls.hpp"
 #include "base/i18n.hpp"
 #include "ui/icons.hpp"
@@ -72,12 +73,7 @@ bool input_seconds(const char* label, std::chrono::seconds& value) {
 void help_marker(const char* text) {
     ImGui::SameLine();
     ImGui::TextColored(col4(colors().text_dim), "(?)");
-    if (ImGui::BeginItemTooltip()) {
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-        ImGui::TextUnformatted(text);
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
+    if (ImGui::IsItemHovered()) hint(text);
 }
 
 bool contains_ci(std::string_view haystack, std::string_view needle) {
@@ -111,7 +107,8 @@ std::vector<DriverEntry> driver_catalog() {
         {"mysql",      "MySQL",       "Popular",    3306, true,  ""},
         {"mariadb",    "MariaDB",     "Popular",    3306, true,  ""},
         {"sqlite",     "SQLite",      "Embedded",      0, false, "planned for phase 3"},
-        {"mssql",      "SQL Server",  "Popular",    1433, false, "TDS planned for phase 3"},
+        {"sqlserver",  "SQL Server",  "Popular",    1433, true,  ""},
+        {"sqlanywhere", "SQL Anywhere", "SQL",      2638, true,  ""},
         {"oracle",     "Oracle",      "Popular",    1521, false, "planned for phase 3"},
         {"db2",        "Db2 for LUW", "SQL",       50000, false, "out of scope for v1"},
         {"clickhouse", "ClickHouse",  "Analytical", 8123, false, "out of scope for v1"},
@@ -130,6 +127,11 @@ std::vector<DriverEntry> driver_catalog() {
 
 ConnectionDialog::ConnectionDialog() = default;
 
+void ConnectionDialog::set_driver_filter(std::string_view text) {
+    std::snprintf(driver_filter_, sizeof driver_filter_, "%.*s",
+                  static_cast<int>(text.size()), text.data());
+}
+
 void ConnectionDialog::open_new() {
     profile_ = db::ConnectionProfile{};
     step_    = Step::select_driver;
@@ -141,6 +143,13 @@ void ConnectionDialog::open_edit(const db::ConnectionProfile& profile) {
     profile_ = profile;
     step_    = Step::configure;
     editing_ = true;
+    visible_ = true;
+}
+
+void ConnectionDialog::open_configure(const db::ConnectionProfile& profile) {
+    profile_ = profile;
+    step_    = Step::configure;
+    editing_ = false;
     visible_ = true;
 }
 
@@ -156,7 +165,14 @@ void ConnectionDialog::draw(const Feedback& feedback) {
     const char* title = editing_ ? TR("Edit connection###ConnDialog")
                                  : TR("New connection###ConnDialog");
 
-    if (ImGui::Begin(title, &visible_, ImGuiWindowFlags_NoDocking)) {
+    // Fundo OPACO (diretiva 13): a janela flutua sobre o editor, e com a
+    // translucidez dos paineis o SQL de tras atravessava a lista de drivers.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,
+                          static_cast<ImU32>(with_alpha(colors().bg_darkest, 1.0f)));
+    const bool open = ImGui::Begin(title, &visible_, ImGuiWindowFlags_NoDocking);
+    ImGui::PopStyleColor();
+
+    if (open) {
         if (step_ == Step::select_driver) {
             draw_driver_catalog();
         } else {
@@ -298,7 +314,7 @@ void ConnectionDialog::draw_configuration(const Feedback& feedback) {
     input_string_hint("##connname", profile_.effective_name().c_str(),
                       profile_.name, 128);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", TR("Connection name. Empty uses \"database@host\"."));
+        hint_fmt("%s", TR("Connection name. Empty uses \"database@host\"."));
     }
 
     ImGui::EndChild();
@@ -668,6 +684,57 @@ void ConnectionDialog::draw_page_connection_settings() {
     ImGui::SetNextItemWidth(320);
     input_string(TR("Database"), profile_.database, 128);
 
+    // Logo abaixo do campo Database, como no DBeaver
+    // (PostgreConnectionPage.java:159). Ficava na pagina Metadata -- e quem
+    // procura onde esta' acostumado nao acha (diretiva 12).
+    if (profile_.driver_id == "postgresql") {
+        ImGui::Checkbox(TR("Show all databases"),
+                        &profile_.postgres.show_non_default_databases);
+        help_marker(TR("Show all databases in database navigator.\nIf not set "
+                       "then only one database will be visible."));
+    }
+
+    const bool anywhere = profile_.driver_id == "sqlanywhere";
+    if (anywhere) {
+        // O que nao se adivinha: o banco e' um nome NO SERVIDOR (nao o
+        // arquivo), e o servidor pessoal (dbeng) so' escuta TCP se mandado.
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(col4(colors().text_dim), "%s",
+                           TR("Database: the name of a database running on the server "
+                              "(not the file); empty uses the default one.\nThe server "
+                              "must accept TCP/IP: the personal server (dbeng) only does "
+                              "when started with -x tcpip."));
+        ImGui::PopTextWrapPos();
+    }
+
+    const bool sqlserver = profile_.driver_id == "sqlserver";
+    if (sqlserver) {
+        // "Trust Server Certificate" do SQLServerConnectionPage (grupo
+        // Settings). Marcada, o canal e' cifrado sem conferir o certificado
+        // -- o modo `require`; desmarcada, `verify-full`.
+        bool trust = profile_.ssl.mode != db::SslMode::verify_ca &&
+                     profile_.ssl.mode != db::SslMode::verify_full;
+        if (ImGui::Checkbox(TR("Trust Server Certificate"), &trust)) {
+            profile_.ssl.mode = trust ? db::SslMode::require : db::SslMode::verify_full;
+        }
+        help_marker(TR("Applies when \"Use SSL\" is on (SSL tab): the server "
+                       "certificate is accepted without validation.\nWithout SSL only "
+                       "the login packet is encrypted, and the data travels in clear."));
+        if (profile_.host.find('\\') != std::string::npos) {
+            // Diz de onde a porta vem: com o Browser desligado a conexao
+            // falha, e a saida (por a porta aqui) nao e' obvia.
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(col4(colors().text_dim), "%s",
+                               profile_.port == 1433 || profile_.port == 0
+                                   ? TR("Named instance: the port is asked to the SQL "
+                                        "Server Browser of the server (UDP 1434). Set a "
+                                        "port other than 1433 to skip that.")
+                                   : TR("Named instance with an explicit port: the SQL "
+                                        "Server Browser is not asked."));
+            ImGui::PopTextWrapPos();
+        }
+    }
+
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), TR("Authentication"));
     ImGui::Separator();
@@ -675,6 +742,36 @@ void ConnectionDialog::draw_page_connection_settings() {
     // Passam por TR() na montagem, nao no literal: um array `constexpr` de
     // literais em portugues nao traduz, e era o que acontecia aqui -- o
     // combo dizia "Banco de dados nativo" mesmo com a UI em ingles.
+    if (sqlserver) {
+        // Os dois modelos do plugin do SQL Server que o driver fala. NTLM e
+        // os do Active Directory do DBeaver nao estao na lista -- oferecer o
+        // que nao conecta seria o campo que finge funcionar (diretiva 6).
+        const bool windows = profile_.auth_model == db::AuthModel::windows;
+        ImGui::SetNextItemWidth(260);
+        if (ImGui::BeginCombo(TR("Method"), windows ? TR("Windows Authentication")
+                                                    : TR("SQL Server Authentication"))) {
+            if (ImGui::Selectable(TR("SQL Server Authentication"), !windows)) {
+                profile_.auth_model = db::AuthModel::database_native;
+            }
+            if (ImGui::Selectable(TR("Windows Authentication"), windows)) {
+                profile_.auth_model = db::AuthModel::windows;
+            }
+            ImGui::EndCombo();
+        }
+        if (profile_.auth_model == db::AuthModel::windows) {
+            ImGui::TextColored(col4(colors().text_dim), "%s",
+                               TR("Connects as the Windows account running C-Otter."));
+        }
+    } else if (anywhere) {
+        // So' usuario e senha do banco: o login integrado e o Kerberos do SQL
+        // Anywhere sao do protocolo nativo dele, nao do TDS.
+        profile_.auth_model = db::AuthModel::database_native;
+        ImGui::SetNextItemWidth(220);
+        if (ImGui::BeginCombo(TR("Method"), TR("Database Native"))) {
+            ImGui::Selectable(TR("Database Native"), true);
+            ImGui::EndCombo();
+        }
+    } else {
     const char* kAuthModels[] = {
         TR("Database Native"), TR("No Authentication"), TR("Ident / Peer"),
         TR("Kerberos"), TR("AWS IAM"),
@@ -684,6 +781,7 @@ void ConnectionDialog::draw_page_connection_settings() {
     if (ImGui::Combo(TR("Method"), &auth, kAuthModels,
                      IM_ARRAYSIZE(kAuthModels))) {
         profile_.auth_model = static_cast<db::AuthModel>(auth);
+    }
     }
 
     const bool needs_credentials =
@@ -725,15 +823,21 @@ void ConnectionDialog::draw_page_connection_settings() {
     // raiz: quem procura SSL procura DENTRO das configuracoes de conexao.
     ImGui::Spacing();
     if (ImGui::BeginTabBar("##network", ImGuiTabBarFlags_None)) {
-        if (ImGui::BeginTabItem(TR("SSH"))) {
+        // "dialog tab <nome>" do canal de comandos escolhe a aba, uma vez.
+        const std::string wanted = std::move(network_tab_request_);
+        network_tab_request_.clear();
+        const auto flags = [&wanted](const char* name) {
+            return wanted == name ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        };
+        if (ImGui::BeginTabItem(TR("SSH"), nullptr, flags("SSH"))) {
             draw_tab_ssh();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem(TR("SSL"))) {
+        if (ImGui::BeginTabItem(TR("SSL"), nullptr, flags("SSL"))) {
             draw_tab_ssl();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem(TR("Proxy"))) {
+        if (ImGui::BeginTabItem(TR("Proxy"), nullptr, flags("Proxy"))) {
             draw_tab_proxy();
             ImGui::EndTabItem();
         }
@@ -752,22 +856,37 @@ void ConnectionDialog::draw_page_metadata() {
     ImGui::TextColored(col4(colors().data), TR("Navigator settings"));
     ImGui::Separator();
 
-    ImGui::Checkbox(TR("Show all databases"),
-                    &profile_.postgres.show_non_default_databases);
-    help_marker(TR("Lists every database on the server, not only the connected one."));
-
+    // "Show all databases" mora na pagina principal, abaixo do campo
+    // Database. As duas daqui dependem dela -- sem a lista de bancos nao ha'
+    // onde mostrar template nem banco sem acesso --, e ficam desabilitadas
+    // em vez de aceitarem um clique que nao muda nada (diretiva 6).
+    ImGui::BeginDisabled(!profile_.postgres.show_non_default_databases);
     ImGui::Checkbox(TR("Show template databases"),
                     &profile_.postgres.show_template_databases);
-    help_marker(TR("Includes template0 and template1."));
-
-    ImGui::Checkbox(TR("Show inaccessible databases"),
+    ImGui::Checkbox(TR("Show databases not available for connection"),
                     &profile_.postgres.show_unavailable_databases);
-    help_marker(TR("Includes databases the user has no permission to connect to."));
+    ImGui::EndDisabled();
+    if (!profile_.postgres.show_non_default_databases) {
+        ImGui::TextColored(col4(colors().text_dim),
+                           TR("Enabled only if \"Show all databases\" is on "
+                              "(Main page)."));
+    }
 
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), TR("Performance"));
     ImGui::Separator();
 
+    // Ajustes do leitor de metadados JDBC do DBeaver. O C-Otter le' cada
+    // pasta da arvore so' quando ela e' aberta, e fala o protocolo direto:
+    // nao ha' o que estas caixas liguem. Ficam visiveis -- quem vem do
+    // DBeaver as procura aqui -- e desabilitadas, com o motivo (diretiva 6).
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(col4(colors().text_dim), "%s",
+                       TR("Not applicable: C-Otter reads each folder of the tree on "
+                          "demand, sizes included, and has no JDBC metadata cache "
+                          "to tune."));
+    ImGui::PopTextWrapPos();
+    ImGui::BeginDisabled();
     ImGui::Checkbox(TR("Read size statistics"),
                     &profile_.postgres.show_database_statistics);
     help_marker(TR("Computes the on-disk size of tables and indexes. On very large "
@@ -775,8 +894,7 @@ void ConnectionDialog::draw_page_metadata() {
 
     ImGui::Checkbox(TR("Read all data types"),
                     &profile_.postgres.read_all_data_types);
-    help_marker("Inclui tipos raros e de sistema. Deixa o carregamento de "
-                "metadados mais lento.");
+    help_marker(TR("Includes rare and system types."));
 
     ImGui::Checkbox(TR("Read key columns"),
                     &profile_.postgres.read_keys_with_columns);
@@ -785,6 +903,7 @@ void ConnectionDialog::draw_page_metadata() {
 
     ImGui::Checkbox(TR("Use prepared statements"),
                     &profile_.postgres.use_prepared_statements);
+    ImGui::EndDisabled();
 
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), "SQL");
@@ -794,9 +913,12 @@ void ConnectionDialog::draw_page_metadata() {
     input_string(TR("Session role"), profile_.postgres.session_role, 64);
     help_marker(TR("Runs SET ROLE when opening the connection."));
 
+    ImGui::BeginDisabled();
     ImGui::Checkbox(TR("Replace legacy timezone"),
                     &profile_.postgres.replace_legacy_timezone);
-    help_marker("Converte timestamptz do formato antigo para o atual.");
+    ImGui::EndDisabled();
+    help_marker(TR("Not applicable: a JDBC driver workaround. C-Otter shows "
+                   "timestamps as the server sends them."));
 
 }
 
@@ -813,6 +935,12 @@ void ConnectionDialog::draw_page_driver_properties() {
                            ? TR("PostgreSQL: runtime parameters of the startup "
                                 "message (search_path, statement_timeout, "
                                 "TimeZone...).")
+                       : profile_.driver_id == "sqlserver"
+                           ? TR("SQL Server: not applied -- the driver takes no "
+                                "extra parameters yet.")
+                       : profile_.driver_id == "sqlanywhere"
+                           ? TR("SQL Anywhere: SET TEMPORARY OPTION name = value, "
+                                "right after connecting.")
                            : TR("MySQL: SET @@name = value, right after "
                                 "connecting."));
     ImGui::TextColored(col4(colors().warn), "%s",
@@ -874,10 +1002,23 @@ void ConnectionDialog::draw_tab_ssh() {
 
     // Com quebra: o aviso e' mais largo que o painel e sem isto some' a
     // metade dele, justamente a que diz que o tunel nao e' estabelecido.
+    // Como o tunel e' feito, e o que ele NAO faz -- na tela, antes de o
+    // usuario preencher um campo que nao serve (diretiva 6; ADR 0021).
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextColored(col4(colors().warn),
-                       TR("Not implemented - the settings are saved, but the tunnel is "
-                          "not established."));
+    ImGui::TextColored(col4(colors().text_dim),
+                       TR("The tunnel uses the ssh client of the system (OpenSSH), "
+                          "with your keys, your agent and your known_hosts."));
+    if (profile_.ssh.enabled && profile_.ssh.auth == db::SshAuthType::password) {
+        ImGui::TextColored(col4(colors().warn),
+                           TR("Password authentication is not supported by the tunnel: "
+                              "choose 'Public key' or 'SSH agent'."));
+    } else if (profile_.ssh.enabled &&
+               profile_.ssh.auth == db::SshAuthType::public_key &&
+               !profile_.ssh.passphrase.empty()) {
+        ImGui::TextColored(col4(colors().warn),
+                           TR("A key with a passphrase needs the SSH agent: add it "
+                              "with ssh-add and choose 'SSH agent'."));
+    }
     ImGui::PopTextWrapPos();
     ImGui::Separator();
 
@@ -932,6 +1073,24 @@ void ConnectionDialog::draw_tab_ssl() {
     // O binario do Linux ainda nao tem TLS (tls_openssl.cpp e' um esboco).
     // Deixar a caixa clicavel la' seria oferecer algo que falha so' na hora
     // de conectar -- a diretiva 6 manda dizer na tela.
+    // SQL Anywhere: o servidor nao cifra o TDS (a cifra dele, -ec, e' do
+    // protocolo nativo). A caixa fica desligada, com o motivo e a saida.
+    if (profile_.driver_id == "sqlanywhere") {
+        profile_.ssl.enabled = false;
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(col4(colors().warn), "%s",
+                           TR("Not available for SQL Anywhere: the server does not "
+                              "encrypt the TDS protocol, so the password and the data "
+                              "travel in clear. Use the SSH tunnel on an untrusted "
+                              "network."));
+        ImGui::PopTextWrapPos();
+        ImGui::BeginDisabled();
+        ImGui::Checkbox(TR("Use SSL"), &profile_.ssl.enabled);
+        ImGui::EndDisabled();
+        ImGui::EndChild();
+        return;
+    }
+
     const bool available = net::tls_available();
     if (!available) {
         ImGui::TextColored(
@@ -994,7 +1153,11 @@ void ConnectionDialog::draw_tab_proxy() {
     ImGui::BeginChild("##proxy", ImVec2(0, 0));
 
     ImGui::Checkbox(TR("Use SOCKS proxy"), &profile_.proxy.enabled);
-    ImGui::TextColored(col4(colors().warn), TR("Not implemented."));
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(col4(colors().text_dim),
+                       TR("SOCKS5. The host name of the database is resolved by the "
+                          "proxy; user and password are optional."));
+    ImGui::PopTextWrapPos();
     ImGui::Separator();
 
     ImGui::BeginDisabled(!profile_.proxy.enabled);
@@ -1026,7 +1189,8 @@ void ConnectionDialog::draw_page_transactions() {
                    "connections start with auto-commit off."));
 
     ImGui::Checkbox(TR("Read-only connection"), &profile_.read_only);
-    help_marker(TR("Blocks INSERT, UPDATE, DELETE and DDL on the client."));
+    help_marker(TR("The session is opened read-only: the server refuses INSERT, "
+                   "UPDATE, DELETE and DDL."));
 
     ImGui::Spacing();
     ImGui::TextColored(col4(colors().data), TR("Isolation"));
@@ -1063,7 +1227,12 @@ void ConnectionDialog::draw_page_initialization() {
     help_marker(TR("Sets search_path when connecting."));
 
     ImGui::Text(TR("Initialization queries"));
-    help_marker(TR("Run in order, right after the connection is established."));
+    help_marker(TR("One statement per line. Run in order, right after the "
+                   "connection is established."));
+    ImGui::SameLine();
+    ImGui::Checkbox(TR("Ignore errors"), &profile_.ignore_bootstrap_errors);
+    help_marker(TR("Off, a statement that fails aborts the connection and the "
+                   "message names it."));
 
     std::vector<char> buffer(
         std::max<std::size_t>(2048, profile_.bootstrap_queries.size() + 1), '\0');
@@ -1217,6 +1386,11 @@ void ConnectionDialog::draw_page_errors_timeouts() {
 
     ImGui::Checkbox(TR("Close idle connections"),
                     &profile_.close_idle_connections);
+    if (profile_.close_idle_connections) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100);
+        input_seconds(TR("After (s)"), profile_.close_idle_interval);
+    }
     help_marker(TR("The opposite of keep-alive: releases the connection "
                    "after a while without use. Useful against a server with "
                    "few slots."));

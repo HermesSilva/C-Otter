@@ -58,6 +58,81 @@ std::string last_error_message() {
 
 } // namespace
 
+Result<std::vector<std::byte>> udp_exchange(std::string_view host, std::uint16_t port,
+                                            std::span<const std::byte> request,
+                                            std::chrono::milliseconds timeout) {
+    OTTER_RETURN_IF_ERROR(initialize_network());
+
+    addrinfo hints = {};
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+
+    const std::string host_text(host);
+    const std::string port_text = std::to_string(port);
+
+    addrinfo* candidates = nullptr;
+    if (::getaddrinfo(host_text.c_str(), port_text.c_str(), &hints, &candidates) != 0 ||
+        candidates == nullptr) {
+        return fail(Errc::connection_failed,
+                    "não foi possível resolver '" + host_text + "'");
+    }
+
+    std::string last_error = "nenhum endereço utilizável";
+    Result<std::vector<std::byte>> result =
+        fail(Errc::connection_failed, host_text + ":" + port_text + " — " + last_error);
+
+    for (addrinfo* it = candidates; it != nullptr; it = it->ai_next) {
+        const socket_t s = ::socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (s == OTTER_INVALID_SOCKET) continue;
+
+        // connect() num socket UDP so' fixa o destino: as respostas de outro
+        // endereco sao descartadas pelo sistema, e um ICMP "porta fechada"
+        // vira erro na leitura em vez de esperar o tempo todo.
+        if (::connect(s, it->ai_addr, static_cast<socklen_t>(it->ai_addrlen)) != 0 ||
+            ::send(s, reinterpret_cast<const char*>(request.data()),
+                   static_cast<int>(request.size()), 0) < 0) {
+            last_error = last_error_message();
+            OTTER_CLOSE_SOCKET(s);
+            continue;
+        }
+
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(s, &readable);
+        timeval tv;
+        tv.tv_sec  = static_cast<long>(timeout.count() / 1000);
+        tv.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+
+        const int ready = ::select(static_cast<int>(s) + 1, &readable, nullptr, nullptr, &tv);
+        if (ready > 0) {
+            std::vector<std::byte> buffer(65536);
+            const auto received = ::recv(s, reinterpret_cast<char*>(buffer.data()),
+                                         static_cast<int>(buffer.size()), 0);
+            if (received >= 0) {
+                buffer.resize(static_cast<std::size_t>(received));
+                OTTER_CLOSE_SOCKET(s);
+                ::freeaddrinfo(candidates);
+                return buffer;
+            }
+            last_error = last_error_message();
+            result = fail(Errc::connection_failed,
+                          host_text + ":" + port_text + " (UDP) — " + last_error);
+        } else if (ready == 0) {
+            result = fail(Errc::timed_out,
+                          host_text + ":" + port_text + " (UDP) — sem resposta");
+        } else {
+            last_error = last_error_message();
+            result = fail(Errc::connection_failed,
+                          host_text + ":" + port_text + " (UDP) — " + last_error);
+        }
+        OTTER_CLOSE_SOCKET(s);
+    }
+
+    ::freeaddrinfo(candidates);
+    return result;
+}
+
 Status initialize_network() {
 #ifdef _WIN32
     static Status result = [] () -> Status {
@@ -199,6 +274,32 @@ Result<Socket> Socket::connect(std::string_view host, std::uint16_t port,
     socket.set_read_timeout(timeout);
     socket.set_write_timeout(timeout);
     return socket;
+}
+
+Result<std::uint16_t> free_local_port() {
+    OTTER_RETURN_IF_ERROR(initialize_network());
+
+    const socket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == OTTER_INVALID_SOCKET) {
+        return fail(Errc::io_error, "cannot create a socket: " + last_error_message());
+    }
+
+    sockaddr_in address = {};
+    address.sin_family      = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port        = 0;   // o sistema escolhe
+
+    socklen_t length = sizeof address;
+    if (::bind(s, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0 ||
+        ::getsockname(s, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+        const std::string message = last_error_message();
+        OTTER_CLOSE_SOCKET(s);
+        return fail(Errc::io_error, "cannot reserve a local port: " + message);
+    }
+
+    const std::uint16_t port = ntohs(address.sin_port);
+    OTTER_CLOSE_SOCKET(s);
+    return port;
 }
 
 void Socket::set_no_delay(bool enabled) {

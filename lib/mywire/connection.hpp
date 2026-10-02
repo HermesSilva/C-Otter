@@ -9,6 +9,7 @@
 #include "base/error.hpp"
 #include "mywire/packet.hpp"
 #include "net/socket.hpp"
+#include "net/socks.hpp"
 #include "net/tls.hpp"
 
 #include <chrono>
@@ -34,6 +35,9 @@ struct ConnectParams {
     bool          use_tls = false;
     bool          require_tls = false;
     bool          allow_invalid_certificate = false;
+
+    // Proxy SOCKS5 (aba "Proxy" do dialogo). Vazio = conexao direta.
+    net::ProxyEndpoint proxy;
 };
 
 // Tipos de coluna do MySQL, de `enum_field_types`. Precisamos deles para
@@ -205,6 +209,7 @@ private:
     // Guardados para abrir a conexao de cancelamento.
     std::string   host_;
     std::uint16_t port_ = 0;
+    net::ProxyEndpoint proxy_;   // para o cancelamento
     std::string   user_;
     std::string   password_;
 };

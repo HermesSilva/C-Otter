@@ -160,23 +160,38 @@ bool set_language(std::string_view code) {
     return false;
 }
 
+std::string normalize_locale(std::string_view locale) {
+    // "pt_BR.UTF-8@euro": a codificacao e o modificador nao escolhem idioma.
+    const std::size_t cut = locale.find_first_of(".@");
+    std::string value(locale.substr(0, cut));
+    std::replace(value.begin(), value.end(), '_', '-');
+
+    // "C" e "POSIX" sao a ausencia de localizacao, nao um idioma chamado C.
+    if (value == "C" || value == "POSIX") return "en";
+    return value;
+}
+
 std::string detect_system_language() {
 #ifdef _WIN32
+    // Idioma de EXIBICAO, nao GetUserDefaultLocaleName: aquele e' o formato
+    // regional (datas, numeros), e nesta maquina de desenvolvimento ele e'
+    // pt-BR com o Windows em en-US -- o C-Otter abria em portugues no meio de
+    // um sistema em ingles.
     wchar_t buffer[LOCALE_NAME_MAX_LENGTH] = {};
-    if (GetUserDefaultLocaleName(buffer, LOCALE_NAME_MAX_LENGTH) > 0) {
+    if (LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(), SORT_DEFAULT),
+                         buffer, LOCALE_NAME_MAX_LENGTH, 0) > 0) {
         char narrow[LOCALE_NAME_MAX_LENGTH] = {};
         WideCharToMultiByte(CP_UTF8, 0, buffer, -1, narrow, sizeof(narrow),
                             nullptr, nullptr);
-        return narrow;   // ex.: "pt-BR"
+        return normalize_locale(narrow);   // ex.: "en-US"
     }
 #else
-    // LANG=pt_BR.UTF-8 -> pt-BR
-    if (const char* lang = std::getenv("LANG")) {
-        std::string value(lang);
-        const auto dot = value.find('.');
-        if (dot != std::string::npos) value.resize(dot);
-        std::replace(value.begin(), value.end(), '_', '-');
-        return value;
+    // Precedencia do POSIX para mensagens. Variavel vazia conta como ausente:
+    // `LC_ALL=` e' o jeito usual de desliga-la sem unset.
+    for (const char* name : {"LC_ALL", "LC_MESSAGES", "LANG"}) {
+        const char* value = std::getenv(name);
+        if (value == nullptr || *value == '\0') continue;
+        return normalize_locale(value);
     }
 #endif
     return "en";

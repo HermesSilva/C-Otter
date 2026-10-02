@@ -45,7 +45,16 @@ public:
 
     void open_new();
     void open_edit(const db::ConnectionProfile& profile);
+    // Conexao NOVA ja' na configuracao, com o driver escolhido por fora
+    // (as variaveis PG* do ambiente). O titulo diz "Nova", nao "Editar".
+    void open_configure(const db::ConnectionProfile& profile);
     void close() { visible_ = false; }
+
+    // Para o canal de comandos (conferencia sem clique): a aba de rede a
+    // mostrar no proximo quadro ("SSH", "SSL", "Proxy") e o texto do filtro do
+    // catalogo de drivers.
+    void request_network_tab(std::string tab) { network_tab_request_ = std::move(tab); }
+    void set_driver_filter(std::string_view text);
 
     [[nodiscard]] bool visible() const noexcept { return visible_; }
     [[nodiscard]] db::ConnectionProfile& profile() noexcept { return profile_; }
@@ -141,6 +150,8 @@ private:
 
     // Pagina aberta. "Connection settings" e' a primeira, como no DBeaver.
     Page  page_ = Page::connection_settings;
+
+    std::string network_tab_request_;
 
     char  driver_filter_[64] = "";
     int   category_index_ = 0;

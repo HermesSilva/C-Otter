@@ -17,7 +17,10 @@
 //     otter_tests_live <host> <port> <db> <user> <pass>
 //
 // Sem argumentos, tenta as variaveis PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD.
+#include "live_connect.hpp"
+
 #include "db/catalog.hpp"
+#include "db/connection_store.hpp"
 #include "db/drivers/postgres.hpp"
 #include "sql/paging.hpp"
 
@@ -64,7 +67,35 @@ int main(int argc, char** argv) {
         config.database = env_or("PGDATABASE", "ERP_TID");
         config.user     = env_or("PGUSER", "postgres");
         config.password = env_or("PGPASSWORD", "");
+
+        // Sem PGPASSWORD, a senha vem do perfil PostgreSQL salvo no C-Otter.
+        // Sem isso a suite so' rodava com a senha na linha de comando ou no
+        // ambiente -- e ficou dias sem rodar porque ninguem a tinha a mao.
+        // Host, porta e usuario do perfil prevalecem; o banco continua sendo
+        // PGDATABASE (ou ERP_TID), porque e' la' que as fixtures estao.
+        if (config.password.empty()) {
+            auto profiles =
+                otter::db::load_profiles(otter::db::otter_store_location());
+            if (profiles) {
+                for (const auto& stored : *profiles) {
+                    if (stored.profile.driver_id != "postgresql") continue;
+                    if (stored.profile.password.empty()) continue;
+                    // So' perfil LOCAL. Sem este filtro a suite pegou o
+                    // primeiro perfil com senha -- que era o de producao.
+                    if (!live::is_local_host(stored.profile.host)) continue;
+                    const std::string database = config.database;
+                    config          = stored.profile.to_conn_config();
+                    config.database = database;
+                    std::printf("senha do perfil salvo \"%s\"\n",
+                                stored.profile.effective_name().c_str());
+                    break;
+                }
+            }
+        }
     }
+
+    // O host FINAL, venha de onde vier (argumentos, ambiente, perfil).
+    live::require_local(config);
 
     auto holt = otter::db::postgres_driver().connect(config);
     if (!holt) {
@@ -86,15 +117,57 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::size_t tables = 0, views = 0, mviews = 0;
+    std::size_t tables = 0, views = 0, mviews = 0, partitioned = 0, foreign = 0;
+    bool partition_listed = false;
     for (const auto& r : *relations) {
         if (r.kind == otter::db::ObjKind::table)                  ++tables;
         else if (r.kind == otter::db::ObjKind::view)              ++views;
         else if (r.kind == otter::db::ObjKind::materialized_view) ++mviews;
+        else if (r.kind == otter::db::ObjKind::partitioned_table) ++partitioned;
+        else if (r.kind == otter::db::ObjKind::foreign_table)     ++foreign;
+        partition_listed |= r.name.rfind("lancamento_", 0) == 0;
     }
-    check(tables == 3, "3 tabelas (cliente, pedido, evento_volume)");
+    check(tables == 5,
+          "5 tabelas (cliente, pedido, evento_volume, documento, documento_fiscal)");
+    check(foreign == 1, "1 foreign table (importacao)");
+    for (const auto& r : *relations) {
+        if (r.name == "lancamento") {
+            // A tabela-mae nao guarda nada; o tamanho e' a soma das particoes.
+            check(r.size_bytes > 0 && !r.size_pretty.empty(),
+                  "particionada mostra o tamanho das particoes, nao zero");
+        }
+        if (r.kind == otter::db::ObjKind::view || r.is_foreign()) {
+            check(r.size_bytes < 0 && r.size_pretty.empty(),
+                  ("sem tamanho ao lado de " + r.name).c_str());
+        }
+        if (r.name == "evento_volume") {
+            // O formato e' o da coluna de tamanho do DBeaver ("209M"), nao o
+            // de pg_size_pretty ("209 MB").
+            check(r.size_bytes > 100 * 1024 * 1024 && r.size_pretty.back() == 'M' &&
+                      r.size_pretty.find(' ') == std::string::npos,
+                  "tamanho da tabela em bytes e no formato curto");
+        }
+    }
     check(views  == 2, "2 views");
     check(mviews == 1, "1 materialized view");
+    check(partitioned == 1, "1 tabela particionada (lancamento)");
+    // O DBeaver esconde as particoes da pasta Tables -- elas aparecem so'
+    // dentro da tabela-mae. Lista-las nos dois lugares duplicava a arvore.
+    check(!partition_listed, "particoes FORA da lista de tabelas");
+
+    std::printf("\nload_partitions\n");
+    {
+        auto partitions = catalog.load_partitions(kSchema, "lancamento");
+        check(partitions.has_value(), "consulta aceita pelo servidor");
+        check(partitions && partitions->size() == 2, "2 particoes");
+        check(partitions && !partitions->empty() &&
+                  (*partitions)[0].name == "lancamento_2025" &&
+                  (*partitions)[0].method == "RANGE" &&
+                  (*partitions)[0].description.find("FOR VALUES FROM (2025)") == 0,
+              "nome, metodo e limites da primeira particao");
+        auto plain = catalog.load_partitions(kSchema, "cliente");
+        check(plain && plain->empty(), "tabela comum nao tem particoes");
+    }
 
     // --- Corpo das views -----------------------------------------------------
     std::printf("\nload_view_definition\n");
@@ -122,7 +195,9 @@ int main(int argc, char** argv) {
     auto routines = catalog.load_routines(kSchema);
     check(routines.has_value(), "load_routines aceito pelo servidor");
     if (routines) {
-        check(routines->size() == 3, "3 rotinas");
+        // 3 originais + fn_dividir + fn_evento_ddl + soma_total (agregada) +
+        // as duas do file_fdw, que nasce dentro do schema.
+        check(routines->size() == 8, "8 rotinas");
 
         for (const auto& r : *routines) {
             auto body = catalog.load_routine_definition(kSchema, r.name,
@@ -225,6 +300,216 @@ int main(int argc, char** argv) {
             check(tail->row_count() == otter::sql::kDefaultPageSize,
                   "ultima pagina sem linha-sonda");
         }
+    }
+
+    // --- Arvore unica (ADR 0018) --------------------------------------------
+    using otter::db::CatalogItem;
+    using otter::db::CatalogList;
+
+    // Carrega a lista e exige que o servidor ACEITE a consulta. `expected`
+    // vazio = so' aceitar; senao, o item precisa estar la'.
+    auto list_has = [&](const char* label, CatalogList list,
+                        std::string_view expected, std::string_view a = {},
+                        std::string_view b = {}, std::string_view c = {})
+        -> std::vector<CatalogItem> {
+        auto items = catalog.load_list(list, a, b, c);
+        if (!items) {
+            std::printf("    %s\n", items.error().to_string().c_str());
+            check(false, (std::string(label) + ": consulta aceita").c_str());
+            return {};
+        }
+        check(true, (std::string(label) + ": consulta aceita (" +
+                     std::to_string(items->size()) + ")").c_str());
+        if (!expected.empty()) {
+            bool found = false;
+            for (const CatalogItem& item : *items) {
+                found |= item.name == expected;
+            }
+            check(found, (std::string(label) + ": tem " +
+                          std::string(expected)).c_str());
+        }
+        return *items;
+    };
+
+    std::printf("\nload_databases\n");
+    {
+        auto plain = catalog.load_databases(false, false);
+        check(plain.has_value(), "consulta aceita pelo servidor");
+        bool current = false, has_template = false, sized = false;
+        if (plain) {
+            for (const auto& db : *plain) {
+                current      |= db.name == config.database;
+                has_template |= db.is_template;
+                if (db.name == config.database) {
+                    sized = db.size_bytes > 0 && !db.size_pretty.empty();
+                }
+            }
+        }
+        check(current, "o banco conectado esta' na lista");
+        check(!has_template, "templates FORA por padrao");
+        check(sized, "tamanho do banco conectado medido");
+
+        auto with_templates = catalog.load_databases(true, true);
+        bool template0 = false;
+        if (with_templates) {
+            for (const auto& db : *with_templates) {
+                template0 |= db.name == "template0" && db.is_template &&
+                             !db.allow_connect;
+            }
+        }
+        check(template0, "template0 aparece quando pedido, sem aceitar conexao");
+    }
+
+    std::printf("\nformat_size\n");
+    check(otter::db::format_size(-1).empty(), "desconhecido fica vazio");
+    check(otter::db::format_size(512) == "512", "bytes sem unidade");
+    check(otter::db::format_size(8073216) == "7.7M", "7.7M como no DBeaver");
+    check(otter::db::format_size(298844160) == "285M", "285M sem casa decimal");
+
+    std::printf("\nlistas por schema\n");
+    list_has("Indexes (schema)", CatalogList::schema_indexes, "cliente_pkey", kSchema);
+    list_has("Aggregate functions", CatalogList::aggregates,
+             "soma_total(numeric)", kSchema);
+
+    std::printf("\nlistas por relacao\n");
+    list_has("Dependencies de cliente", CatalogList::dependencies, "",
+             kSchema, "cliente");
+    list_has("Dependencies de view", CatalogList::dependencies, "",
+             kSchema, "vw_cliente_ativo");
+    {
+        // A politica de RLS depende da tabela, e precisa aparecer com NOME:
+        // o pg_depend aponta para o pg_policy, que a consulta do DBeaver nao
+        // junta -- a linha saia em branco.
+        const auto deps = list_has("Dependencies de documento",
+                                   CatalogList::dependencies,
+                                   "pl_documento_leitura", kSchema, "documento");
+        bool unnamed = false;
+        for (const CatalogItem& item : deps) unnamed |= item.name.empty();
+        check(!unnamed, "nenhuma dependencia sem nome");
+    }
+    list_has("Rules", CatalogList::rules, "rl_documento_noop", kSchema, "documento");
+    list_has("Policies", CatalogList::policies, "pl_documento_leitura",
+             kSchema, "documento");
+    list_has("Child tables", CatalogList::child_tables, "documento_fiscal",
+             kSchema, "documento");
+    {
+        // A particionada NAO lista as particoes como filhas por heranca:
+        // elas tem pasta propria, e apareceriam em dois lugares.
+        auto children = catalog.load_list(CatalogList::child_tables, kSchema,
+                                          "lancamento");
+        check(children && children->empty(),
+              "particoes nao aparecem em Child tables");
+    }
+
+    std::printf("\nlistas por rotina\n");
+    {
+        const auto params = list_has(
+            "Function parameters", CatalogList::routine_parameters, "p_a",
+            kSchema, "fn_dividir",
+            "p_a integer, p_b integer, OUT quociente integer, OUT resto integer");
+        check(params.size() == 4, "4 parametros");
+        check(params.size() == 4 && params[0].tooltip == "IN" &&
+                  params[2].name == "quociente" && params[2].tooltip == "OUT" &&
+                  params[2].flag,
+              "modo IN/OUT de cada parametro");
+        check(params.size() == 4 && params[0].detail == "integer",
+              "tipo do parametro");
+
+        const auto simple = list_has(
+            "parametros so' de entrada", CatalogList::routine_parameters,
+            "p_cliente", kSchema, "fn_credito_disponivel", "p_cliente integer");
+        check(simple.size() == 1, "1 parametro");
+
+        list_has("Dependencies de funcao", CatalogList::routine_dependencies, "",
+                 kSchema, "fn_pedido_auditoria", "");
+    }
+    {
+        // O corpo da agregada: pg_get_functiondef a recusa.
+        auto body = catalog.load_routine_definition(kSchema, "soma_total",
+                                                    "numeric");
+        check(body && body->rfind("CREATE AGGREGATE", 0) == 0 &&
+                  body->find("SFUNC = numeric_add") != std::string::npos,
+              "definicao da funcao agregada");
+    }
+
+    std::printf("\nlistas por banco\n");
+    {
+        const auto triggers = list_has("Event Triggers",
+                                       CatalogList::event_triggers,
+                                       "otter_evento_ddl");
+        for (const CatalogItem& item : triggers) {
+            if (item.name == "otter_evento_ddl") {
+                check(!item.flag, "event trigger desabilitado marcado como tal");
+                check(item.detail == "ddl_command_start", "evento do trigger");
+            }
+        }
+    }
+    list_has("Extensions", CatalogList::extensions, "file_fdw");
+    list_has("Tablespaces", CatalogList::tablespaces, "pg_default");
+    list_has("Foreign data wrappers", CatalogList::foreign_data_wrappers,
+             "file_fdw");
+    list_has("Foreign servers", CatalogList::foreign_servers, "otter_arquivos");
+    list_has("User Mappings", CatalogList::user_mappings, "public",
+             "otter_arquivos");
+    list_has("Settings", CatalogList::settings, "max_connections");
+    {
+        const auto roles = list_has("Roles", CatalogList::roles, config.user);
+        for (const CatalogItem& role : roles) {
+            if (role.name == config.user) {
+                check(role.flag, "o usuario conectado pode fazer login");
+            }
+            if (role.name == "pg_monitor") {
+                check(!role.flag, "pg_monitor e' grupo, sem login");
+            }
+        }
+    }
+    // pg_monitor e' membro de pg_read_all_settings desde o PostgreSQL 10.
+    list_has("Members", CatalogList::role_members, "pg_monitor",
+             "pg_read_all_settings");
+    list_has("Roles (belongs)", CatalogList::role_belongs,
+             "pg_read_all_settings", "pg_monitor");
+
+    std::printf("\nlistas por servidor\n");
+    list_has("Access Methods", CatalogList::access_methods, "btree");
+    list_has("Operator classes", CatalogList::operator_classes, "int4_ops", "btree");
+    list_has("Operator families", CatalogList::operator_families, "integer_ops",
+             "btree");
+    list_has("Encodings", CatalogList::encodings, "UTF8");
+    list_has("Collations", CatalogList::collations, "C");
+    list_has("Languages", CatalogList::languages, "plpgsql");
+    list_has("Available Extensions", CatalogList::available_extensions,
+             "file_fdw");
+    {
+        // Sem pgAgent a lista e' VAZIA, nao erro.
+        auto jobs = catalog.load_list(CatalogList::jobs);
+        check(jobs.has_value(), "Jobs: sem pgAgent devolve vazio, nao erro");
+        auto steps = catalog.load_list(CatalogList::job_steps, "1; DROP TABLE x");
+        check(steps && steps->empty(), "Job steps: id nao numerico e' recusado");
+    }
+
+    std::printf("\nsaida do servidor (NOTICE)\n");
+    {
+        // O painel "Show server output" depende disto: os NoticeResponse eram
+        // lidos pelo protocolo e descartados.
+        (void)(*holt)->take_server_output();
+        auto status = (*holt)->execute(
+            "DO $$ BEGIN RAISE NOTICE 'otter %', 42; END $$");
+        check(status.has_value(), "bloco com RAISE NOTICE aceito");
+
+        const std::vector<std::string> output = (*holt)->take_server_output();
+        // A severidade vem no idioma do servidor (lc_messages): "NOTICE" num,
+        // "NOTA" noutro. O que se confere e' a forma "<severidade>: <texto>".
+        check(output.size() == 1 && output.front().ends_with(": otter 42") &&
+                  output.front().size() > std::string(": otter 42").size(),
+              "o NOTICE chega com a severidade e a mensagem");
+        check((*holt)->take_server_output().empty(),
+              "a leitura esvazia a lista");
+        check((*holt)->reports_server_output(), "o driver declara que reporta");
+
+        // Um aviso de comando comum tambem: DROP IF EXISTS do que nao existe.
+        (void)(*holt)->execute("DROP TABLE IF EXISTS otter_test.nao_existe_xyz");
+        check(!(*holt)->take_server_output().empty(),
+              "DROP IF EXISTS de tabela ausente gera aviso");
     }
 
     std::printf("\n%d verificacoes, %d falha(s)\n", checks, failures);

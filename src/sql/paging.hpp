@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace otter::sql {
 
@@ -26,7 +27,7 @@ inline constexpr std::size_t kDefaultPageSize = 200;
 enum class PagingRefusal : std::uint8_t {
     none,              // pode paginar
     not_a_query,       // INSERT/UPDATE/DELETE/DDL -- nao produz linhas
-    already_limited,   // ja' tem LIMIT ou FETCH FIRST; o usuario decidiu
+    already_limited,   // ja' tem LIMIT, FETCH FIRST ou TOP; o usuario decidiu
     multiple_commands, // varios statements num texto so'
     unsupported_form,  // EXPLAIN, SHOW, VALUES, ...
     empty,
@@ -71,9 +72,44 @@ struct ColumnFilter {
     std::string column;         // vazio = sem filtro
     std::string expression;     // "> 100", "LIKE '%lontra%'", "IS NULL"
 
+    // Criterios de OUTRAS colunas, alem do primeiro. O DBeaver filtra por
+    // varias colunas ao mesmo tempo ("Filter settings", ou "Filter by value"
+    // numa coluna depois de outra); com um criterio so', filtrar a segunda
+    // desfazia o filtro da primeira.
+    struct Criterion {
+        std::string column;
+        std::string expression;
+    };
+    std::vector<Criterion> more;
+
+    // Condicao livre, da barra de filtro acima da grade -- o campo "Enter a
+    // SQL expression to filter results" do DBeaver. Entra entre parenteses.
+    std::string condition;
+
     [[nodiscard]] bool empty() const noexcept {
-        return column.empty() || expression.empty();
+        if (!column.empty() && !expression.empty()) return false;
+        for (const Criterion& criterion : more) {
+            if (!criterion.column.empty() && !criterion.expression.empty()) {
+                return false;
+            }
+        }
+        return condition.empty();
     }
+
+    // A expressao em vigor para a coluna; vazio se nao ha'.
+    [[nodiscard]] std::string_view expression_for(std::string_view name) const noexcept;
+
+    // Define (ou, com expressao vazia, remove) o criterio de UMA coluna, sem
+    // tocar nos das outras.
+    void set_column(std::string_view name, std::string_view new_expression);
+
+    // Quantas colunas tem criterio.
+    [[nodiscard]] std::size_t column_count() const noexcept;
+
+    // `"a" > 1 AND "b" IS NULL AND (condicao)` -- o que vai depois do WHERE.
+    // Vazio quando nao ha' filtro. Os nomes saem com o delimitador do
+    // dialeto ([a] no SQL Server, `a` no MySQL); sem dialeto, aspas duplas.
+    [[nodiscard]] std::string where_clause(const Dialect* dialect = nullptr) const;
 };
 
 // Monta a consulta de uma pagina.
@@ -87,6 +123,23 @@ struct ColumnFilter {
                                           std::size_t page_size = kDefaultPageSize,
                                           const SortOrder& sort = {},
                                           const ColumnFilter& filter = {});
+
+// Monta a consulta SEM limite -- o `resultset.fetch.all` do DBeaver.
+//
+// Preserva o filtro e a ordenacao escolhidos na grade (e' o que esta' na
+// tela), e omite apenas o LIMIT/OFFSET. Um `page_size` enorme daria quase o
+// mesmo SQL, mas com um LIMIT fingido: a grade diria "sem limite" e o
+// servidor receberia um numero.
+//
+// As recusas sao as mesmas: o que nao da' para paginar sai inalterado, com
+// `rewritten = false`.
+//
+// Contraria o ADR 0011 de proposito, a pedido explicito do usuario. Quem
+// varre uma tabela inteira paga a espera; o ADR recomenda exportar.
+[[nodiscard]] PagedQuery make_unpaged_query(std::string_view sql,
+                                            const Dialect& dialect,
+                                            const SortOrder& sort = {},
+                                            const ColumnFilter& filter = {});
 
 // Monta a consulta que conta o resultado INTEIRO -- o `resultset.count` do
 // DBeaver.

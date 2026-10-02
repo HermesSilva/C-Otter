@@ -127,6 +127,63 @@ SELECT g AS evento_id,
   FROM generate_series(1, 2000000) g;
 COMMENT ON TABLE evento_volume IS 'Volume para testar paginacao -- 2M linhas';
 
+-- --- Tabela particionada -----------------------------------------------------
+--
+-- Existe porque a pasta "Partitions" foi escrita sem uma particao no banco --
+-- e o DBeaver ESCONDE as particoes da pasta Tables (PostgreSchema.getTables
+-- filtra isPartition). Sem esta tabela nao havia como ver que o C-Otter as
+-- listava duas vezes.
+
+CREATE TABLE lancamento (
+    lancamento_id integer NOT NULL,
+    ano           integer NOT NULL,
+    valor         numeric(12,2)
+) PARTITION BY RANGE (ano);
+CREATE TABLE lancamento_2025 PARTITION OF lancamento FOR VALUES FROM (2025) TO (2026);
+CREATE TABLE lancamento_2026 PARTITION OF lancamento FOR VALUES FROM (2026) TO (2027);
+INSERT INTO lancamento VALUES (1, 2025, 10.00), (2, 2026, 20.00), (3, 2026, 30.00);
+
+-- --- Nos da arvore unica (ADR 0018) ---------------------------------------
+--
+-- Um objeto de cada tipo que a arvore lista, pelo mesmo motivo do resto do
+-- arquivo: pasta sem objeto no banco e' consulta que nunca rodou.
+
+-- Heranca (Child tables). Par proprio, e nao um filho de `cliente`: um
+-- SELECT em tabela-mae traz as linhas das filhas, e isso mudaria as contagens
+-- que outros testes fazem sobre `cliente`.
+CREATE TABLE documento (documento_id integer PRIMARY KEY, titulo text);
+CREATE TABLE documento_fiscal (numero integer) INHERITS (documento);
+
+-- Rule. DO ALSO NOTHING: aparece na arvore sem mudar o comportamento.
+CREATE RULE rl_documento_noop AS ON UPDATE TO documento DO ALSO NOTHING;
+
+-- Policy. Sem ENABLE ROW LEVEL SECURITY ela existe e nao filtra nada.
+CREATE POLICY pl_documento_leitura ON documento FOR SELECT TO PUBLIC USING (true);
+
+-- Aggregate function.
+CREATE AGGREGATE soma_total(numeric) (SFUNC = numeric_add, STYPE = numeric, INITCOND = '0');
+
+-- Parametros de entrada e saida (Function parameters).
+CREATE FUNCTION fn_dividir(p_a integer, p_b integer, OUT quociente integer, OUT resto integer)
+LANGUAGE sql IMMUTABLE AS $$ SELECT p_a / p_b, p_a % p_b $$;
+
+-- Foreign data wrapper, servidor, mapeamento e foreign table. A extensao
+-- nasce DENTRO do schema para sair junto no DROP SCHEMA ... CASCADE; o
+-- servidor depende dela e cai na mesma cascata.
+CREATE EXTENSION IF NOT EXISTS file_fdw SCHEMA otter_test;
+CREATE SERVER otter_arquivos FOREIGN DATA WRAPPER file_fdw;
+CREATE USER MAPPING FOR PUBLIC SERVER otter_arquivos;
+CREATE FOREIGN TABLE importacao (linha text)
+    SERVER otter_arquivos OPTIONS (filename 'otter_importacao.txt');
+
+-- Event trigger. Nasce DESABILITADO: habilitado, rodaria a cada DDL do banco
+-- inteiro. Depende da funcao, que e' do schema -- cai na cascata tambem.
+CREATE FUNCTION fn_evento_ddl() RETURNS event_trigger
+LANGUAGE plpgsql AS $$ BEGIN NULL; END; $$;
+CREATE EVENT TRIGGER otter_evento_ddl ON ddl_command_start
+    EXECUTE FUNCTION fn_evento_ddl();
+ALTER EVENT TRIGGER otter_evento_ddl DISABLE;
+
 -- --- Dados -----------------------------------------------------------------
 
 INSERT INTO cliente (nome, email, credito) VALUES

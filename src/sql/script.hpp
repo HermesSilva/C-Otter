@@ -20,10 +20,21 @@ struct Statement {
     std::size_t      offset = 0;
     std::size_t      line = 0;   // linha inicial, base zero
 
+    // Um LOTE que nao pode ser repartido (SQL Server): declara variaveis, que
+    // so' valem dentro dele, ou e' um CREATE PROCEDURE/FUNCTION/TRIGGER/VIEW,
+    // cujo corpo vai ate' o fim do lote. Quem parte por linha em branco
+    // (sql/editing.cpp) precisa deixar este inteiro.
+    bool atomic = false;
+
     [[nodiscard]] bool empty() const noexcept;
 };
 
 // Separa o script em statements executaveis.
+//
+// No dialeto do SQL Server o script e' primeiro partido em LOTES nas linhas
+// `GO`. Um lote que declara variavel ou cria rotina/view vai inteiro (ver
+// Statement::atomic); os demais sao partidos no ';', como nos outros SGBDs --
+// com o ELSE colado ao IF que o antecede.
 [[nodiscard]] std::vector<Statement> split_script(std::string_view script,
                                                   const Dialect& dialect);
 

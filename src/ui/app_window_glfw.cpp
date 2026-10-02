@@ -9,6 +9,7 @@
 #include "ui/theme.hpp"
 
 #include <filesystem>
+#include <cstdlib>
 #include <string>
 
 // windows.h antes de GLFW: ambos definem APIENTRY, e incluir na ordem inversa
@@ -21,11 +22,15 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include "ui/icon_images.hpp"
+
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <cmath>     // sqrt, para o antialias do icone da janela
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace otter::ui {
 namespace {
@@ -222,7 +227,33 @@ namespace {
 struct AppWindow::Impl {
     GLFWwindow* window = nullptr;
     float       scale  = 1.0f;
+
+    // O retangulo da janela NORMAL. Maximizada ou minimizada, glfwGetWindowPos
+    // devolve o da tela inteira (ou -32000): o que se grava e' o ultimo
+    // retangulo visto com a janela normal, atualizado a cada quadro.
+    WindowPlacement normal;
 };
+
+namespace {
+
+// Atualiza `normal` se a janela esta' no estado normal.
+void track_placement(GLFWwindow* window, WindowPlacement& normal) {
+    if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) return;
+
+    normal.maximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED) != 0;
+    if (normal.maximized) return;
+
+    int x = 0, y = 0, width = 0, height = 0;
+    glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &width, &height);
+    if (width <= 0 || height <= 0) return;
+    normal.x      = x;
+    normal.y      = y;
+    normal.width  = width;
+    normal.height = height;
+}
+
+} // namespace
 
 Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config) {
     glfwSetErrorCallback(glfw_error_callback);
@@ -242,35 +273,68 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // so' mostra apos posicionar
 
+    // OTTER_NO_FOCUS: a janela aparece sem tomar o teclado. E' para a
+    // conferencia automatizada -- abrir o programa dez vezes numa sessao de
+    // teste tirava o foco de quem estava usando a maquina a cada vez, e as
+    // teclas que a pessoa digitava iam parar no C-Otter.
+    if (std::getenv("OTTER_NO_FOCUS") != nullptr) {
+        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+    }
+
     auto window = std::unique_ptr<AppWindow>(new AppWindow());
     window->impl_ = std::make_unique<Impl>();
     Impl& impl = *window->impl_;
 
-    // Limita a janela a area de trabalho do monitor: criar maior que a tela
-    // deixa o rodape (barra de status) fora da area visivel.
-    int width  = config.width;
-    int height = config.height;
-
+    // Onde abrir: como estava na ultima vez, conferido contra os monitores
+    // que existem AGORA (ui/window_placement.hpp) -- o gravado pode apontar
+    // para um monitor desligado, ou ser maior que a tela de hoje. Sem nada
+    // gravado, o tamanho padrao, centrado; nunca maior que a area de
+    // trabalho, que deixaria a barra de status fora da tela.
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-    int work_x = 0, work_y = 0, work_w = 0, work_h = 0;
-    if (monitor != nullptr) {
-        glfwGetMonitorWorkarea(monitor, &work_x, &work_y, &work_w, &work_h);
-        if (work_w > 0 && width  > work_w) width  = work_w;
-        if (work_h > 0 && height > work_h) height = work_h;
-    }
 
-    impl.window = glfwCreateWindow(width, height, config.title.c_str(),
-                                   nullptr, nullptr);
+    std::vector<WorkArea> areas;
+    {
+        int count = 0;
+        GLFWmonitor** monitors = glfwGetMonitors(&count);
+        // O principal primeiro: e' o `monitors[0]` do GLFW.
+        for (int i = 0; i < count; ++i) {
+            WorkArea area;
+            glfwGetMonitorWorkarea(monitors[i], &area.x, &area.y, &area.width, &area.height);
+            if (area.width > 0 && area.height > 0) areas.push_back(area);
+        }
+    }
+    const WindowPlacement placement =
+        fit_window_placement(config.placement, areas, config.width, config.height);
+
+    impl.window = glfwCreateWindow(placement.width, placement.height,
+                                   config.title.c_str(), nullptr, nullptr);
     if (impl.window == nullptr) {
         glfwTerminate();
         return fail(Errc::internal, "glfwCreateWindow falhou (OpenGL 3.3 indisponivel?)");
     }
 
-    if (work_w > 0 && work_h > 0) {
-        glfwSetWindowPos(impl.window,
-                         work_x + (work_w - width)  / 2,
-                         work_y + (work_h - height) / 2);
+    // O tamanho de novo, DEPOIS de criar: com GLFW_SCALE_TO_MONITOR o
+    // glfwCreateWindow multiplica o pedido pela escala do monitor, e uma
+    // janela restaurada cresceria 25% a cada abertura num monitor a 125%.
+    // glfwSetWindowSize nao escala. So' para o tamanho GRAVADO -- o padrao e'
+    // em unidades logicas, e a escala e' bem-vinda nele.
+    if (config.placement.saved()) {
+        glfwSetWindowSize(impl.window, placement.width, placement.height);
     }
+    if (!areas.empty()) {
+        int x = placement.x, y = placement.y;
+        if (!config.placement.saved()) {
+            // Centra com o tamanho que a janela de fato ganhou.
+            int width = 0, height = 0;
+            glfwGetWindowSize(impl.window, &width, &height);
+            x = areas.front().x + (areas.front().width - width) / 2;
+            y = areas.front().y + (std::max)(0, (areas.front().height - height) / 2);
+        }
+        glfwSetWindowPos(impl.window, x, y);
+    }
+    track_placement(impl.window, impl.normal);
+    if (placement.maximized) glfwMaximizeWindow(impl.window);
+
     set_window_icon(impl.window);
     glfwShowWindow(impl.window);
 
@@ -288,10 +352,11 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    // Layout das janelas ao lado das conexoes salvas, nao no diretorio de
-    // trabalho. O padrao do ImGui grava "imgui.ini" onde o programa foi
-    // iniciado -- um arquivo que aparece no repositorio, na area de trabalho
-    // ou onde quer que o usuario esteja.
+    // A disposicao das janelas fica em `.C-Otter/layout.ini`, ao lado do
+    // executavel, junto das preferencias e das conexoes (ADR 0020). O padrao
+    // do ImGui grava "imgui.ini" no diretorio de TRABALHO -- um arquivo que
+    // aparece no repositorio, na area de trabalho ou onde quer que o usuario
+    // esteja.
     //
     // O caminho fica estatico: o ImGui guarda o ponteiro, nao a string.
     static std::string ini_path = [] {
@@ -311,6 +376,30 @@ Result<std::unique_ptr<AppWindow>> AppWindow::create(const WindowConfig& config)
     ImGui_ImplGlfw_InitForOpenGL(impl.window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    // Os icones do DBeaver sao rasterizados em execucao e viram texturas
+    // (ui/icon_images.hpp). So' aqui existe contexto OpenGL para cria-las.
+    set_icon_texture_factory(
+        [](const unsigned char* rgba, int width, int height) -> ImTextureID {
+            GLuint texture = 0;
+            glGenTextures(1, &texture);
+            glBindTexture(GL_TEXTURE_2D, texture);
+
+            // Linear: o icone e' rasterizado no tamanho em que aparece, mas a
+            // posicao pode cair em meio pixel com DPI fracionario.
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            // 0x812F = GL_CLAMP_TO_EDGE, que o gl.h do Windows (OpenGL 1.1)
+            // nao declara. Sem ele a borda do icone vazaria do lado oposto.
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
+
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                         GL_UNSIGNED_BYTE, rgba);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            return static_cast<ImTextureID>(static_cast<std::intptr_t>(texture));
+        });
+
     return window;
 }
 
@@ -327,6 +416,10 @@ AppWindow::~AppWindow() {
 
 void* AppWindow::native_handle() const noexcept {
     return impl_ ? static_cast<void*>(impl_->window) : nullptr;
+}
+
+WindowPlacement AppWindow::placement() const noexcept {
+    return impl_ ? impl_->normal : WindowPlacement{};
 }
 
 void AppWindow::run(const FrameFn& draw_frame) {
@@ -351,6 +444,8 @@ void AppWindow::run(const FrameFn& draw_frame) {
             glfwWaitEventsTimeout(0.1);
             continue;
         }
+
+        track_placement(impl.window, impl.normal);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

@@ -88,8 +88,12 @@ int main(int argc, char** argv) {
         try_connect(*profile, db::SslMode::require, true);
     std::printf("  canal: %s\n", required.c_str());
     check(required.rfind("erro:", 0) != 0, "require conecta");
-    check(required.find("TLS") != std::string::npos,
-          "require negocia TLS e reporta o protocolo");
+    // Exige sucesso E o protocolo no canal. So' procurar "TLS" no texto
+    // passava com a MENSAGEM DE ERRO "o servidor nao aceita TLS" -- foi assim
+    // que um servidor com ssl=off deu OK aqui.
+    const bool negotiated = required.rfind("erro:", 0) != 0 &&
+                            required.find("TLS") != std::string::npos;
+    check(negotiated, "require negocia TLS e reporta o protocolo");
 
     // verify-full contra um servidor local com certificado autoassinado DEVE
     // falhar. Se passasse, a verificacao nao estaria acontecendo -- e o modo
@@ -98,7 +102,12 @@ int main(int argc, char** argv) {
     const std::string verified =
         try_connect(*profile, db::SslMode::verify_full, true);
     std::printf("  canal: %s\n", verified.c_str());
-    check(verified.rfind("erro:", 0) == 0,
+    // A recusa so' prova algo se o servidor chegou a OFERECER TLS. Com
+    // ssl=off ele recusa antes do certificado, e o OK seria pelo motivo errado.
+    if (!negotiated) {
+        std::printf("  (servidor sem TLS: a validacao do certificado nao foi exercida)\n");
+    }
+    check(negotiated && verified.rfind("erro:", 0) == 0,
           "verify-full recusa certificado que a cadeia do sistema nao valida");
 
     std::printf("\n%d verificacoes, %d falharam\n", checks, failures);

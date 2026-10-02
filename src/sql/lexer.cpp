@@ -113,6 +113,9 @@ Token Lexer::next() {
     // Comentario de linha: -- ou # (MySQL).
     if (c == '-' && peek(1) == '-') return lex_line_comment();
     if (c == '#' && dialect_->hash_line_comments) return lex_line_comment();
+    if (c == '/' && peek(1) == '/' && dialect_->slash_line_comments) {
+        return lex_line_comment();
+    }
 
     if (c == '/' && peek(1) == '*') return lex_block_comment();
 

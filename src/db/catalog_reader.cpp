@@ -1,6 +1,9 @@
 #include "db/catalog_reader.hpp"
 
+#include "db/catalog_mssql.hpp"
 #include "db/catalog_mysql.hpp"
+#include "db/catalog_sqlanywhere.hpp"
+#include "db/object_info_load.hpp"
 
 namespace otter::db {
 namespace {
@@ -12,7 +15,12 @@ namespace {
 template <typename Catalog>
 class ReaderFor final : public CatalogReader {
 public:
-    explicit ReaderFor(Holt& holt) : catalog_(holt) {}
+    explicit ReaderFor(Holt& holt) : catalog_(holt), holt_(holt) {}
+
+    ObjectInfo load_object_info(const ObjectRef& ref) override {
+        // A sobrecarga escolhe o SGBD pelo tipo do catalogo.
+        return db::load_object_info(catalog_, holt_, ref);
+    }
 
     Result<std::vector<SchemaMeta>> load_schemas() override {
         return catalog_.load_schemas();
@@ -86,9 +94,16 @@ public:
     [[nodiscard]] Result<std::vector<UserMeta>> load_users() override;
     [[nodiscard]] Result<std::vector<std::string>> load_grants(
         std::string_view user, std::string_view host) override;
+    [[nodiscard]] bool has_database_level() const noexcept override;
+    [[nodiscard]] Result<std::vector<DatabaseMeta>> load_databases(
+        bool templates, bool unavailable) override;
+    [[nodiscard]] Result<std::vector<CatalogItem>> load_list(
+        CatalogList list, std::string_view a, std::string_view b,
+        std::string_view c) override;
 
 private:
     Catalog catalog_;
+    Holt&   holt_;
 };
 
 template <>
@@ -149,6 +164,45 @@ bool ReaderFor<PostgresCatalog>::has_events() const noexcept {
 }
 
 template <>
+bool ReaderFor<PostgresCatalog>::has_database_level() const noexcept {
+    return true;
+}
+
+template <>
+Result<std::vector<DatabaseMeta>> ReaderFor<PostgresCatalog>::load_databases(
+    bool templates, bool unavailable) {
+    return catalog_.load_databases(templates, unavailable);
+}
+
+template <>
+Result<std::vector<CatalogItem>> ReaderFor<PostgresCatalog>::load_list(
+    CatalogList list, std::string_view a, std::string_view b,
+    std::string_view c) {
+    return catalog_.load_list(list, a, b, c);
+}
+
+template <>
+bool ReaderFor<MysqlCatalog>::has_database_level() const noexcept {
+    // No MySQL "database" e "schema" sao sinonimos, e a conexao enxerga
+    // todos: load_schemas() ja' devolve os bancos.
+    return false;
+}
+
+template <>
+Result<std::vector<DatabaseMeta>> ReaderFor<MysqlCatalog>::load_databases(
+    bool, bool) {
+    return std::vector<DatabaseMeta>{};
+}
+
+template <>
+Result<std::vector<CatalogItem>> ReaderFor<MysqlCatalog>::load_list(
+    CatalogList, std::string_view, std::string_view, std::string_view) {
+    // As listas de CatalogList sao as do `<tree>` do PostgreSQL. As do MySQL
+    // (status, variaveis, engines, charsets, usuarios) tem caminho proprio.
+    return std::vector<CatalogItem>{};
+}
+
+template <>
 std::string ReaderFor<MysqlCatalog>::default_schema() const {
     // Nao existe nivel de schema no MySQL: o banco corrente faz esse papel.
     // Quem chama usa o banco da conexao quando isto vem vazio.
@@ -194,6 +248,8 @@ ReaderFor<MysqlCatalog>::load_server_info(ServerInfoKind kind) {
         case ServerInfoKind::global_variables:  return catalog_.load_variables(true);
         case ServerInfoKind::engines:           return catalog_.load_engines();
         case ServerInfoKind::charsets:          return catalog_.load_charsets();
+        case ServerInfoKind::privileges:        return catalog_.load_privileges();
+        case ServerInfoKind::plugins:           return catalog_.load_plugins();
     }
     return std::vector<ServerVariable>{};
 }
@@ -212,6 +268,151 @@ bool ReaderFor<MysqlCatalog>::has_user_types() const noexcept {
     return false;
 }
 
+// --- SQL Server -------------------------------------------------------------------
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_database_level() const noexcept {
+    // Servidor -> banco -> schema, como no PostgreSQL: cada banco e' navegado
+    // por uma sessao propria.
+    return true;
+}
+
+template <>
+Result<std::vector<DatabaseMeta>> ReaderFor<MssqlCatalog>::load_databases(
+    bool templates, bool unavailable) {
+    return catalog_.load_databases(templates, unavailable);
+}
+
+template <>
+Result<std::vector<CatalogItem>> ReaderFor<MssqlCatalog>::load_list(
+    CatalogList list, std::string_view a, std::string_view b, std::string_view c) {
+    return catalog_.load_list(list, a, b, c);
+}
+
+template <>
+std::string ReaderFor<MssqlCatalog>::default_schema() const { return "dbo"; }
+
+template <>
+std::string_view ReaderFor<MssqlCatalog>::schema_label() const noexcept {
+    return "Schema";
+}
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_sequences() const noexcept {
+    return catalog_.version().at_least(11);   // SQL Server 2012
+}
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_user_types() const noexcept { return true; }
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_events() const noexcept { return false; }
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_server_info() const noexcept { return false; }
+
+template <>
+Result<std::vector<ServerVariable>>
+ReaderFor<MssqlCatalog>::load_server_info(ServerInfoKind) {
+    return std::vector<ServerVariable>{};
+}
+
+template <>
+bool ReaderFor<MssqlCatalog>::has_users() const noexcept {
+    // Os logins do servidor tem pasta propria (Security > Logins), pela lista
+    // generica; a pasta "Users" e' a do MySQL.
+    return false;
+}
+
+template <>
+Result<std::vector<UserMeta>> ReaderFor<MssqlCatalog>::load_users() {
+    return std::vector<UserMeta>{};
+}
+
+template <>
+Result<std::vector<std::string>> ReaderFor<MssqlCatalog>::load_grants(std::string_view,
+                                                                     std::string_view) {
+    return std::vector<std::string>{};
+}
+
+// --- SQL Anywhere -----------------------------------------------------------------
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_database_level() const noexcept {
+    // Uma conexao = um banco (um arquivo). O servidor pode ter outros abertos,
+    // mas cada um tem os proprios usuarios e exige outro login: nao ha' nivel
+    // de banco na arvore.
+    return false;
+}
+
+template <>
+Result<std::vector<DatabaseMeta>> ReaderFor<SqlAnywhereCatalog>::load_databases(bool,
+                                                                                bool) {
+    return std::vector<DatabaseMeta>{};
+}
+
+template <>
+Result<std::vector<CatalogItem>> ReaderFor<SqlAnywhereCatalog>::load_list(
+    CatalogList list, std::string_view a, std::string_view b, std::string_view c) {
+    return catalog_.load_list(list, a, b, c);
+}
+
+template <>
+std::string ReaderFor<SqlAnywhereCatalog>::default_schema() const {
+    // O dono dos objetos faz o papel de schema: a arvore comeca no usuario
+    // da conexao.
+    return catalog_.user();
+}
+
+template <>
+std::string_view ReaderFor<SqlAnywhereCatalog>::schema_label() const noexcept {
+    return "Schema";
+}
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_sequences() const noexcept {
+    return catalog_.version().at_least(12);
+}
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_user_types() const noexcept { return true; }
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_events() const noexcept { return true; }
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_server_info() const noexcept { return true; }
+
+template <>
+Result<std::vector<ServerVariable>>
+ReaderFor<SqlAnywhereCatalog>::load_server_info(ServerInfoKind kind) {
+    // As quatro pastas de pares nome/valor, com o que o SQL Anywhere tem em
+    // cada lugar: propriedades da conexao e do servidor, opcoes em vigor e
+    // propriedades do banco. As demais (engines, charsets...) sao do MySQL.
+    switch (kind) {
+        case ServerInfoKind::session_status:    return catalog_.load_properties("connection");
+        case ServerInfoKind::global_status:     return catalog_.load_properties("server");
+        case ServerInfoKind::session_variables: return catalog_.load_options();
+        case ServerInfoKind::global_variables:  return catalog_.load_properties("database");
+        default:                                break;
+    }
+    return std::vector<ServerVariable>{};
+}
+
+template <>
+bool ReaderFor<SqlAnywhereCatalog>::has_users() const noexcept { return true; }
+
+template <>
+Result<std::vector<UserMeta>> ReaderFor<SqlAnywhereCatalog>::load_users() {
+    return catalog_.load_users();
+}
+
+template <>
+Result<std::vector<std::string>> ReaderFor<SqlAnywhereCatalog>::load_grants(
+    std::string_view user, std::string_view) {
+    return catalog_.load_grants(user);
+}
+
 } // namespace
 
 std::unique_ptr<CatalogReader> make_catalog_reader(std::string_view driver_id,
@@ -221,6 +422,12 @@ std::unique_ptr<CatalogReader> make_catalog_reader(std::string_view driver_id,
     }
     if (driver_id == "mysql" || driver_id == "mariadb") {
         return std::make_unique<ReaderFor<MysqlCatalog>>(holt);
+    }
+    if (driver_id == "sqlserver" || driver_id == "mssql") {
+        return std::make_unique<ReaderFor<MssqlCatalog>>(holt);
+    }
+    if (driver_id == "sqlanywhere") {
+        return std::make_unique<ReaderFor<SqlAnywhereCatalog>>(holt);
     }
     // Driver desconhecido nao ganha um leitor padrao: consultar o pg_catalog
     // num servidor que nao e' PostgreSQL daria um erro incompreensivel.

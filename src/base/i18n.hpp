@@ -35,8 +35,19 @@ struct Language {
 // Troca o idioma. Devolve false se o codigo nao existir.
 bool set_language(std::string_view code);
 
-// Detecta o idioma do sistema operacional. Chamado na inicializacao.
+// Detecta o idioma do ambiente. Chamado na inicializacao.
+//
+// No Windows, o idioma de EXIBICAO do usuario (GetUserDefaultUILanguage) --
+// nao o formato regional. Os dois divergem com frequencia: um Windows em
+// ingles com datas e numeros no padrao brasileiro e' comum, e ler o formato
+// abria o C-Otter em portugues num sistema cujos menus estao em ingles.
+//
+// Fora do Windows, LC_ALL > LC_MESSAGES > LANG, a precedencia do POSIX.
 [[nodiscard]] std::string detect_system_language();
+
+// "pt_BR.UTF-8" -> "pt-BR"; "C" e "POSIX" -> "en"; vazio -> vazio.
+// Separada de detect_system_language para ser testavel sem mexer no ambiente.
+[[nodiscard]] std::string normalize_locale(std::string_view locale);
 
 // Traduz. Devolve `text` inalterado quando nao ha' traducao -- e' por isso que
 // a chave ser o proprio ingles importa: falta de traducao degrada para ingles

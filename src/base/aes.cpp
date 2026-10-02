@@ -106,10 +106,12 @@ void add_round_key(std::uint8_t* state, const std::uint8_t* key) noexcept {
     for (std::size_t i = 0; i < kAesBlockSize; ++i) state[i] ^= key[i];
 }
 
-void encrypt_block(std::uint8_t* state, const RoundKeys& keys) {
-    add_round_key(state, keys.data());
+// `keys` = as subchaves em sequencia; `rounds` = 10, 12 ou 14 conforme a chave
+// tenha 128, 192 ou 256 bits.
+void encrypt_block(std::uint8_t* state, const std::uint8_t* keys, int rounds) {
+    add_round_key(state, keys);
 
-    for (int round = 1; round <= kRounds; ++round) {
+    for (int round = 1; round <= rounds; ++round) {
         for (std::size_t i = 0; i < kAesBlockSize; ++i) state[i] = kSbox[state[i]];
 
         // ShiftRows: o estado e' column-major, entao a linha r ocupa os
@@ -122,7 +124,7 @@ void encrypt_block(std::uint8_t* state, const RoundKeys& keys) {
         }
         std::memcpy(state, tmp, kAesBlockSize);
 
-        if (round != kRounds) {
+        if (round != rounds) {
             for (std::size_t c = 0; c < 4; ++c) {
                 std::uint8_t* col = state + c * 4;
                 const std::uint8_t a0 = col[0], a1 = col[1];
@@ -134,8 +136,71 @@ void encrypt_block(std::uint8_t* state, const RoundKeys& keys) {
             }
         }
 
-        add_round_key(state, keys.data() + round * kAesBlockSize);
+        add_round_key(state, keys + static_cast<std::size_t>(round) * kAesBlockSize);
     }
+}
+
+void encrypt_block(std::uint8_t* state, const RoundKeys& keys) {
+    encrypt_block(state, keys.data(), kRounds);
+}
+
+// --- Chave de 128, 192 ou 256 bits (so' para cifrar: e' o que o CFB usa) ---
+//
+// O CFB cifra o registrador nos dois sentidos -- decifrar a mensagem NAO usa
+// a operacao inversa do AES. Por isso basta a expansao da chave e o
+// encrypt_block de cima.
+struct Schedule {
+    std::array<std::uint8_t, kAesBlockSize * 15> keys{};   // ate' 14 rodadas
+    int rounds = 0;
+};
+
+bool expand_any_key(std::span<const std::uint8_t> key, Schedule& out) {
+    const std::size_t size = key.size();
+    if (size != 16 && size != 24 && size != 32) return false;
+
+    out.rounds = static_cast<int>(size / 4) + 6;
+    const std::size_t total = kAesBlockSize * (static_cast<std::size_t>(out.rounds) + 1);
+    std::memcpy(out.keys.data(), key.data(), size);
+
+    std::uint8_t rcon = 1;
+    for (std::size_t i = size; i < total; i += 4) {
+        std::uint8_t temp[4] = {
+            out.keys[i - 4], out.keys[i - 3], out.keys[i - 2], out.keys[i - 1],
+        };
+
+        if (i % size == 0) {
+            // RotWord + SubWord + Rcon
+            const std::uint8_t first = temp[0];
+            temp[0] = static_cast<std::uint8_t>(kSbox[temp[1]] ^ rcon);
+            temp[1] = kSbox[temp[2]];
+            temp[2] = kSbox[temp[3]];
+            temp[3] = kSbox[first];
+            rcon = xtime(rcon);
+        } else if (size == 32 && i % size == 16) {
+            // So' no AES-256: um SubWord a mais no meio de cada ciclo.
+            for (std::uint8_t& byte : temp) byte = kSbox[byte];
+        }
+
+        for (std::size_t j = 0; j < 4; ++j) {
+            out.keys[i + j] = static_cast<std::uint8_t>(out.keys[i + j - size] ^ temp[j]);
+        }
+    }
+    return true;
+}
+
+// Um passo do CFB8: cifra o registrador, usa o PRIMEIRO byte, e empurra o
+// byte CIFRADO para o fim do registrador.
+std::uint8_t cfb8_keystream(const Schedule& schedule,
+                            const std::array<std::uint8_t, kAesBlockSize>& shift) {
+    std::uint8_t block[kAesBlockSize];
+    std::memcpy(block, shift.data(), kAesBlockSize);
+    encrypt_block(block, schedule.keys.data(), schedule.rounds);
+    return block[0];
+}
+
+void cfb8_shift(std::array<std::uint8_t, kAesBlockSize>& shift, std::uint8_t cipher_byte) {
+    std::memmove(shift.data(), shift.data() + 1, kAesBlockSize - 1);
+    shift[kAesBlockSize - 1] = cipher_byte;
 }
 
 void decrypt_block(std::uint8_t* state, const RoundKeys& keys) {
@@ -257,6 +322,51 @@ Result<std::vector<std::uint8_t>> aes128_cbc_decrypt(
         }
     }
     out.resize(out.size() - pad);
+    return out;
+}
+
+Result<std::vector<std::uint8_t>> aes_cfb8_decrypt(
+    std::span<const std::uint8_t> input, std::span<const std::uint8_t> key) {
+    Schedule schedule;
+    if (!expand_any_key(key, schedule)) {
+        return fail(Errc::invalid_argument, "the AES key must have 16, 24 or 32 bytes");
+    }
+    if (input.size() < kAesBlockSize) {
+        return fail(Errc::invalid_argument, "ciphertext shorter than the IV");
+    }
+
+    std::array<std::uint8_t, kAesBlockSize> shift{};
+    std::memcpy(shift.data(), input.data(), kAesBlockSize);
+
+    std::vector<std::uint8_t> out;
+    out.reserve(input.size() - kAesBlockSize);
+    for (std::size_t i = kAesBlockSize; i < input.size(); ++i) {
+        const std::uint8_t cipher_byte = input[i];
+        out.push_back(static_cast<std::uint8_t>(cipher_byte ^ cfb8_keystream(schedule, shift)));
+        cfb8_shift(shift, cipher_byte);
+    }
+    return out;
+}
+
+Result<std::vector<std::uint8_t>> aes_cfb8_encrypt(
+    std::span<const std::uint8_t> plaintext, std::span<const std::uint8_t> key,
+    const AesIv& iv) {
+    Schedule schedule;
+    if (!expand_any_key(key, schedule)) {
+        return fail(Errc::invalid_argument, "the AES key must have 16, 24 or 32 bytes");
+    }
+
+    std::array<std::uint8_t, kAesBlockSize> shift = iv;
+
+    std::vector<std::uint8_t> out;
+    out.reserve(kAesBlockSize + plaintext.size());
+    out.insert(out.end(), iv.begin(), iv.end());
+    for (const std::uint8_t byte : plaintext) {
+        const std::uint8_t cipher_byte =
+            static_cast<std::uint8_t>(byte ^ cfb8_keystream(schedule, shift));
+        out.push_back(cipher_byte);
+        cfb8_shift(shift, cipher_byte);
+    }
     return out;
 }
 

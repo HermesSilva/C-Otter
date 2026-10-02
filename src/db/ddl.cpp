@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <unordered_set>
 
 namespace otter::db {
@@ -84,7 +85,11 @@ namespace {
 // O dialeto corrente. Nao e' thread_local de proposito: a conexao ativa e' uma
 // so' na interface, e um worker que gere SQL precisa do MESMO dialeto que a
 // UI mostrou ao usuario.
-QuoteStyle g_dialect = QuoteStyle::double_quotes;
+// POR THREAD: o thread de UI troca o dialeto conforme a conexao em uso (duas
+// conexoes de SGBDs diferentes na mesma arvore), e o worker de uma sessao
+// gera SQL ao mesmo tempo para a conexao DELE. Com um global so', um
+// atropelava o outro.
+thread_local QuoteStyle g_dialect = QuoteStyle::double_quotes;
 
 struct Delimiters { char open; char close; };
 
@@ -92,6 +97,7 @@ Delimiters delimiters_for(QuoteStyle style) noexcept {
     switch (style) {
         case QuoteStyle::backticks: return {'`', '`'};
         case QuoteStyle::brackets:  return {'[', ']'};
+        case QuoteStyle::anywhere:
         case QuoteStyle::double_quotes: break;
     }
     return {'"', '"'};
@@ -108,9 +114,22 @@ void set_sql_dialect_for(std::string_view driver_id) {
         set_sql_dialect(QuoteStyle::backticks);
     } else if (driver_id == "mssql" || driver_id == "sqlserver") {
         set_sql_dialect(QuoteStyle::brackets);
+    } else if (driver_id == "sqlanywhere") {
+        set_sql_dialect(QuoteStyle::anywhere);
     } else {
         set_sql_dialect(QuoteStyle::double_quotes);
     }
+}
+
+std::string_view transaction_begin_sql() noexcept {
+    // No SQL Anywhere "BEGIN" sozinho tambem abre um BLOCO.
+    return g_dialect == QuoteStyle::brackets || g_dialect == QuoteStyle::anywhere
+               ? "BEGIN TRANSACTION"
+               : "BEGIN";
+}
+
+std::string_view transaction_commit_sql() noexcept {
+    return g_dialect == QuoteStyle::brackets ? "COMMIT TRANSACTION" : "COMMIT";
 }
 
 std::string quote_if_needed(std::string_view identifier) {
@@ -149,12 +168,94 @@ std::string quote_if_needed(std::string_view identifier) {
     return out;
 }
 
+namespace {
+
+// UNISTR('...'): o literal do SQL Anywhere para texto fora do ASCII.
+//
+// O servidor converte o COMANDO inteiro para o conjunto de caracteres do
+// banco antes de le-lo. Num banco cp1252 (o padrao no Windows), um literal
+// comum com "日本" chega como "??" -- mesmo com N'...' e mesmo para uma coluna
+// nvarchar. Em UNISTR o que nao e' ASCII vai como \uXXXX, e o comando inteiro
+// e' ASCII: nada se perde no caminho.
+std::string unistr_literal(std::string_view text) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out = "UNISTR('";
+
+    const auto unit = [&out](std::uint32_t value) {
+        out += "\\u";
+        for (int shift = 12; shift >= 0; shift -= 4) out += kHex[(value >> shift) & 0xF];
+    };
+
+    for (std::size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead < 0x80) {
+            if (lead == '\'') out += "''";
+            // A barra e' o escape do UNISTR, e "\\\\" NAO vira uma barra so'
+            // (conferido no servidor): vai pelo codigo dela.
+            else if (lead == '\\') unit(0x5C);
+            else out += static_cast<char>(lead);
+            ++i;
+            continue;
+        }
+
+        // Um ponto de codigo UTF-8; byte invalido vai como Latin-1.
+        std::uint32_t code = lead;
+        std::size_t   size = 1;
+        const auto cont = [&text, i](std::size_t k) {
+            return i + k < text.size()
+                       ? (static_cast<unsigned char>(text[i + k]) & 0x3Fu)
+                       : 0u;
+        };
+        if ((lead & 0xE0) == 0xC0 && i + 1 < text.size()) {
+            code = ((lead & 0x1Fu) << 6) | cont(1);
+            size = 2;
+        } else if ((lead & 0xF0) == 0xE0 && i + 2 < text.size()) {
+            code = ((lead & 0x0Fu) << 12) | (cont(1) << 6) | cont(2);
+            size = 3;
+        } else if ((lead & 0xF8) == 0xF0 && i + 3 < text.size()) {
+            code = ((lead & 0x07u) << 18) | (cont(1) << 12) | (cont(2) << 6) | cont(3);
+            size = 4;
+        }
+        i += size;
+
+        if (code >= 0x10000) {
+            // Fora do plano basico: o par substituto do UTF-16.
+            code -= 0x10000;
+            unit(0xD800 + (code >> 10));
+            unit(0xDC00 + (code & 0x3FF));
+        } else {
+            unit(code);
+        }
+    }
+    out += "')";
+    return out;
+}
+
+} // namespace
+
 std::string quote_literal(std::string_view text) {
     constexpr char kQuote     = '\'';
     constexpr char kBackslash = '\\';
 
+    if (g_dialect == QuoteStyle::anywhere &&
+        std::any_of(text.begin(), text.end(),
+                    [](char c) { return static_cast<unsigned char>(c) >= 0x80; })) {
+        return unistr_literal(text);
+    }
+
     std::string out;
-    out.reserve(text.size() + 2);
+    out.reserve(text.size() + 3);
+
+    // SQL Server: um literal sem N e' convertido para a pagina de codigo do
+    // banco, e o que nao cabe nela vira '?' -- em silencio. O N so' entra
+    // quando ha' algo fora do ASCII: num literal comum ele forcaria a
+    // conversao da COLUNA varchar comparada, e a busca deixaria de usar o
+    // indice.
+    if (g_dialect == QuoteStyle::brackets &&
+        std::any_of(text.begin(), text.end(),
+                    [](char c) { return static_cast<unsigned char>(c) >= 0x80; })) {
+        out.push_back('N');
+    }
     out.push_back(kQuote);
 
     // O MySQL trata a barra invertida como escape por padrao (NO_BACKSLASH_
@@ -203,6 +304,15 @@ std::string generate_select(std::string_view schema, const TableMeta& table,
                             std::size_t limit) {
     std::string out = "SELECT ";
 
+    // O limite do T-SQL fica no comeco: SELECT TOP (n). O do SQL Anywhere
+    // tambem, sem os parenteses.
+    const bool top = g_dialect == QuoteStyle::brackets || g_dialect == QuoteStyle::anywhere;
+    if (g_dialect == QuoteStyle::anywhere && limit > 0) {
+        out += "TOP " + std::to_string(limit) + " ";
+    } else if (top && limit > 0) {
+        out += "TOP (" + std::to_string(limit) + ") ";
+    }
+
     if (table.columns.empty()) {
         // Colunas ainda nao carregadas: '*' e' melhor que um SELECT vazio, e
         // o comentario explica por que nao vieram listadas.
@@ -217,7 +327,7 @@ std::string generate_select(std::string_view schema, const TableMeta& table,
     }
 
     out += "  FROM " + qualified_name(schema, table.name);
-    if (limit > 0) out += "\n LIMIT " + std::to_string(limit);
+    if (!top && limit > 0) out += "\n LIMIT " + std::to_string(limit);
     out += ";\n";
     return out;
 }

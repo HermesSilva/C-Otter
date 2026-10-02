@@ -1,5 +1,7 @@
 #include "ui/icons.hpp"
+#include "ui/hint.hpp"
 
+#include "ui/icon_images.hpp"
 #include "ui/theme.hpp"
 
 #include "imgui.h"
@@ -616,6 +618,557 @@ void draw_grant(const Canvas& c) {
     c.circle_filled(0.22f, 0.22f, 0.10f);
 }
 
+// --- Nos da arvore unica (ADR 0018) -------------------------------------------
+//
+// Mesma regra dos de cima: formas geometricas, nao letras -- a 14 px uma
+// letra vira dois riscos. Onde dois tipos sao parentes (role e role_group,
+// trigger e event_trigger, extension e extension_available), a diferenca
+// esta' na SILHUETA, nao num detalhe interno.
+
+void draw_foreign_table(const Canvas& c) {
+    // A grade da tabela, menor e no canto, com uma seta saindo dela: os
+    // dados estao fora.
+    c.rect(-0.38f, -0.10f, 0.14f, 0.36f, 0.06f);
+    c.line(-0.38f, 0.06f, 0.14f, 0.06f);
+    c.line(-0.14f, 0.06f, -0.14f, 0.36f);
+    c.line(0.02f, -0.02f, 0.30f, -0.30f);
+    c.triangle_filled(0.38f, -0.38f, 0.16f, -0.32f, 0.32f, -0.16f);
+}
+
+void draw_aggregate(const Canvas& c) {
+    c.dl->PathLineTo(c.at( 0.26f, -0.24f));
+    c.dl->PathLineTo(c.at( 0.26f, -0.34f));
+    c.dl->PathLineTo(c.at(-0.26f, -0.34f));
+    c.dl->PathLineTo(c.at( 0.04f,  0.00f));
+    c.dl->PathLineTo(c.at(-0.26f,  0.34f));
+    c.dl->PathLineTo(c.at( 0.26f,  0.34f));
+    c.dl->PathLineTo(c.at( 0.26f,  0.24f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_dependency(const Canvas& c) {
+    // O objeto em cima, cheio; os que dependem dele embaixo, vazios. E' o
+    // `references` de pe': la' as origens convergem para a direita.
+    c.circle_filled(0.0f, -0.26f, 0.12f);
+    c.line(-0.06f, -0.16f, -0.22f, 0.14f);
+    c.line( 0.06f, -0.16f,  0.22f, 0.14f);
+    c.circle(-0.24f, 0.24f, 0.10f);
+    c.circle( 0.24f, 0.24f, 0.10f);
+}
+
+void draw_rule(const Canvas& c) {
+    c.line(-0.34f, -0.14f, 0.22f, -0.14f);
+    c.triangle_filled(0.18f, -0.26f, 0.18f, -0.02f, 0.38f, -0.14f);
+    c.line(-0.22f, 0.14f, 0.34f, 0.14f);
+    c.triangle_filled(-0.18f, 0.02f, -0.18f, 0.26f, -0.38f, 0.14f);
+}
+
+void draw_policy(const Canvas& c) {
+    // Tres linhas de dados, e so' a do meio passa.
+    c.line(-0.34f, -0.26f, 0.34f, -0.26f);
+    c.rect_filled(-0.34f, -0.09f, 0.34f, 0.09f, 0.04f);
+    c.line(-0.34f, 0.26f, 0.34f, 0.26f);
+}
+
+void draw_inheritance(const Canvas& c) {
+    c.rect(-0.20f, -0.38f, 0.20f, -0.18f, 0.04f);
+    c.dl->AddTriangle(c.at(0.0f, -0.18f), c.at(-0.11f, 0.0f), c.at(0.11f, 0.0f),
+                      c.color, c.thickness);
+    c.line(0.0f, 0.0f, 0.0f, 0.18f);
+    c.rect(-0.20f, 0.18f, 0.20f, 0.38f, 0.04f);
+}
+
+void draw_parameter(const Canvas& c) {
+    c.arc(-0.02f, 0.0f, 0.34f, 135.0f, 225.0f);
+    c.arc( 0.02f, 0.0f, 0.34f, -45.0f, 45.0f);
+    c.circle_filled(0.0f, 0.0f, 0.09f);
+}
+
+void draw_event_trigger(const Canvas& c) {
+    // O raio do trigger, menor, dentro de um anel: o gatilho do BANCO, nao
+    // de uma tabela.
+    c.circle(0.0f, 0.0f, 0.37f);
+    c.dl->PathLineTo(c.at( 0.06f, -0.24f));
+    c.dl->PathLineTo(c.at(-0.14f,  0.03f));
+    c.dl->PathLineTo(c.at( 0.00f,  0.03f));
+    c.dl->PathLineTo(c.at(-0.06f,  0.24f));
+    c.dl->PathLineTo(c.at( 0.14f, -0.03f));
+    c.dl->PathLineTo(c.at( 0.00f, -0.03f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_storage(const Canvas& c) {
+    // Disco rigido visto de cima. Nao as tres barras empilhadas, que sao a
+    // torre de `generic_server`.
+    c.rect(-0.34f, -0.32f, 0.34f, 0.32f, 0.07f);
+    c.circle(-0.05f, -0.04f, 0.19f);
+    c.circle_filled(-0.05f, -0.04f, 0.045f);
+    c.line(0.24f, 0.24f, 0.07f, 0.06f);
+}
+
+void draw_foreign_wrapper(const Canvas& c) {
+    c.rect(-0.38f, -0.18f, -0.08f, 0.18f, 0.05f);
+    c.rect( 0.08f, -0.18f,  0.38f, 0.18f, 0.05f);
+    c.line(-0.08f, -0.08f, 0.08f, -0.08f);
+    c.line(-0.08f,  0.08f, 0.08f,  0.08f);
+}
+
+void draw_foreign_server(const Canvas& c) {
+    c.circle(0.0f, 0.0f, 0.34f);
+    c.ellipse(0.0f, 0.0f, 0.14f, 0.34f);
+    c.line(-0.34f, 0.0f, 0.34f, 0.0f);
+}
+
+void draw_user_mapping(const Canvas& c) {
+    c.circle(-0.26f, -0.12f, 0.10f);
+    c.arc(-0.26f, 0.26f, 0.16f, 180.0f, 360.0f);
+    c.line(-0.04f, 0.04f, 0.12f, 0.04f);
+    c.triangle_filled(0.10f, -0.06f, 0.10f, 0.14f, 0.22f, 0.04f);
+    c.rect(0.24f, -0.10f, 0.40f, 0.18f, 0.03f);
+}
+
+void draw_setting(const Canvas& c) {
+    // Controles deslizantes, e nao a engrenagem: aquela e' a ACAO de abrir
+    // as preferencias; este e' um valor do servidor.
+    c.line(-0.36f, -0.15f, 0.36f, -0.15f);
+    c.circle_filled(-0.12f, -0.15f, 0.085f);
+    c.line(-0.36f, 0.15f, 0.36f, 0.15f);
+    c.circle_filled(0.16f, 0.15f, 0.085f);
+}
+
+void draw_role_group(const Canvas& c) {
+    // Duas silhuetas, a de tras deslocada. Sem a chave do `role`: o grupo
+    // nao entra no servidor, so' reune permissoes.
+    c.circle(0.14f, -0.22f, 0.11f);
+    c.arc(0.14f, 0.20f, 0.20f, 200.0f, 360.0f);
+    c.circle(-0.12f, -0.10f, 0.13f);
+    c.arc(-0.12f, 0.36f, 0.24f, 180.0f, 360.0f);
+}
+
+void draw_access_method(const Canvas& c) {
+    c.rect_filled(-0.09f, -0.36f, 0.09f, -0.20f, 0.03f);
+    for (int i = -1; i <= 1; ++i) {
+        const float x = static_cast<float>(i) * 0.27f;
+        c.line(0.0f, -0.20f, x, 0.18f);
+        c.rect(x - 0.09f, 0.18f, x + 0.09f, 0.34f, 0.03f);
+    }
+}
+
+void draw_operator_class(const Canvas& c) {
+    c.dl->PathLineTo(c.at( 0.22f, -0.34f));
+    c.dl->PathLineTo(c.at(-0.24f, -0.10f));
+    c.dl->PathLineTo(c.at( 0.22f,  0.14f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(-0.24f, 0.32f, 0.22f, 0.32f);
+}
+
+void draw_operator_family(const Canvas& c) {
+    c.circle(-0.13f, 0.0f, 0.23f);
+    c.circle( 0.13f, 0.0f, 0.23f);
+}
+
+void draw_encoding(const Canvas& c) {
+    // Tres bits por linha; os acesos em diagonal para nao ler como grade de
+    // tabela.
+    constexpr bool kLit[2][3] = {{true, false, true}, {false, true, false}};
+    for (int row = 0; row < 2; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const float x = -0.34f + static_cast<float>(col) * 0.25f;
+            const float y = -0.22f + static_cast<float>(row) * 0.26f;
+            if (kLit[row][col]) {
+                c.rect_filled(x, y, x + 0.18f, y + 0.18f, 0.03f);
+            } else {
+                c.rect(x, y, x + 0.18f, y + 0.18f, 0.03f);
+            }
+        }
+    }
+}
+
+void draw_collation(const Canvas& c) {
+    c.line(-0.30f, -0.32f, -0.30f, 0.20f);
+    c.triangle_filled(-0.40f, 0.16f, -0.20f, 0.16f, -0.30f, 0.36f);
+    c.line(-0.08f, -0.24f, 0.08f, -0.24f);
+    c.line(-0.08f,  0.00f, 0.22f,  0.00f);
+    c.line(-0.08f,  0.24f, 0.38f,  0.24f);
+}
+
+void draw_language(const Canvas& c) {
+    c.dl->PathLineTo(c.at(-0.18f, -0.22f));
+    c.dl->PathLineTo(c.at(-0.38f,  0.00f));
+    c.dl->PathLineTo(c.at(-0.18f,  0.22f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(0.08f, -0.32f, -0.08f, 0.32f);
+    c.dl->PathLineTo(c.at(0.18f, -0.22f));
+    c.dl->PathLineTo(c.at(0.38f,  0.00f));
+    c.dl->PathLineTo(c.at(0.18f,  0.22f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_extension_available(const Canvas& c) {
+    // A extensao instalada e' a peca de quebra-cabeca. Esta ainda esta' na
+    // caixa: aberta em cima, com a seta entrando.
+    c.dl->PathLineTo(c.at(-0.32f, 0.02f));
+    c.dl->PathLineTo(c.at(-0.32f, 0.36f));
+    c.dl->PathLineTo(c.at( 0.32f, 0.36f));
+    c.dl->PathLineTo(c.at( 0.32f, 0.02f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(0.0f, -0.38f, 0.0f, 0.04f);
+    c.triangle_filled(-0.13f, 0.00f, 0.13f, 0.00f, 0.0f, 0.20f);
+}
+
+void draw_administer(const Canvas& c) {
+    c.rect(-0.36f, -0.12f, 0.36f, 0.32f, 0.06f);
+    c.dl->PathLineTo(c.at(-0.14f, -0.12f));
+    c.dl->PathLineTo(c.at(-0.14f, -0.30f));
+    c.dl->PathLineTo(c.at( 0.14f, -0.30f));
+    c.dl->PathLineTo(c.at( 0.14f, -0.12f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(-0.36f, 0.06f, 0.36f, 0.06f);
+    c.rect_filled(-0.07f, 0.00f, 0.07f, 0.14f, 0.02f);
+}
+
+void draw_system_info(const Canvas& c) {
+    // O `info` e' o circulo com i, usado em mensagens. Aqui o i esta' numa
+    // tela: informacao DO SERVIDOR.
+    c.rect(-0.36f, -0.34f, 0.36f, 0.16f, 0.06f);
+    c.line(0.0f, 0.16f, 0.0f, 0.32f);
+    c.line(-0.18f, 0.34f, 0.18f, 0.34f);
+    c.circle_filled(0.0f, -0.22f, 0.045f);
+    c.line(0.0f, -0.12f, 0.0f, 0.04f);
+}
+
+void draw_sessions(const Canvas& c) {
+    c.rect(-0.36f, -0.28f, 0.36f, 0.28f, 0.07f);
+    c.dl->PathLineTo(c.at(-0.22f, -0.12f));
+    c.dl->PathLineTo(c.at(-0.07f,  0.01f));
+    c.dl->PathLineTo(c.at(-0.22f,  0.14f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(0.02f, 0.14f, 0.22f, 0.14f);
+}
+
+void draw_locks(const Canvas& c) {
+    // O cadeado de `lock` (canal cifrado) ocupa a caixa inteira. Este e'
+    // pequeno e cheio, com a LISTA ao lado: os bloqueios em curso.
+    c.arc(-0.22f, -0.04f, 0.11f, 180.0f, 360.0f);
+    c.rect_filled(-0.38f, -0.04f, -0.06f, 0.24f, 0.04f);
+    c.line(0.06f, -0.16f, 0.38f, -0.16f);
+    c.line(0.06f,  0.04f, 0.38f,  0.04f);
+    c.line(0.06f,  0.24f, 0.38f,  0.24f);
+}
+
+void draw_synonym(const Canvas& c) {
+    // Dois retangulos (o nome e o objeto) e a seta de um para o outro.
+    c.rect(-0.40f, -0.34f, -0.04f, -0.10f, 0.04f);
+    c.rect( 0.04f,  0.10f,  0.40f,  0.34f, 0.04f);
+    c.line(-0.22f, -0.10f, -0.22f, 0.22f);
+    c.line(-0.22f,  0.22f,  0.04f, 0.22f);
+    c.line(-0.08f,  0.12f,  0.04f, 0.22f);
+    c.line(-0.08f,  0.32f,  0.04f, 0.22f);
+}
+
+void draw_job(const Canvas& c) {
+    c.rect(-0.28f, -0.28f, 0.28f, 0.36f, 0.06f);
+    c.rect_filled(-0.12f, -0.38f, 0.12f, -0.22f, 0.03f);
+    c.dl->PathLineTo(c.at(-0.14f, 0.06f));
+    c.dl->PathLineTo(c.at(-0.03f, 0.18f));
+    c.dl->PathLineTo(c.at( 0.16f, -0.06f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_job_step(const Canvas& c) {
+    c.line(-0.24f, -0.26f, -0.24f, 0.26f);
+    c.circle(-0.24f, -0.26f, 0.085f);
+    c.circle_filled(-0.24f, 0.0f, 0.085f);
+    c.circle(-0.24f, 0.26f, 0.085f);
+    c.line(-0.04f, -0.26f, 0.36f, -0.26f);
+    c.line(-0.04f,  0.00f, 0.36f,  0.00f);
+    c.line(-0.04f,  0.26f, 0.36f,  0.26f);
+}
+
+void draw_job_schedule(const Canvas& c) {
+    c.rect(-0.32f, -0.26f, 0.32f, 0.34f, 0.06f);
+    c.line(-0.32f, -0.08f, 0.32f, -0.08f);
+    c.line(-0.16f, -0.38f, -0.16f, -0.18f);
+    c.line( 0.16f, -0.38f,  0.16f, -0.18f);
+    c.circle_filled(-0.14f, 0.06f, 0.04f);
+    c.circle_filled( 0.02f, 0.06f, 0.04f);
+    c.circle_filled( 0.18f, 0.06f, 0.04f);
+    c.circle_filled(-0.14f, 0.22f, 0.04f);
+}
+
+// --- Barra lateral do editor SQL ------------------------------------------------
+
+void draw_play_new(const Canvas& c) {
+    // O play, deslocado, e um + no canto: "executar em OUTRA aba".
+    c.triangle_filled(-0.32f, -0.30f, -0.32f, 0.30f, 0.12f, 0.0f);
+    c.line(0.26f, 0.06f, 0.26f, 0.34f);
+    c.line(0.12f, 0.20f, 0.40f, 0.20f);
+}
+
+void draw_play_script(const Canvas& c) {
+    // A folha do script, com as linhas, e o play sobre o canto.
+    c.rect(-0.34f, -0.36f, 0.16f, 0.30f, 0.05f);
+    c.line(-0.24f, -0.20f, 0.06f, -0.20f);
+    c.line(-0.24f, -0.04f, 0.06f, -0.04f);
+    c.line(-0.24f,  0.12f, -0.06f, 0.12f);
+    c.triangle_filled(0.10f, 0.06f, 0.10f, 0.40f, 0.40f, 0.23f);
+}
+
+void draw_plan(const Canvas& c) {
+    // Um no em cima e dois embaixo, ligados em angulo reto: a arvore do
+    // plano, lida de cima para baixo. Caixas, nao os circulos do
+    // `dependency`.
+    c.rect(-0.14f, -0.36f, 0.14f, -0.16f, 0.04f);
+    c.line(0.0f, -0.16f, 0.0f, 0.0f);
+    c.line(-0.24f, 0.0f, 0.24f, 0.0f);
+    c.line(-0.24f, 0.0f, -0.24f, 0.14f);
+    c.line( 0.24f, 0.0f,  0.24f, 0.14f);
+    c.rect_filled(-0.38f, 0.14f, -0.10f, 0.34f, 0.04f);
+    c.rect(0.10f, 0.14f, 0.38f, 0.34f, 0.04f);
+}
+
+void draw_ai(const Canvas& c) {
+    // Faisca de quatro pontas, e uma menor ao lado.
+    c.dl->PathLineTo(c.at(-0.06f, -0.38f));
+    c.dl->PathLineTo(c.at( 0.02f, -0.10f));
+    c.dl->PathLineTo(c.at( 0.30f, -0.02f));
+    c.dl->PathLineTo(c.at( 0.02f,  0.06f));
+    c.dl->PathLineTo(c.at(-0.06f,  0.34f));
+    c.dl->PathLineTo(c.at(-0.14f,  0.06f));
+    c.dl->PathLineTo(c.at(-0.42f, -0.02f));
+    c.dl->PathLineTo(c.at(-0.14f, -0.10f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+    c.line(0.30f, 0.16f, 0.30f, 0.38f);
+    c.line(0.19f, 0.27f, 0.41f, 0.27f);
+}
+
+void draw_terminal(const Canvas& c) {
+    // O `sessions` e' a janela com o prompt. Aqui nao ha' moldura: so' o
+    // prompt e o cursor em BLOCO cheio -- o lugar onde se digita.
+    c.dl->PathLineTo(c.at(-0.38f, -0.24f));
+    c.dl->PathLineTo(c.at(-0.12f,  0.00f));
+    c.dl->PathLineTo(c.at(-0.38f,  0.24f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness * 1.2f);
+    c.rect_filled(0.04f, 0.10f, 0.38f, 0.28f, 0.02f);
+}
+
+void draw_server_output(const Canvas& c) {
+    // Balao de fala, com a ponta embaixo a' esquerda.
+    c.dl->PathLineTo(c.at(-0.36f, -0.32f));
+    c.dl->PathLineTo(c.at( 0.36f, -0.32f));
+    c.dl->PathLineTo(c.at( 0.36f,  0.14f));
+    c.dl->PathLineTo(c.at(-0.10f,  0.14f));
+    c.dl->PathLineTo(c.at(-0.28f,  0.36f));
+    c.dl->PathLineTo(c.at(-0.24f,  0.14f));
+    c.dl->PathLineTo(c.at(-0.36f,  0.14f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+    c.line(-0.20f, -0.16f, 0.20f, -0.16f);
+    c.line(-0.20f, -0.02f, 0.08f, -0.02f);
+}
+
+void draw_exec_log(const Canvas& c) {
+    // Tres linhas de historico e o relogio no canto.
+    c.line(-0.38f, -0.28f, 0.10f, -0.28f);
+    c.line(-0.38f, -0.08f, -0.06f, -0.08f);
+    c.line(-0.38f,  0.12f, -0.10f, 0.12f);
+    c.circle(0.18f, 0.16f, 0.20f);
+    c.line(0.18f, 0.16f, 0.18f, 0.04f);
+    c.line(0.18f, 0.16f, 0.28f, 0.20f);
+}
+
+void draw_variables(const Canvas& c) {
+    // Um x entre chaves -- ${x}.
+    c.dl->PathLineTo(c.at(-0.22f, -0.34f));
+    c.dl->PathBezierCubicCurveTo(c.at(-0.34f, -0.32f), c.at(-0.30f, -0.08f),
+                                 c.at(-0.40f, 0.0f), 10);
+    c.dl->PathBezierCubicCurveTo(c.at(-0.30f, 0.08f), c.at(-0.34f, 0.32f),
+                                 c.at(-0.22f, 0.34f), 10);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.dl->PathLineTo(c.at(0.22f, -0.34f));
+    c.dl->PathBezierCubicCurveTo(c.at(0.34f, -0.32f), c.at(0.30f, -0.08f),
+                                 c.at(0.40f, 0.0f), 10);
+    c.dl->PathBezierCubicCurveTo(c.at(0.30f, 0.08f), c.at(0.34f, 0.32f),
+                                 c.at(0.22f, 0.34f), 10);
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+    c.line(-0.12f, -0.14f, 0.12f, 0.14f);
+    c.line(-0.12f,  0.14f, 0.12f, -0.14f);
+}
+
+void draw_outline(const Canvas& c) {
+    // Um titulo e dois itens recuados, cada um com seu marcador.
+    c.circle_filled(-0.32f, -0.26f, 0.055f);
+    c.line(-0.18f, -0.26f, 0.38f, -0.26f);
+    c.circle_filled(-0.14f, 0.0f, 0.055f);
+    c.line(0.0f, 0.0f, 0.38f, 0.0f);
+    c.circle_filled(-0.14f, 0.26f, 0.055f);
+    c.line(0.0f, 0.26f, 0.30f, 0.26f);
+}
+
+// --- Pastas tipadas ---------------------------------------------------------------
+//
+// No conjunto do DBeaver cada uma e' um SVG proprio. Aqui, a pasta do C-Otter
+// com `marks` pontos embaixo: o bastante para serem desenhos DIFERENTES entre
+// si (o teste compara a geometria) sem inventar onze pictogramas que so'
+// aparecem quando o usuario troca de conjunto.
+void draw_folder_marked(const Canvas& c, int marks) {
+    draw_folder(c);
+    for (int i = 0; i < marks; ++i) {
+        const int   row = i / 4;
+        const float x   = -0.24f + static_cast<float>(i % 4) * 0.16f;
+        const float y   = 0.10f + static_cast<float>(row) * 0.12f;
+        c.circle_filled(x, y, 0.035f);
+    }
+}
+
+void draw_object_page(const Canvas& c) {
+    // Folha com o canto dobrado.
+    c.dl->PathLineTo(c.at(-0.26f, -0.36f));
+    c.dl->PathLineTo(c.at( 0.10f, -0.36f));
+    c.dl->PathLineTo(c.at( 0.28f, -0.18f));
+    c.dl->PathLineTo(c.at( 0.28f,  0.36f));
+    c.dl->PathLineTo(c.at(-0.26f,  0.36f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+    c.line(0.10f, -0.36f, 0.10f, -0.18f);
+    c.line(0.10f, -0.18f, 0.28f, -0.18f);
+}
+
+// --- A grade de resultado ----------------------------------------------------
+
+void draw_accept(const Canvas& c) {
+    c.circle(0.0f, 0.0f, 0.36f);
+    c.dl->PathLineTo(c.at(-0.18f, 0.00f));
+    c.dl->PathLineTo(c.at(-0.04f, 0.15f));
+    c.dl->PathLineTo(c.at( 0.20f, -0.14f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness * 1.2f);
+}
+
+void draw_reject(const Canvas& c) {
+    c.circle(0.0f, 0.0f, 0.36f);
+    c.line(-0.15f, -0.15f, 0.15f, 0.15f);
+    c.line( 0.15f, -0.15f, -0.15f, 0.15f);
+}
+
+// A "linha" das quatro acoes de linha: uma faixa com duas divisorias.
+void draw_row_strip(const Canvas& c, float top) {
+    c.rect(-0.36f, top, 0.36f, top + 0.22f, 0.04f);
+    c.line(-0.12f, top, -0.12f, top + 0.22f);
+    c.line( 0.12f, top, 0.12f, top + 0.22f);
+}
+
+void draw_row_add(const Canvas& c) {
+    draw_row_strip(c, -0.32f);
+    c.line(0.0f, 0.04f, 0.0f, 0.36f);
+    c.line(-0.16f, 0.20f, 0.16f, 0.20f);
+}
+
+void draw_row_copy(const Canvas& c) {
+    draw_row_strip(c, -0.32f);
+    draw_row_strip(c, 0.10f);
+}
+
+void draw_row_edit(const Canvas& c) {
+    draw_row_strip(c, 0.10f);
+    // Lapis: o corpo inclinado e a ponta.
+    c.line(-0.22f, -0.04f, 0.14f, -0.36f);
+    c.line(-0.10f, 0.04f, 0.24f, -0.26f);
+    c.line(0.14f, -0.36f, 0.24f, -0.26f);
+    c.triangle_filled(-0.22f, -0.04f, -0.10f, 0.04f, -0.28f, 0.08f);
+}
+
+void draw_row_delete(const Canvas& c) {
+    draw_row_strip(c, -0.32f);
+    c.line(-0.13f, 0.07f, 0.13f, 0.33f);
+    c.line( 0.13f, 0.07f, -0.13f, 0.33f);
+}
+
+void draw_panels(const Canvas& c) {
+    c.rect(-0.36f, -0.30f, 0.36f, 0.30f, 0.06f);
+    c.line(0.06f, -0.30f, 0.06f, 0.30f);
+    c.line(0.06f, 0.00f, 0.36f, 0.00f);
+}
+
+void draw_panel_calc(const Canvas& c) {
+    c.rect(-0.36f, -0.36f, 0.36f, 0.36f, 0.06f);
+    // Sigma.
+    c.dl->PathLineTo(c.at( 0.16f, -0.20f));
+    c.dl->PathLineTo(c.at(-0.16f, -0.20f));
+    c.dl->PathLineTo(c.at( 0.02f,  0.00f));
+    c.dl->PathLineTo(c.at(-0.16f,  0.20f));
+    c.dl->PathLineTo(c.at( 0.16f,  0.20f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness);
+}
+
+void draw_panel_grouping(const Canvas& c) {
+    c.rect_filled(-0.36f, -0.32f, 0.36f, -0.18f, 0.03f);
+    c.line(-0.20f, -0.02f, 0.36f, -0.02f);
+    c.line(-0.20f, 0.14f, 0.36f, 0.14f);
+    c.line(-0.20f, 0.30f, 0.20f, 0.30f);
+    c.line(-0.30f, -0.18f, -0.30f, 0.30f);
+}
+
+void draw_panel_metadata(const Canvas& c) {
+    c.rect(-0.36f, -0.32f, 0.36f, 0.32f, 0.05f);
+    c.rect_filled(-0.36f, -0.32f, -0.12f, 0.32f);
+    c.line(-0.12f, -0.10f, 0.36f, -0.10f);
+    c.line(-0.12f, 0.11f, 0.36f, 0.11f);
+}
+
+void draw_panel_references(const Canvas& c) {
+    c.rect(-0.38f, -0.34f, -0.06f, -0.06f, 0.04f);
+    c.rect(0.06f, 0.06f, 0.38f, 0.34f, 0.04f);
+    c.line(-0.22f, -0.06f, -0.22f, 0.20f);
+    c.line(-0.22f, 0.20f, 0.06f, 0.20f);
+    c.triangle_filled(0.06f, 0.20f, -0.04f, 0.13f, -0.04f, 0.27f);
+}
+
+// O funil menor, no canto de cima, para os quatro botoes de filtro: sobra o
+// canto de baixo para a marca que os distingue.
+void draw_small_funnel(const Canvas& c) {
+    c.dl->PathLineTo(c.at(-0.38f, -0.36f));
+    c.dl->PathLineTo(c.at( 0.20f, -0.36f));
+    c.dl->PathLineTo(c.at(-0.02f, -0.10f));
+    c.dl->PathLineTo(c.at(-0.02f,  0.18f));
+    c.dl->PathLineTo(c.at(-0.16f,  0.10f));
+    c.dl->PathLineTo(c.at(-0.16f, -0.10f));
+    c.dl->PathStroke(c.color, ImDrawFlags_Closed, c.thickness);
+}
+
+void draw_filter_apply(const Canvas& c) {
+    draw_small_funnel(c);
+    c.dl->PathLineTo(c.at(0.08f, 0.20f));
+    c.dl->PathLineTo(c.at(0.18f, 0.32f));
+    c.dl->PathLineTo(c.at(0.38f, 0.06f));
+    c.dl->PathStroke(c.color, ImDrawFlags_None, c.thickness * 1.2f);
+}
+
+void draw_filter_reset(const Canvas& c) {
+    draw_small_funnel(c);
+    c.line(0.10f, 0.08f, 0.36f, 0.34f);
+    c.line(0.36f, 0.08f, 0.10f, 0.34f);
+}
+
+void draw_filter_config(const Canvas& c) {
+    draw_small_funnel(c);
+    c.line(0.06f, 0.14f, 0.38f, 0.14f);
+    c.circle_filled(0.16f, 0.14f, 0.05f);
+    c.line(0.06f, 0.30f, 0.38f, 0.30f);
+    c.circle_filled(0.30f, 0.30f, 0.05f);
+}
+
+void draw_filter_value(const Canvas& c) {
+    draw_small_funnel(c);
+    c.line(0.10f, 0.14f, 0.38f, 0.14f);
+    c.line(0.10f, 0.28f, 0.38f, 0.28f);
+}
+
+void draw_grid_mode(const Canvas& c) {
+    c.rect(-0.36f, -0.36f, 0.36f, 0.36f, 0.05f);
+    c.line(-0.12f, -0.36f, -0.12f, 0.36f);
+    c.line( 0.12f, -0.36f,  0.12f, 0.36f);
+    c.line(-0.36f, -0.12f, 0.36f, -0.12f);
+    c.line(-0.36f,  0.12f, 0.36f,  0.12f);
+}
+
 // --- Um icone por SGBD -----------------------------------------------------
 //
 // O que precisa ser lido em 16 px nao e' a especie do animal, e' a SILHUETA:
@@ -683,6 +1236,34 @@ void draw_my_server(const Canvas& c) {
     c.circle_filled(-0.22f, -0.02f, 0.030f);
 }
 
+void draw_ms_server(const Canvas& c) {
+    // Cilindro de banco com duas "velas" curvas ao lado -- o que sobra do
+    // logotipo do SQL Server quando se tira a cor: base cilindrica e as duas
+    // laminas inclinadas. Distingue-se do elefante (redondo) e do golfinho
+    // (horizontal) por ser vertical e ter linhas retas.
+    c.arc(-0.10f, -0.22f, 0.20f, 180.0f, 360.0f);
+    c.arc(-0.10f, -0.22f, 0.20f, 0.0f, 180.0f);
+    c.line(-0.30f, -0.22f, -0.30f, 0.26f);
+    c.line( 0.10f, -0.22f,  0.10f, 0.26f);
+    c.arc(-0.10f, 0.26f, 0.20f, 0.0f, 180.0f);
+    c.arc(-0.10f, 0.02f, 0.20f, 0.0f, 180.0f);
+
+    // As duas laminas.
+    c.line(0.20f, 0.30f, 0.40f, -0.30f);
+    c.line(0.30f, 0.30f, 0.44f, -0.12f);
+}
+
+void draw_sa_server(const Canvas& c) {
+    // O simbolo da Sybase: um retangulo em pe' com a espiral aurea dentro.
+    // Aqui, a moldura e tres quartos de circulo que encolhem -- o bastante
+    // para ler "espiral" no tamanho da arvore, onde o logotipo e' uma mancha.
+    c.rect(-0.28f, -0.38f, 0.28f, 0.38f, 0.03f);
+    c.arc( 0.28f, -0.04f, 0.56f, 180.0f, 270.0f);
+    c.arc( 0.00f, -0.04f, 0.28f,  90.0f, 180.0f);
+    c.arc( 0.00f,  0.10f, 0.14f,   0.0f,  90.0f);
+    c.line(-0.28f, -0.04f, 0.28f, -0.04f);
+}
+
 void draw_generic_server(const Canvas& c) {
     // Torre de servidor: tres modulos empilhados, cada um com seu LED.
     //
@@ -701,6 +1282,8 @@ void draw_generic_server(const Canvas& c) {
 Icon driver_icon(std::string_view driver_id) noexcept {
     if (driver_id == "postgresql") return Icon::pg_server;
     if (driver_id == "mysql" || driver_id == "mariadb") return Icon::my_server;
+    if (driver_id == "sqlserver" || driver_id == "mssql") return Icon::ms_server;
+    if (driver_id == "sqlanywhere") return Icon::sa_server;
     return Icon::generic_server;
 }
 
@@ -734,6 +1317,42 @@ void draw_icon(Icon icon, const ImVec2& center, float size, std::uint32_t color,
 
 void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
                   std::uint32_t color, float thickness) {
+    // O original do DBeaver, quando o conjunto ativo e' o dele e o icone tem
+    // equivalente. A imagem ocupa um pouco mais que `size`: os vetoriais
+    // deixam margem dentro da caixa, e os SVG de 16 px do DBeaver a ocupam
+    // quase inteira -- no mesmo `size` eles pareceriam menores.
+    //
+    // O lado e a posicao sao arredondados para pixel inteiro: uma imagem de
+    // 16 px desenhada em 15,6 borra.
+    const int pixels = static_cast<int>(size * 1.12f + 0.5f);
+    if (const ImTextureID texture = icon_texture(icon, pixels)) {
+        const ImVec2 min(static_cast<float>(static_cast<int>(center.x - pixels * 0.5f + 0.5f)),
+                         static_cast<float>(static_cast<int>(center.y - pixels * 0.5f + 0.5f)));
+        const ImVec2 max(min.x + static_cast<float>(pixels),
+                         min.y + static_cast<float>(pixels));
+
+        // A cor do icone e' a dele. Da cor pedida so' o ALFA e' aproveitado:
+        // e' como o botao desabilitado fica esmaecido.
+        const ImU32 alpha = (static_cast<ImU32>(color) >> IM_COL32_A_SHIFT) & 0xFFu;
+
+        // O logotipo da Sybase e' azul-marinho sobre transparente: foi feito
+        // para fundo claro, e num tema escuro vira uma mancha que nao se le'
+        // (visto na captura ampliada). O arquivo continua o original do
+        // DBeaver; num fundo escuro ele ganha uma placa clara por tras, que
+        // e' o fundo para o qual foi desenhado.
+        if (icon == Icon::sa_server) {
+            const ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+            if (0.2126f * bg.x + 0.7152f * bg.y + 0.0722f * bg.z < 0.5f) {
+                dl->AddRectFilled(ImVec2(min.x - 1.0f, min.y - 1.0f),
+                                  ImVec2(max.x + 1.0f, max.y + 1.0f),
+                                  IM_COL32(232, 236, 244, alpha), 3.0f);
+            }
+        }
+        dl->AddImage(texture, min, max, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+                     IM_COL32(255, 255, 255, alpha));
+        return;
+    }
+
     const Canvas c{dl, center, size, color, thickness};
 
     switch (icon) {
@@ -745,6 +1364,8 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::rollback:      draw_rollback(c);      break;
         case Icon::pg_server:      draw_pg_server(c);      break;
         case Icon::my_server:      draw_my_server(c);      break;
+        case Icon::ms_server:      draw_ms_server(c);      break;
+        case Icon::sa_server:      draw_sa_server(c);      break;
         case Icon::generic_server: draw_generic_server(c); break;
         case Icon::database:      draw_database(c);      break;
         case Icon::table:         draw_table(c);         break;
@@ -793,13 +1414,104 @@ void draw_icon_to(ImDrawList* dl, Icon icon, const ImVec2& center, float size,
         case Icon::event:             draw_event(c);             break;
         case Icon::user:              draw_user(c);              break;
         case Icon::grant:             draw_grant(c);             break;
+
+        case Icon::foreign_table: draw_foreign_table(c); break;
+        case Icon::aggregate: draw_aggregate(c); break;
+        case Icon::dependency: draw_dependency(c); break;
+        case Icon::rule: draw_rule(c); break;
+        case Icon::policy: draw_policy(c); break;
+        case Icon::inheritance: draw_inheritance(c); break;
+        case Icon::parameter: draw_parameter(c); break;
+        case Icon::event_trigger: draw_event_trigger(c); break;
+        case Icon::storage: draw_storage(c); break;
+        case Icon::foreign_wrapper: draw_foreign_wrapper(c); break;
+        case Icon::foreign_server: draw_foreign_server(c); break;
+        case Icon::user_mapping: draw_user_mapping(c); break;
+        case Icon::setting: draw_setting(c); break;
+        case Icon::role_group: draw_role_group(c); break;
+        case Icon::access_method: draw_access_method(c); break;
+        case Icon::operator_class: draw_operator_class(c); break;
+        case Icon::operator_family: draw_operator_family(c); break;
+        case Icon::encoding: draw_encoding(c); break;
+        case Icon::collation: draw_collation(c); break;
+        case Icon::language: draw_language(c); break;
+        case Icon::extension_available: draw_extension_available(c); break;
+        case Icon::administer: draw_administer(c); break;
+        case Icon::system_info: draw_system_info(c); break;
+        case Icon::sessions: draw_sessions(c); break;
+        case Icon::locks: draw_locks(c); break;
+        case Icon::synonym: draw_synonym(c); break;
+        case Icon::job: draw_job(c); break;
+        case Icon::job_step: draw_job_step(c); break;
+        case Icon::job_schedule: draw_job_schedule(c); break;
+        case Icon::play_new: draw_play_new(c); break;
+        case Icon::play_script: draw_play_script(c); break;
+        case Icon::plan: draw_plan(c); break;
+        case Icon::ai: draw_ai(c); break;
+        case Icon::terminal: draw_terminal(c); break;
+        case Icon::server_output: draw_server_output(c); break;
+        case Icon::exec_log: draw_exec_log(c); break;
+        case Icon::variables: draw_variables(c); break;
+        case Icon::outline: draw_outline(c); break;
+
+        case Icon::folder_database: draw_folder_marked(c, 1); break;
+        case Icon::folder_schema: draw_folder_marked(c, 2); break;
+        case Icon::folder_table: draw_folder_marked(c, 3); break;
+        case Icon::folder_view: draw_folder_marked(c, 4); break;
+        case Icon::folder_link: draw_folder_marked(c, 5); break;
+        case Icon::folder_user: draw_folder_marked(c, 6); break;
+        case Icon::folder_constraint: draw_folder_marked(c, 7); break;
+        case Icon::folder_columns: draw_folder_marked(c, 8); break;
+        case Icon::folder_admin: draw_folder_marked(c, 9); break;
+        case Icon::folder_info: draw_folder_marked(c, 10); break;
+        case Icon::object_page: draw_object_page(c); break;
+        case Icon::accept: draw_accept(c); break;
+        case Icon::reject: draw_reject(c); break;
+        case Icon::row_add: draw_row_add(c); break;
+        case Icon::row_copy: draw_row_copy(c); break;
+        case Icon::row_edit: draw_row_edit(c); break;
+        case Icon::row_delete: draw_row_delete(c); break;
+        case Icon::panels: draw_panels(c); break;
+        case Icon::panel_calc: draw_panel_calc(c); break;
+        case Icon::panel_grouping: draw_panel_grouping(c); break;
+        case Icon::panel_metadata: draw_panel_metadata(c); break;
+        case Icon::panel_references: draw_panel_references(c); break;
+        case Icon::filter_apply: draw_filter_apply(c); break;
+        case Icon::filter_reset: draw_filter_reset(c); break;
+        case Icon::filter_config: draw_filter_config(c); break;
+        case Icon::filter_value: draw_filter_value(c); break;
+        case Icon::grid_mode: draw_grid_mode(c); break;
     }
 }
 
+float tree_arrow_gap() {
+    // O TreeNode reserva FontSize + 2*FramePadding.x; o triangulo acaba a
+    // ~0,56 FontSize depois da primeira margem. O vao visivel ate' o icone
+    // e' o resto: 0,44 FontSize + FramePadding.x (15,5 px medidos na tela
+    // com fonte 15 e margem 9). Tira-se METADE dele.
+    //
+    // O primeiro pedido foi 75%; visto na tela, o usuario corrigiu para
+    // 50% -- a 4 px o icone parecia colado na seta.
+    const float gap =
+        ImGui::GetFontSize() * 0.44f + ImGui::GetStyle().FramePadding.x;
+    return -std::floor(gap * 0.50f + 0.5f);
+}
+
+void same_line_after_arrow() {
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + tree_arrow_gap());
+}
+
+float tree_label_gap() {
+    // Era 6. O desenho do icone ja' deixa ~1,5 px de margem dentro da propria
+    // caixa: com 2 aqui, o vao VISIVEL cai de 7 para 3,5 -- a metade pedida.
+    return 2.0f;
+}
+
 bool icon_button(const char* id, Icon icon, const char* tooltip, bool enabled,
-                 std::uint32_t tint) {
+                 std::uint32_t tint, float box) {
     const Palette& p = colors();
-    const float box = toolbar_button_size();
+    if (box <= 0.0f) box = toolbar_button_size();
 
     ImGui::BeginDisabled(!enabled);
 
@@ -831,8 +1543,12 @@ bool icon_button(const char* id, Icon icon, const char* tooltip, bool enabled,
 
     ImGui::EndDisabled();
 
-    if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
-        ImGui::SetTooltip("%s", tooltip);
+    // AllowWhenDisabled: dentro de BeginDisabled o item nunca conta como
+    // "hovered", e o botao desabilitado ficava sem tooltip -- justamente o
+    // que precisa dizer por que nao funciona.
+    if (tooltip != nullptr && tooltip[0] != '\0' &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        hint(tooltip);
     }
     return pressed && enabled;
 }
@@ -877,7 +1593,7 @@ bool icon_text_button(const char* id, Icon icon, const char* label,
     ImGui::EndDisabled();
 
     if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
-        ImGui::SetTooltip("%s", tooltip);
+        hint(tooltip);
     }
     return pressed && enabled;
 }

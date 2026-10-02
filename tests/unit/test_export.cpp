@@ -9,6 +9,9 @@
 #include "db/export.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -305,4 +308,153 @@ OTTER_TEST(export_handles_an_empty_result) {
     ExportOptions sql;
     sql.format = ExportFormat::sql_insert;
     OTTER_CHECK(export_to_string(rs, sql).empty());
+}
+
+// --- Exportacao em pedacos ----------------------------------------------------
+//
+// A consulta inteira e' lida do servidor aos poucos, e o arquivo sai de
+// varios ResultSets. O que quebra ai' e' a COSTURA: cabecalho repetido a
+// cada pedaco, virgula faltando (ou sobrando) entre dois pedacos do JSON.
+
+namespace {
+
+std::string read_file(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+}
+
+std::string temp_file(const char* name) {
+    return (std::filesystem::temp_directory_path() / name).string();
+}
+
+// O mesmo conteudo de uma vez e em dois pedacos: os arquivos tem de ser
+// iguais byte a byte.
+bool same_in_chunks(ExportFormat format) {
+    const std::vector<std::pair<std::string, DataKind>> columns = {
+        {"id", DataKind::integer}, {"nome", DataKind::string}};
+
+    ExportOptions options;
+    options.format                = format;
+    options.one_statement_per_row = true;
+
+    const ResultSet whole  = make_result(columns, {{"1", "ana"}, {"2", "bia"}, {"3", "caio"}});
+    const ResultSet first  = make_result(columns, {{"1", "ana"}, {"2", "bia"}});
+    const ResultSet second = make_result(columns, {{"3", "caio"}});
+
+    const std::string path = temp_file("otter-export-chunks.tmp");
+    ExportStream stream(options);
+    if (!stream.open(path)) return false;
+    if (!stream.write(first) || !stream.write(second) || !stream.finish()) return false;
+    if (stream.rows() != 3) return false;
+
+    const std::string chunked = read_file(path);
+    std::filesystem::remove(path);
+    return chunked == export_to_string(whole, options);
+}
+
+} // namespace
+
+OTTER_TEST(export_stream_chunks_make_one_file) {
+    OTTER_CHECK(same_in_chunks(ExportFormat::csv));
+    OTTER_CHECK(same_in_chunks(ExportFormat::json));
+    OTTER_CHECK(same_in_chunks(ExportFormat::sql_insert));
+    OTTER_CHECK(same_in_chunks(ExportFormat::html));
+    OTTER_CHECK(same_in_chunks(ExportFormat::xml));
+}
+
+OTTER_TEST(export_stream_json_of_an_empty_result_is_valid) {
+    ExportOptions options;
+    options.format = ExportFormat::json;
+
+    const std::string path = temp_file("otter-export-empty.tmp");
+    ExportStream stream(options);
+    OTTER_CHECK(stream.open(path).has_value());
+    OTTER_CHECK(stream.write(make_result({{"id", DataKind::integer}}, {})).has_value());
+    OTTER_CHECK(stream.finish().has_value());
+
+    OTTER_CHECK(read_file(path) == "[\n]\n");
+    std::filesystem::remove(path);
+}
+
+OTTER_TEST(export_stream_reports_a_path_it_cannot_write) {
+    ExportStream stream(ExportOptions{});
+    // Um DIRETORIO no lugar do arquivo: abrir para escrita falha.
+    OTTER_CHECK(!stream.open(std::filesystem::temp_directory_path().string()).has_value());
+}
+
+// --- HTML, XML e TXT ----------------------------------------------------------
+
+OTTER_TEST(export_html_escapes_markup) {
+    // Um valor com <script> nao pode virar script no relatorio.
+    ExportOptions options;
+    options.format = ExportFormat::html;
+
+    const std::string html = export_to_string(
+        make_result({{"a<b", DataKind::string}, {"n", DataKind::integer}},
+                    {{"<script>alert(1)</script> & \"x\"", "7"}, {"", ""}},
+                    {{1, 0}, {1, 1}}),
+        options);
+
+    OTTER_CHECK(has(html, "<th>a&lt;b</th>"));
+    OTTER_CHECK(has(html, "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;x&quot;"));
+    OTTER_CHECK(!has(html, "<script>"));
+    OTTER_CHECK(has(html, "<td class=\"n\">7</td>"));       // numero a' direita
+    OTTER_CHECK(has(html, "<td class=\"null\">NULL</td>"));  // NULL nao e' ''
+    OTTER_CHECK(has(html, "</table>"));
+    OTTER_CHECK(has(html, "charset=\"utf-8\""));
+}
+
+OTTER_TEST(export_xml_is_well_formed) {
+    ExportOptions options;
+    options.format = ExportFormat::xml;
+
+    const std::string xml = export_to_string(
+        make_result({{"valor total", DataKind::numeric}, {"1a", DataKind::string},
+                     {"obs", DataKind::string}},
+                    {{"10.5", "a & b <c>", ""}},
+                    {{0, 2}}),
+        options);
+
+    OTTER_CHECK(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+    // Nome de coluna com espaco, ou comecando por digito, nao e' nome de
+    // elemento: um XML assim nao abre em leitor nenhum.
+    OTTER_CHECK(has(xml, "<valor_total>10.5</valor_total>"));
+    OTTER_CHECK(has(xml, "<_a>a &amp; b &lt;c&gt;</_a>"));
+    OTTER_CHECK(has(xml, "<obs null=\"true\"/>"));
+    OTTER_CHECK(has(xml, "<DATA_RECORD>"));
+    OTTER_CHECK(xml.ends_with("</data>\n"));
+}
+
+OTTER_TEST(export_xml_drops_control_characters) {
+    // U+0001 e' invalido em XML 1.0, mesmo escapado.
+    ExportOptions options;
+    options.format = ExportFormat::xml;
+    const std::string xml = export_to_string(
+        make_result({{"t", DataKind::string}}, {{std::string("a\x01" "b")}}), options);
+    OTTER_CHECK(has(xml, "<t>a b</t>"));
+}
+
+OTTER_TEST(export_txt_aligns_by_characters_not_bytes) {
+    ExportOptions options;
+    options.format = ExportFormat::txt;
+
+    const std::string txt = export_to_string(
+        make_result({{"nome", DataKind::string}, {"n", DataKind::integer}},
+                    {{"a\xC3\xA7\xC3\xA3o", "5"}, {"xy", "123"}}),
+        options);
+
+    // "ação" tem 4 letras e 6 bytes: medida em bytes, a borda da linha de
+    // "xy" sairia duas colunas a' direita.
+    OTTER_CHECK(has(txt, "| a\xC3\xA7\xC3\xA3o |   5 |\n"));
+    OTTER_CHECK(has(txt, "| xy   | 123 |\n"));
+    OTTER_CHECK(has(txt, "+------+-----+\n"));
+}
+
+OTTER_TEST(export_every_format_has_a_name_and_an_extension) {
+    for (int f = 0; f <= static_cast<int>(ExportFormat::txt); ++f) {
+        const auto format = static_cast<ExportFormat>(f);
+        OTTER_CHECK(to_string(format) != "unknown");
+        OTTER_CHECK(file_extension(format).starts_with("."));
+    }
 }

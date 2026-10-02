@@ -31,6 +31,10 @@ enum class QuoteStyle : std::uint8_t {
     double_quotes,   // "nome" -- PostgreSQL, padrao SQL
     backticks,       // `nome` -- MySQL, MariaDB
     brackets,        // [nome] -- SQL Server
+    // "nome", como o PostgreSQL -- mas e' o SQL Anywhere: TOP em vez de LIMIT,
+    // bit em vez de boolean, ALTER TABLE com a gramatica dele. O nome do
+    // enum e' "estilo de citacao" por historia; ele identifica o SGBD.
+    anywhere,
 };
 
 void set_sql_dialect(QuoteStyle style);
@@ -38,6 +42,12 @@ void set_sql_dialect(QuoteStyle style);
 
 // Define o dialeto a partir do identificador de driver do perfil.
 void set_sql_dialect_for(std::string_view driver_id);
+
+// Os comandos que abrem e fecham a transacao de um script gerado (DDL de
+// varias instrucoes, gravacao da grade). No T-SQL "BEGIN" sozinho abre um
+// BLOCO, nao uma transacao -- e "COMMIT" sem transacao e' erro.
+[[nodiscard]] std::string_view transaction_begin_sql() noexcept;
+[[nodiscard]] std::string_view transaction_commit_sql() noexcept;
 
 // Escapa um identificador quando ele precisa: nome com maiuscula, espaco ou
 // palavra reservada sai entre aspas duplas.

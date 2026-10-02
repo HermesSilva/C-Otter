@@ -18,6 +18,7 @@ CMakeUserPresets.json
 # Ferramentas
 .cache/
 .idea/
+__pycache__/
 *.swp
 *~
 
@@ -27,3 +28,6 @@ CMakeUserPresets.json
 
 # Layout das janelas do ImGui: estado local, nao do projeto.
 imgui.ini
+
+# Dados do programa (ADR 0020): conexoes e SENHAS de quem o executou.
+.C-Otter/

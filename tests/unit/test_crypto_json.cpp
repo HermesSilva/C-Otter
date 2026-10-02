@@ -102,6 +102,58 @@ OTTER_TEST(aes_matches_the_nist_cbc_vector) {
                                "5086cb9b507219ee95db113a917678b2"});
 }
 
+// --- CFB8: os vetores do NIST SP 800-38A (F.3.7, F.3.9, F.3.11) -------------------
+//
+// E' o modo com que o pgAdmin cifra as senhas (db/connection_import). As tres
+// larguras de chave, porque a expansao da de 192 e a da de 256 bits tem
+// passos que a de 128 nao tem.
+
+OTTER_TEST(aes_cfb8_matches_the_nist_vectors) {
+    const crypto::AesIv iv = [] {
+        crypto::AesIv out{};
+        const std::vector<std::uint8_t> bytes = from_hex("000102030405060708090a0b0c0d0e0f");
+        std::copy(bytes.begin(), bytes.end(), out.begin());
+        return out;
+    }();
+    const std::vector<std::uint8_t> plain = from_hex("6bc1bee22e409f96e93d7e117393172aae2d");
+
+    struct Vector { const char* key; const char* cipher; };
+    const Vector vectors[] = {
+        {"2b7e151628aed2a6abf7158809cf4f3c", "3b79424c9c0dd436bace9e0ed4586a4f32b9"},
+        {"8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
+         "cda2521ef0a905ca44cd057cbf0d47a0678a"},
+        {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+         "dc1f1a8520a64db55fcc8ac554844e889700"},
+    };
+    for (const Vector& vector : vectors) {
+        const std::vector<std::uint8_t> key = from_hex(vector.key);
+
+        const auto encrypted = crypto::aes_cfb8_encrypt(plain, key, iv);
+        OTTER_CHECK(encrypted.has_value());
+        // IV na frente, e o texto cifrado do tamanho do texto: sem padding.
+        OTTER_CHECK_EQ(encrypted->size(), std::size_t{16} + plain.size());
+        OTTER_CHECK_EQ(to_hex(std::span<const std::uint8_t>(*encrypted).subspan(16)),
+                       std::string(vector.cipher));
+
+        const auto decrypted = crypto::aes_cfb8_decrypt(*encrypted, key);
+        OTTER_CHECK(decrypted.has_value());
+        OTTER_CHECK_EQ(to_hex(*decrypted), to_hex(plain));
+    }
+}
+
+OTTER_TEST(aes_cfb8_rejects_a_key_of_the_wrong_size_and_a_short_input) {
+    const std::vector<std::uint8_t> short_key = from_hex("00112233");
+    const std::vector<std::uint8_t> key = from_hex("2b7e151628aed2a6abf7158809cf4f3c");
+    const std::vector<std::uint8_t> input = from_hex("000102030405060708090a0b0c0d0e0f00");
+
+    OTTER_CHECK(!crypto::aes_cfb8_decrypt(input, short_key).has_value());
+    OTTER_CHECK(!crypto::aes_cfb8_decrypt(from_hex("0001"), key).has_value());
+    // So' o IV, sem texto: resultado vazio, nao erro.
+    const auto empty = crypto::aes_cfb8_decrypt(
+        std::span<const std::uint8_t>(input).first(16), key);
+    OTTER_CHECK(empty.has_value() && empty->empty());
+}
+
 OTTER_TEST(aes_round_trips_text) {
     const crypto::AesKey key = key_from_hex("ffeeddccbbaa99887766554433221100");
     const crypto::AesIv iv = *crypto::random_iv();

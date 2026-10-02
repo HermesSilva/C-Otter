@@ -2,7 +2,9 @@
 
 #include "base/aes.hpp"
 #include "base/json.hpp"
+#include "base/paths.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -110,11 +112,27 @@ constexpr DriverMapping kDriverMappings[] = {
     {"sqlite",     "",  "SQLite driver is not implemented yet"},
     {"generic",    "",  "generic JDBC has no equivalent without a JVM"},
     {"oracle",     "",  "Oracle driver is planned for a later phase"},
-    {"mssql",      "",  "SQL Server driver is planned for a later phase"},
-    {"sqlserver",  "",  "SQL Server driver is planned for a later phase"},
+    {"mssql",      "sqlserver", ""},
+    {"sqlserver",  "sqlserver", ""},
+    {"sqlanywhere", "sqlanywhere", ""},
 };
 
+// Os drivers Sybase do DBeaver ("sybase_jtds", "sybase_jconn" e "sypase_jconn"
+// -- o erro de grafia e' do plugin.xml dele) moram no provider "mssql", junto
+// do SQL Server, mas falam TDS 5.0, nao o 7.x. O que decide o protocolo aqui
+// e' o DRIVER: mapea-los pelo provider os mandaria ao driver do SQL Server,
+// que nem passa do login.
+bool is_sybase_driver(std::string_view driver) noexcept {
+    return driver.starts_with("sybase") || driver.starts_with("sypase");
+}
+
 void apply_driver(StoredProfile& stored) {
+    if (is_sybase_driver(stored.driver)) {
+        stored.supported = true;
+        stored.profile.driver_id = "sqlanywhere";
+        return;
+    }
+
     for (const DriverMapping& mapping : kDriverMappings) {
         if (stored.provider != mapping.provider) continue;
 
@@ -134,6 +152,16 @@ void apply_driver(StoredProfile& stored) {
     stored.supported = false;
     stored.unsupported_reason = "this database is not supported yet";
 }
+
+// PostgreConstants.PROP_SHOW_* do DBeaver ("@dbeaver-" + nome + "@").
+constexpr const char* kShowNonDefaultDb  = "@dbeaver-show-non-default-db@";
+constexpr const char* kShowTemplateDb    = "@dbeaver-show-template-db@";
+constexpr const char* kShowUnavailableDb = "@dbeaver-show-unavailable-db@";
+// PostgreConstants.PROP_CHOSEN_ROLE: a role do "SET ROLE" ao conectar.
+constexpr const char* kChosenRole        = "@dbeaver-chosen-role@";
+// SQLServerConstants.PROP_AUTHENTICATION: "SQL_SERVER_PASSWORD" ou
+// "WINDOWS_INTEGRATED" (os nomes do enum SQLServerAuthentication).
+constexpr const char* kMssqlAuthentication = "@dbeaver-authentication@";
 
 ConnectionType type_from_string(std::string_view text) noexcept {
     if (text == "prod" || text == "production") return ConnectionType::production;
@@ -258,8 +286,74 @@ StoredProfile profile_from_json(const std::string& id,
         profile.auto_commit = config["auto-commit"].as_bool();
     }
 
+    // RegistryConstants do DBeaver: "keepAlive" e "closeIdle" em SEGUNDOS;
+    // keepAlive > 0 e' o que liga o ping (la' nao ha' caixa separada).
+    if (const std::int64_t seconds = config["keepAlive"].as_int(0); seconds > 0) {
+        profile.keep_alive          = true;
+        profile.keep_alive_interval = std::chrono::seconds(seconds);
+    }
+    if (const std::int64_t seconds = config["closeIdle"].as_int(0); seconds > 0) {
+        profile.close_idle_interval = std::chrono::seconds(seconds);
+    }
+
+    // "bootstrap": o que roda ao conectar. Estes campos existiam no dialogo e
+    // NAO eram gravados -- o schema padrao e as consultas de inicializacao
+    // morriam ao fechar o programa (diretiva 6).
+    if (const json::Value& bootstrap = config["bootstrap"]; bootstrap.is_object()) {
+        if (bootstrap["autocommit"].kind() == json::Kind::boolean) {
+            profile.auto_commit = bootstrap["autocommit"].as_bool();
+        }
+        profile.default_schema =
+            std::string(bootstrap["defaultSchema"].as_string());
+        if (profile.default_schema.empty()) {
+            // No MySQL o DBeaver grava o banco padrao como catalogo.
+            profile.default_schema =
+                std::string(bootstrap["defaultCatalog"].as_string());
+        }
+        profile.ignore_bootstrap_errors = bootstrap["ignoreErrors"].as_bool();
+
+        std::string queries;
+        for (const json::Value& query : bootstrap["query"].as_array()) {
+            if (!queries.empty()) queries += '\n';
+            queries += query.as_string();
+        }
+        profile.bootstrap_queries = std::move(queries);
+    }
+
     for (const auto& [key, value] : config["properties"].as_object()) {
         profile.driver_properties[key] = std::string(value.as_string());
+    }
+
+    // Opcoes da arvore do PostgreSQL. As chaves e os valores ("true" como
+    // TEXTO) sao os do DBeaver -- PostgreConstants.PROP_SHOW_*, conferidos num
+    // data-sources.json real --, para que um perfil importado traga
+    // "Show all databases" como estava la'.
+    //
+    // Nao eram lidas nem gravadas: as caixas do dialogo existiam e o valor
+    // morria ao fechar o programa (diretiva 6).
+    const json::Value& provider = config["provider-properties"];
+    const auto provider_flag = [&provider](const char* key) {
+        return provider[key].as_string() == "true";
+    };
+    profile.postgres.show_non_default_databases =
+        provider_flag(kShowNonDefaultDb);
+    profile.postgres.show_template_databases = provider_flag(kShowTemplateDb);
+    profile.postgres.show_unavailable_databases =
+        provider_flag(kShowUnavailableDb);
+    profile.postgres.session_role =
+        std::string(provider[kChosenRole].as_string());
+
+    // SQL Server: autenticacao do Windows. Sem a propriedade (perfil vindo do
+    // SSMS, ou gravado antes dela existir), usuario vazio quer dizer a conta
+    // do Windows -- nao ha' login por senha sem usuario.
+    if ((stored.provider == "sqlserver" || stored.provider == "mssql") &&
+        !is_sybase_driver(stored.driver)) {
+        const std::string_view authentication =
+            provider[kMssqlAuthentication].as_string();
+        if (authentication == "WINDOWS_INTEGRATED" ||
+            (authentication.empty() && profile.user.empty())) {
+            profile.auth_model = AuthModel::windows;
+        }
     }
 
     // SSL. No DBeaver e' um "handler" de rede, com id por driver e chaves
@@ -297,6 +391,47 @@ StoredProfile profile_from_json(const std::string& id,
         break;
     }
 
+    // Tunel SSH e proxy SOCKS: handlers "ssh_tunnel" e "socks_proxy", com as
+    // chaves de SSHConstants / SocksConstants. As abas existiam, a conexao as
+    // usava, e o perfil era gravado SEM elas -- o tunel sumia ao reabrir.
+    if (const json::Value& ssh = handlers["ssh_tunnel"]; ssh.is_object()) {
+        const json::Value& properties = ssh["properties"];
+        profile.ssh.enabled = ssh["enabled"].as_bool();
+        profile.ssh.host    = std::string(properties["host"].as_string());
+        if (const std::int64_t value = properties["port"].as_int(0);
+            value > 0 && value <= 65535) {
+            profile.ssh.port = static_cast<std::uint16_t>(value);
+        }
+        profile.ssh.user          = std::string(ssh["user"].as_string());
+        profile.ssh.save_password = ssh["save-password"].as_bool();
+
+        const std::string_view auth = properties["authType"].as_string();
+        profile.ssh.auth = auth == "PUBLIC_KEY" ? SshAuthType::public_key
+                         : auth == "AGENT"      ? SshAuthType::agent
+                                                : SshAuthType::password;
+        profile.ssh.private_key_path =
+            std::string(properties["keyPath"].as_string());
+
+        // Milissegundos no DBeaver, segundos no perfil.
+        if (const std::int64_t ms = properties["aliveInterval"].as_int(0); ms > 0) {
+            profile.ssh.keep_alive = std::chrono::seconds(ms / 1000);
+        }
+        if (const std::int64_t ms = properties["sshConnectTimeout"].as_int(0);
+            ms > 0) {
+            profile.ssh.connect_timeout = std::chrono::seconds(ms / 1000);
+        }
+    }
+    if (const json::Value& socks = handlers["socks_proxy"]; socks.is_object()) {
+        const json::Value& properties = socks["properties"];
+        profile.proxy.enabled = socks["enabled"].as_bool();
+        profile.proxy.host = std::string(properties["socks-host"].as_string());
+        if (const std::int64_t value = properties["socks-port"].as_int(0);
+            value > 0 && value <= 65535) {
+            profile.proxy.port = static_cast<std::uint16_t>(value);
+        }
+        profile.proxy.user = std::string(socks["user"].as_string());
+    }
+
     apply_driver(stored);
 
     // Guarda o no' inteiro: regravar um perfil importado nao deve apagar
@@ -322,6 +457,46 @@ json::Value profile_to_json(const StoredProfile& stored) {
     if (profile.read_only) config["read-only"] = json::Value(true);
     if (profile.close_idle_connections) {
         config["closeIdleConnection"] = json::Value(true);
+        config["closeIdle"] = json::Value(
+            static_cast<double>(profile.close_idle_interval.count()));
+    }
+    if (profile.keep_alive && profile.keep_alive_interval.count() > 0) {
+        config["keepAlive"] = json::Value(
+            static_cast<double>(profile.keep_alive_interval.count()));
+    }
+
+    // "bootstrap", no formato de DataSourceSerializerModern. So' quando ha' o
+    // que dizer, como o DBeaver (bootstrap.hasData()).
+    {
+        json::Object bootstrap;
+        if (!profile.default_schema.empty()) {
+            bootstrap[stored.provider == "mysql" ? "defaultCatalog"
+                                                 : "defaultSchema"] =
+                json::Value(profile.default_schema);
+        }
+        if (profile.ignore_bootstrap_errors) {
+            bootstrap["ignoreErrors"] = json::Value(true);
+        }
+
+        json::Array queries;
+        std::string_view rest = profile.bootstrap_queries;
+        while (!rest.empty()) {
+            const std::size_t end = rest.find('\n');
+            std::string_view line =
+                rest.substr(0, end == std::string_view::npos ? rest.size() : end);
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+                line.remove_suffix(1);
+            }
+            if (!line.empty()) queries.emplace_back(std::string(line));
+            if (end == std::string_view::npos) break;
+            rest.remove_prefix(end + 1);
+        }
+        if (!queries.empty()) bootstrap["query"] = json::Value(std::move(queries));
+
+        if (!bootstrap.empty()) {
+            bootstrap["autocommit"] = json::Value(profile.auto_commit);
+            config["bootstrap"] = json::Value(std::move(bootstrap));
+        }
     }
 
     // url no formato JDBC: o DBeaver a usa para exibir e reconectar. Escrever
@@ -338,9 +513,25 @@ json::Value profile_to_json(const StoredProfile& stored) {
       : stored.provider.empty()      ? "postgresql"
                                      : stored.provider;
 
-    config["url"] = json::Value(
-        "jdbc:" + scheme + "://" + profile.host + ":" +
-        std::to_string(profile.port) + "/" + profile.database);
+    // O SQL Anywhere e' gravado como o DBeaver o alcanca: o driver "Sybase
+    // jConnect", cuja url leva o banco em ServiceName.
+    if (profile.driver_id == "sqlanywhere") {
+        config["url"] = json::Value(
+            "jdbc:sybase:Tds:" + profile.host + ":" + std::to_string(profile.port) +
+            (profile.database.empty() ? std::string{}
+                                      : "?ServiceName=" + profile.database));
+    } else
+    // O SQL Server tem forma propria: ";databaseName=", nao "/banco".
+    if (scheme == "sqlserver" || scheme == "mssql") {
+        config["url"] = json::Value(
+            "jdbc:sqlserver://" + profile.host + ":" + std::to_string(profile.port) +
+            (profile.database.empty() ? std::string{}
+                                      : ";databaseName=" + profile.database));
+    } else {
+        config["url"] = json::Value(
+            "jdbc:" + scheme + "://" + profile.host + ":" +
+            std::to_string(profile.port) + "/" + profile.database);
+    }
 
     if (!profile.driver_properties.empty()) {
         json::Object properties;
@@ -350,9 +541,33 @@ json::Value profile_to_json(const StoredProfile& stored) {
         config["properties"] = json::Value(std::move(properties));
     }
 
+    // So' as ligadas: ausente e' o padrao (falso) nos dois programas.
+    {
+        json::Object provider;
+        const auto put = [&provider](const char* key, bool value) {
+            if (value) provider[key] = json::Value(std::string("true"));
+        };
+        put(kShowNonDefaultDb,  profile.postgres.show_non_default_databases);
+        put(kShowTemplateDb,    profile.postgres.show_template_databases);
+        put(kShowUnavailableDb, profile.postgres.show_unavailable_databases);
+        if (!profile.postgres.session_role.empty()) {
+            provider[kChosenRole] = json::Value(profile.postgres.session_role);
+        }
+        if ((stored.provider == "sqlserver" || stored.provider == "mssql") &&
+            profile.driver_id != "sqlanywhere") {
+            provider[kMssqlAuthentication] = json::Value(std::string(
+                profile.auth_model == AuthModel::windows ? "WINDOWS_INTEGRATED"
+                                                         : "SQL_SERVER_PASSWORD"));
+        }
+        if (!provider.empty()) {
+            config["provider-properties"] = json::Value(std::move(provider));
+        }
+    }
+
     // SSL no formato do handler do DBeaver. Gravar so' quando ligado: o
     // DBeaver tambem omite handler desabilitado, e um handler vazio no
     // arquivo aparece como aba configurada na tela dele.
+    json::Object handlers;
     if (profile.ssl.enabled) {
         const bool is_mysql = stored.provider == "mysql";
 
@@ -385,11 +600,55 @@ json::Value profile_to_json(const StoredProfile& stored) {
         handler["enabled"]    = json::Value(true);
         handler["properties"] = json::Value(std::move(properties));
 
-        json::Object handlers;
         handlers[is_mysql ? "mysql_ssl" : "postgre_ssl"] =
             json::Value(std::move(handler));
-        config["handlers"] = json::Value(std::move(handlers));
     }
+
+    // Tunel e proxy: gravados mesmo desligados quando ha' host -- quem
+    // desmarca a caixa para testar sem o tunel nao quer redigitar tudo. As
+    // SENHAS vao para o arquivo de credenciais, nunca para este.
+    if (!profile.ssh.host.empty()) {
+        json::Object properties;
+        properties["host"] = json::Value(profile.ssh.host);
+        properties["port"] = json::Value(static_cast<double>(profile.ssh.port));
+        properties["authType"] = json::Value(std::string(
+            profile.ssh.auth == SshAuthType::public_key ? "PUBLIC_KEY"
+          : profile.ssh.auth == SshAuthType::agent      ? "AGENT"
+                                                        : "PASSWORD"));
+        if (!profile.ssh.private_key_path.empty()) {
+            properties["keyPath"] = json::Value(profile.ssh.private_key_path);
+        }
+        properties["aliveInterval"] = json::Value(
+            static_cast<double>(profile.ssh.keep_alive.count() * 1000));
+        properties["sshConnectTimeout"] = json::Value(
+            static_cast<double>(profile.ssh.connect_timeout.count() * 1000));
+
+        json::Object handler;
+        handler["type"]    = json::Value(std::string("TUNNEL"));
+        handler["enabled"] = json::Value(profile.ssh.enabled);
+        if (!profile.ssh.user.empty()) {
+            handler["user"] = json::Value(profile.ssh.user);
+        }
+        handler["save-password"] = json::Value(profile.ssh.save_password);
+        handler["properties"]    = json::Value(std::move(properties));
+        handlers["ssh_tunnel"]   = json::Value(std::move(handler));
+    }
+    if (!profile.proxy.host.empty()) {
+        json::Object properties;
+        properties["socks-host"] = json::Value(profile.proxy.host);
+        properties["socks-port"] =
+            json::Value(static_cast<double>(profile.proxy.port));
+
+        json::Object handler;
+        handler["type"]    = json::Value(std::string("PROXY"));
+        handler["enabled"] = json::Value(profile.proxy.enabled);
+        if (!profile.proxy.user.empty()) {
+            handler["user"] = json::Value(profile.proxy.user);
+        }
+        handler["properties"]   = json::Value(std::move(properties));
+        handlers["socks_proxy"] = json::Value(std::move(handler));
+    }
+    if (!handlers.empty()) config["handlers"] = json::Value(std::move(handlers));
 
     json::Object node;
     node["provider"] = json::Value(
@@ -541,18 +800,44 @@ Status write_credentials(const StoreLocation& location,
     json::Object root;
 
     for (const StoredProfile& stored : profiles) {
-        if (!stored.profile.save_password) continue;
-        if (stored.profile.password.empty()) continue;
-
-        json::Object connection;
-        if (!stored.profile.user.empty()) {
-            connection["user"] = json::Value(stored.profile.user);
-        }
-        connection["password"] = json::Value(stored.profile.password);
-
+        const ConnectionProfile& profile = stored.profile;
         json::Object entry;
-        entry["#connection"] = json::Value(std::move(connection));
-        root[stored.id] = json::Value(std::move(entry));
+
+        if (profile.save_password && !profile.password.empty()) {
+            json::Object connection;
+            if (!profile.user.empty()) {
+                connection["user"] = json::Value(profile.user);
+            }
+            connection["password"] = json::Value(profile.password);
+            entry["#connection"] = json::Value(std::move(connection));
+        }
+
+        // Senhas dos handlers de rede, sob "network/<id>" como no DBeaver.
+        // A do tunel so' com "salvar senha" da aba SSH; a frase da chave vai
+        // no mesmo campo `password`, que e' onde o DBeaver a guarda.
+        if (profile.ssh.save_password) {
+            const std::string& secret =
+                profile.ssh.auth == SshAuthType::public_key ? profile.ssh.passphrase
+                                                            : profile.ssh.password;
+            if (!secret.empty()) {
+                json::Object ssh;
+                if (!profile.ssh.user.empty()) {
+                    ssh["user"] = json::Value(profile.ssh.user);
+                }
+                ssh["password"] = json::Value(secret);
+                entry["network/ssh_tunnel"] = json::Value(std::move(ssh));
+            }
+        }
+        if (profile.save_password && !profile.proxy.password.empty()) {
+            json::Object socks;
+            if (!profile.proxy.user.empty()) {
+                socks["user"] = json::Value(profile.proxy.user);
+            }
+            socks["password"] = json::Value(profile.proxy.password);
+            entry["network/socks_proxy"] = json::Value(std::move(socks));
+        }
+
+        if (!entry.empty()) root[stored.id] = json::Value(std::move(entry));
     }
 
     // Nenhuma senha a guardar: apaga o arquivo em vez de deixar um vazio
@@ -586,7 +871,30 @@ bool StoreLocation::exists() const {
 }
 
 StoreLocation otter_store_location() {
+    return location_from_directory(fs::path(data_directory()));
+}
+
+StoreLocation legacy_store_location() {
     return location_from_directory(user_config_root() / "C-Otter");
+}
+
+bool import_legacy_store(const StoreLocation& from, const StoreLocation& to) {
+    if (to.exists() || !from.exists()) return false;
+
+    std::error_code ec;
+    fs::create_directories(to.directory, ec);
+    if (ec) return false;
+
+    fs::copy_file(from.data_sources, to.data_sources,
+                  fs::copy_options::skip_existing, ec);
+    if (ec) return false;
+
+    // As senhas sao opcionais: um perfil pode nao ter nenhuma salva.
+    if (fs::exists(from.credentials, ec)) {
+        fs::copy_file(from.credentials, to.credentials,
+                      fs::copy_options::skip_existing, ec);
+    }
+    return true;
 }
 
 std::vector<StoreLocation> dbeaver_store_locations() {
@@ -640,6 +948,21 @@ Result<std::vector<StoredProfile>> load_profiles(const StoreLocation& location) 
             stored.profile.password = std::string(entry["password"].as_string());
         }
 
+        if (const json::Value& ssh = credentials[id]["network/ssh_tunnel"];
+            !ssh.is_null()) {
+            SshTunnelConfig& tunnel = stored.profile.ssh;
+            if (tunnel.user.empty()) tunnel.user = std::string(ssh["user"].as_string());
+            (tunnel.auth == SshAuthType::public_key ? tunnel.passphrase
+                                                    : tunnel.password) =
+                std::string(ssh["password"].as_string());
+        }
+        if (const json::Value& socks = credentials[id]["network/socks_proxy"];
+            !socks.is_null()) {
+            ProxyConfig& proxy = stored.profile.proxy;
+            if (proxy.user.empty()) proxy.user = std::string(socks["user"].as_string());
+            proxy.password = std::string(socks["password"].as_string());
+        }
+
         profiles.push_back(std::move(stored));
     }
     return profiles;
@@ -649,6 +972,13 @@ ProviderNames provider_for_driver(std::string_view driver_id) noexcept {
     // Os nomes de driver sao os que o DBeaver grava -- "mysql8" e
     // "postgres-jdbc" --, para que um perfil criado aqui abra la'.
     if (driver_id == "mysql") return {"mysql", "mysql8"};
+    if (driver_id == "sqlserver" || driver_id == "mssql") {
+        return {"sqlserver", "microsoft"};
+    }
+    // O DBeaver nao tem driver de SQL Anywhere: quem o usa la' conecta pelo
+    // "Sybase jConnect", do plugin do SQL Server. E' o par que faz um perfil
+    // criado aqui abrir la'.
+    if (driver_id == "sqlanywhere") return {"mssql", "sybase_jconn"};
 
     // O padrao e' PostgreSQL, que e' o driver padrao do ConnConfig. Um
     // driver desconhecido gravado como PostgreSQL e' melhor que um provider
@@ -677,8 +1007,24 @@ Status save_profiles(const StoreLocation& location,
         connections[stored.id] = profile_to_json(stored);
     }
 
+    // As pastas, como o DBeaver as grava: uma entrada por CAMINHO
+    // ("Clientes/Producao"), os ancestrais incluidos. Ficava sempre vazio --
+    // o DBeaver recria a pasta a partir do campo `folder` da conexao, mas uma
+    // ferramenta que leia so' esta lista nao veria nenhuma.
+    json::Object folders;
+    for (const StoredProfile& stored : with_ids) {
+        const std::string& path = stored.profile.folder;
+        for (std::size_t slash = path.find('/');; slash = path.find('/', slash + 1)) {
+            const std::string part = path.substr(0, slash);
+            if (!part.empty() && folders.find(part) == folders.end()) {
+                folders[part] = json::Value(json::Object{});
+            }
+            if (slash == std::string::npos) break;
+        }
+    }
+
     json::Object root;
-    root["folders"]     = json::Value(json::Object{});
+    root["folders"]     = json::Value(std::move(folders));
     root["connections"] = json::Value(std::move(connections));
 
     OTTER_RETURN_IF_ERROR(write_file(
@@ -686,5 +1032,49 @@ Status save_profiles(const StoreLocation& location,
 
     return write_credentials(location, with_ids);
 }
+
+std::string unique_name(std::string_view wanted,
+                        const std::vector<std::string>& taken) {
+    const auto used = [&taken](std::string_view name) {
+        return std::find(taken.begin(), taken.end(), name) != taken.end();
+    };
+    if (!used(wanted)) return std::string(wanted);
+
+    for (std::size_t n = 1;; ++n) {
+        std::string candidate = std::string(wanted) + "_" + std::to_string(n);
+        if (!used(candidate)) return candidate;
+    }
+}
+
+std::size_t make_names_unique(std::vector<StoredProfile>& profiles) {
+    std::vector<std::string> taken;
+    taken.reserve(profiles.size());
+
+    // Os nomes de TODOS entram antes de renomear: senao o segundo "x" viraria
+    // "x_1" mesmo que um "x_1" legitimo viesse depois na lista, e os dois
+    // colidiriam.
+    for (const StoredProfile& stored : profiles) {
+        taken.push_back(stored.profile.effective_name());
+    }
+
+    std::size_t renamed = 0;
+    for (std::size_t i = 0; i < profiles.size(); ++i) {
+        const std::string current = profiles[i].profile.effective_name();
+        const bool repeated =
+            std::find(taken.begin(), taken.begin() + static_cast<std::ptrdiff_t>(i),
+                      current) != taken.begin() + static_cast<std::ptrdiff_t>(i);
+        if (!repeated) continue;
+
+        const std::string fresh = unique_name(current, taken);
+        profiles[i].profile.name = fresh;
+        taken[i] = fresh;
+        ++renamed;
+    }
+    return renamed;
+}
+
+void resolve_driver(StoredProfile& stored) { apply_driver(stored); }
+
+std::string user_config_directory() { return user_config_root().string(); }
 
 } // namespace otter::db

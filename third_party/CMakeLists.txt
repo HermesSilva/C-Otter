@@ -74,3 +74,21 @@ else()
 endif()
 
 set_target_properties(texteditor PROPERTIES FOLDER "third_party")
+
+# --- nanosvg ------------------------------------------------------------------
+# Licenca zlib -- compativel com link estatico (ADR 0002). So' cabecalhos;
+# nanosvg_impl.cpp e' o ponto de montagem. Rasteriza os icones originais do
+# DBeaver (SVG) no tamanho exato do DPI. Fixada no commit
+# 239e102ec2c691f2902e20ace2ed36ee4a35cfe6 de github.com/memononen/nanosvg.
+add_library(nanosvg STATIC nanosvg/nanosvg_impl.cpp)
+
+target_include_directories(nanosvg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/nanosvg)
+
+if(MSVC)
+    target_compile_options(nanosvg PRIVATE /W0)
+else()
+    target_compile_options(nanosvg PRIVATE -w)
+    target_link_libraries(nanosvg PUBLIC m)
+endif()
+
+set_target_properties(nanosvg PROPERTIES FOLDER "third_party")

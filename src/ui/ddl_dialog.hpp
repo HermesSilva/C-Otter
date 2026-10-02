@@ -33,6 +33,15 @@ public:
     // Desenha. Devolve verdadeiro se executou neste quadro.
     bool draw(bool can_execute, bool ddl_in_transaction);
 
+    // Confirma como o botao "Execute", com "I understand" marcado. Para a
+    // conferencia automatizada (OTTER_COMMAND_FILE): o clique no botao e' o
+    // que a automacao nao alcanca sem tomar o mouse do usuario.
+    bool execute_now();
+
+    // O script em revisao -- o teste de tela confere o SQL sem depender de
+    // ler pixels.
+    [[nodiscard]] const db::AlterScript& script() const noexcept { return script_; }
+
 private:
     bool            visible_ = false;
     std::string     title_;

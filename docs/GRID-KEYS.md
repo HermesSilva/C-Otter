@@ -1,5 +1,9 @@
 # Atalhos da grade de resultado
 
+> **Substituído em 2026-10-01** por [`EDITOR-COMMANDS.md`](EDITOR-COMMANDS.md), gerado da
+> tabela de comandos do programa: 70 comandos da grade, 63 iguais ao DBeaver. Este
+> arquivo fica como registro do levantamento original das teclas.
+
 Extraído de `plugin.xml` do `org.jkiss.dbeaver.ui.editors.data` (elementos
 `<key sequence="...">`), em 2026-09-21. **50 associações**, 47 comandos
 distintos — três têm mais de uma tecla.

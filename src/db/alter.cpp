@@ -1,13 +1,320 @@
 #include "db/alter.hpp"
 
+#include "db/catalog_mssql.hpp"   // mssql_literal, mssql_object_id
 #include "db/ddl.hpp"
+#include "db/mssql_object.hpp"
+#include "db/sqlanywhere_object.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace otter::db {
 namespace {
 
 bool is_mysql() noexcept { return sql_dialect() == QuoteStyle::backticks; }
+bool is_mssql() noexcept { return sql_dialect() == QuoteStyle::brackets; }
+bool is_anywhere() noexcept { return sql_dialect() == QuoteStyle::anywhere; }
+
+// O nome do SGBD nos avisos: "PostgreSQL does not..." num SQL Server mandaria
+// procurar a causa no lugar errado.
+const char* engine_name() noexcept {
+    return is_mysql()      ? "MySQL"
+           : is_mssql()    ? "SQL Server"
+           : is_anywhere() ? "SQL Anywhere"
+                           : "PostgreSQL";
+}
+
+// --- SQL Anywhere ----------------------------------------------------------------
+
+// O ALTER TABLE do SQL Anywhere: ADD e DROP sem a palavra COLUMN; "ALTER
+// coluna" seguido do que muda (tipo, NULL / NOT NULL, DEFAULT), um comando por
+// atributo; RENAME sem COLUMN nem TO para a tabela; comentario por COMMENT ON.
+void anywhere_alter(AlterScript& script, const TableMeta& current,
+                    const TableAlteration& wanted) {
+    const std::string qualified = qualified_name(wanted.schema, wanted.table);
+    const std::string prefix    = "ALTER TABLE " + qualified;
+
+    const auto add = [&script](std::string statement, bool destructive = false) {
+        if (destructive) script.destructive.push_back(script.statements.size());
+        script.statements.push_back(std::move(statement));
+    };
+
+    for (const NewColumn& column : wanted.add_columns) {
+        if (column.name.empty() || column.type_name.empty()) {
+            script.error = "new column needs a name and a type";
+            return;
+        }
+        // NULL explicito: sem ele a nulidade depende de allow_nulls_by_default
+        // da conexao, e a mesma janela criaria colunas diferentes.
+        std::string statement = prefix + " ADD " + quote_if_needed(column.name) + " " +
+                                column.type_name + (column.nullable ? " NULL" : " NOT NULL");
+        if (!column.default_value.empty()) statement += " DEFAULT " + column.default_value;
+        add(std::move(statement));
+
+        if (column.first || !column.after.empty()) {
+            script.warnings.push_back(
+                "SQL Anywhere does not support column position; '" + column.name +
+                "' will be added at the end");
+        }
+        if (!column.nullable && column.default_value.empty() && current.estimated_rows > 0) {
+            script.warnings.push_back(
+                "'" + column.name +
+                "' is NOT NULL without a DEFAULT; this fails when the table "
+                "already has rows");
+        }
+        if (!column.comment.empty()) {
+            add("COMMENT ON COLUMN " + qualified + "." + quote_if_needed(column.name) +
+                " IS " + quote_literal(column.comment));
+        }
+    }
+
+    for (const ColumnChange& change : wanted.alter_columns) {
+        if (change.empty()) continue;
+
+        const ColumnMeta* column = nullptr;
+        for (const ColumnMeta& candidate : current.columns) {
+            if (candidate.name == change.name) column = &candidate;
+        }
+        if (column == nullptr) {
+            script.error = "column '" + change.name + "' not found in the table";
+            return;
+        }
+
+        if (change.new_name && *change.new_name != change.name) {
+            add(prefix + " RENAME " + quote_if_needed(change.name) + " TO " +
+                quote_if_needed(*change.new_name));
+        }
+        // Os comandos seguintes usam o nome NOVO: o RENAME acima ja' passou.
+        const std::string name = quote_if_needed(change.new_name.value_or(change.name));
+
+        if (change.type_name && *change.type_name != column->type_name) {
+            add(prefix + " ALTER " + name + " " + *change.type_name);
+            script.warnings.push_back(
+                "changing the type of '" + change.name +
+                "' fails when a value does not convert, or when the column is part "
+                "of a key");
+        }
+        if (change.nullable && *change.nullable != column->nullable) {
+            add(prefix + " ALTER " + name + (*change.nullable ? " NULL" : " NOT NULL"));
+            if (!*change.nullable) {
+                script.warnings.push_back("NOT NULL on '" + change.name +
+                                          "' fails when the column already has NULLs");
+            }
+        }
+        if (change.default_value) {
+            if (change.default_value->empty()) {
+                add(prefix + " ALTER " + name + " DROP DEFAULT");
+            } else {
+                add(prefix + " ALTER " + name + " DEFAULT " + *change.default_value);
+            }
+        }
+        if (change.comment) {
+            add("COMMENT ON COLUMN " + qualified + "." + name + " IS " +
+                (change.comment->empty() ? std::string("NULL")
+                                         : quote_literal(*change.comment)));
+        }
+    }
+
+    for (const std::string& name : wanted.drop_columns) {
+        const bool known = std::any_of(
+            current.columns.begin(), current.columns.end(),
+            [&name](const ColumnMeta& candidate) { return candidate.name == name; });
+        if (!known) {
+            script.error = "column '" + name + "' not found in the table";
+            return;
+        }
+        add(prefix + " DROP " + quote_if_needed(name), /*destructive=*/true);
+    }
+
+    if (wanted.comment) {
+        add("COMMENT ON TABLE " + qualified + " IS " +
+            (wanted.comment->empty() ? std::string("NULL") : quote_literal(*wanted.comment)));
+    }
+    // O RENAME vem por ultimo: os comandos acima usam o nome antigo.
+    if (wanted.new_name && *wanted.new_name != wanted.table) {
+        add(prefix + " RENAME " + quote_if_needed(*wanted.new_name));
+    }
+}
+
+// --- SQL Server ------------------------------------------------------------------
+
+ObjectRef mssql_column_ref(std::string_view schema, std::string_view table,
+                           std::string_view column) {
+    ObjectRef ref;
+    ref.type   = ObjectType::column;
+    ref.schema = std::string(schema);
+    ref.parent = std::string(table);
+    ref.name   = std::string(column);
+    return ref;
+}
+
+ObjectRef mssql_table_ref(std::string_view schema, std::string_view table) {
+    ObjectRef ref;
+    ref.type   = ObjectType::table;
+    ref.schema = std::string(schema);
+    ref.name   = std::string(table);
+    return ref;
+}
+
+// No SQL Server o DEFAULT e' uma CONSTRAINT com nome proprio, quase sempre
+// gerado (DF__tabela__col__5AEE82B9). Para tira-lo e' preciso descobrir o
+// nome no catalogo -- por isso um lote com SQL dinamico, e nao um ALTER fixo.
+// Sem default na coluna o lote nao faz nada.
+std::string mssql_drop_default(std::string_view schema, std::string_view table,
+                               std::string_view column) {
+    // O comando e' montado numa variavel: EXEC('...' + QUOTENAME(x)) nao
+    // compila -- o EXEC de texto so' concatena literais e variaveis.
+    return "DECLARE @sql nvarchar(max) = (SELECT " +
+           mssql_literal("ALTER TABLE " + qualified_name(schema, table) +
+                         " DROP CONSTRAINT ") +
+           " + QUOTENAME(dc.name) FROM sys.default_constraints dc"
+           " JOIN sys.columns c ON c.object_id = dc.parent_object_id"
+           " AND c.column_id = dc.parent_column_id"
+           " WHERE dc.parent_object_id = " + mssql_object_id(schema, table) +
+           " AND c.name = " + mssql_literal(column) + ");\n"
+           "IF @sql IS NOT NULL EXEC(@sql)";
+}
+
+// IDENTITY e coluna calculada chegam do catalogo no campo do default, para a
+// arvore mostrar de onde o valor vem. Nao sao constraint de default.
+bool mssql_real_default(const ColumnMeta& column) {
+    return !column.default_value.empty() && column.default_value != "IDENTITY" &&
+           !column.default_value.starts_with("AS ");
+}
+
+// O que o ALTER de uma tabela do SQL Server tem de diferente dos outros dois:
+// ADD sem a palavra COLUMN; ALTER COLUMN repete tipo E nulidade; default e'
+// constraint; renomear e comentar sao procedimentos do sistema.
+void mssql_alter(AlterScript& script, const TableMeta& current,
+                 const TableAlteration& wanted) {
+    const std::string qualified = qualified_name(wanted.schema, wanted.table);
+    const std::string prefix    = "ALTER TABLE " + qualified;
+
+    const auto add = [&script](std::string statement, bool destructive = false) {
+        if (destructive) script.destructive.push_back(script.statements.size());
+        script.statements.push_back(std::move(statement));
+    };
+    const auto append = [&script, &add](AlterScript part) {
+        if (!part.error.empty()) {
+            if (script.error.empty()) script.error = std::move(part.error);
+            return;
+        }
+        for (std::string& statement : part.statements) add(std::move(statement));
+        for (std::string& warning : part.warnings) script.warnings.push_back(std::move(warning));
+    };
+
+    for (const NewColumn& column : wanted.add_columns) {
+        if (column.name.empty() || column.type_name.empty()) {
+            script.error = "new column needs a name and a type";
+            return;
+        }
+        std::string statement = prefix + " ADD " + quote_if_needed(column.name) + " " +
+                                column.type_name;
+        // NULL explicito: sem ele a nulidade depende de ANSI_NULL_DFLT_ON da
+        // sessao, e a mesma janela criaria colunas diferentes.
+        statement += column.nullable ? " NULL" : " NOT NULL";
+        if (!column.default_value.empty()) statement += " DEFAULT " + column.default_value;
+        add(std::move(statement));
+
+        if (column.first || !column.after.empty()) {
+            script.warnings.push_back(
+                "SQL Server does not support column position; '" + column.name +
+                "' will be added at the end");
+        }
+        if (!column.nullable && column.default_value.empty() && current.estimated_rows > 0) {
+            script.warnings.push_back(
+                "'" + column.name +
+                "' is NOT NULL without a DEFAULT; this fails when the table "
+                "already has rows");
+        }
+        if (!column.comment.empty()) {
+            append(mssql_object_comment(
+                mssql_column_ref(wanted.schema, wanted.table, column.name), column.comment));
+        }
+    }
+
+    for (const ColumnChange& change : wanted.alter_columns) {
+        if (change.empty()) continue;
+
+        const ColumnMeta* column = nullptr;
+        for (const ColumnMeta& candidate : current.columns) {
+            if (candidate.name == change.name) column = &candidate;
+        }
+        if (column == nullptr) {
+            script.error = "column '" + change.name + "' not found in the table";
+            return;
+        }
+
+        const std::string name = change.new_name.value_or(change.name);
+        if (name != change.name) {
+            append(mssql_object_rename(
+                mssql_column_ref(wanted.schema, wanted.table, change.name), name));
+        }
+
+        const bool type_changed = change.type_name && *change.type_name != column->type_name;
+        const bool null_changed = change.nullable && *change.nullable != column->nullable;
+        if (type_changed || null_changed) {
+            // Tipo e nulidade vao JUNTOS: omitir a nulidade a devolve ao padrao
+            // da sessao, e um ALTER de tipo tornaria nula uma coluna NOT NULL.
+            const bool nullable = change.nullable.value_or(column->nullable);
+            add(prefix + " ALTER COLUMN " + quote_if_needed(name) + " " +
+                change.type_name.value_or(column->type_name) +
+                (nullable ? " NULL" : " NOT NULL"));
+
+            if (type_changed) {
+                script.warnings.push_back(
+                    "changing the type of '" + change.name +
+                    "' fails when a value does not convert, or when an index or "
+                    "constraint depends on the column");
+            }
+            if (null_changed && !nullable) {
+                script.warnings.push_back("SET NOT NULL on '" + change.name +
+                                          "' fails when the column already has NULLs");
+            }
+        }
+
+        if (change.default_value) {
+            if (mssql_real_default(*column)) {
+                add(mssql_drop_default(wanted.schema, wanted.table, name));
+            }
+            if (!change.default_value->empty()) {
+                add(prefix + " ADD DEFAULT " + *change.default_value + " FOR " +
+                    quote_if_needed(name));
+            }
+        }
+
+        if (change.comment) {
+            append(mssql_object_comment(
+                mssql_column_ref(wanted.schema, wanted.table, name), *change.comment));
+        }
+    }
+
+    for (const std::string& name : wanted.drop_columns) {
+        const ColumnMeta* column = nullptr;
+        for (const ColumnMeta& candidate : current.columns) {
+            if (candidate.name == name) column = &candidate;
+        }
+        if (column == nullptr) {
+            script.error = "column '" + name + "' not found in the table";
+            return;
+        }
+        // A constraint de default prende a coluna: o DROP COLUMN e' recusado
+        // enquanto ela existir.
+        if (mssql_real_default(*column)) {
+            add(mssql_drop_default(wanted.schema, wanted.table, name));
+        }
+        add(prefix + " DROP COLUMN " + quote_if_needed(name), /*destructive=*/true);
+    }
+
+    if (wanted.comment) {
+        append(mssql_object_comment(mssql_table_ref(wanted.schema, wanted.table),
+                                    *wanted.comment));
+    }
+    if (wanted.new_name && *wanted.new_name != wanted.table) {
+        append(mssql_object_rename(mssql_table_ref(wanted.schema, wanted.table),
+                                   *wanted.new_name));
+    }
+}
 
 // Definicao COMPLETA de uma coluna, como o MySQL exige em MODIFY/CHANGE.
 //
@@ -54,6 +361,9 @@ std::string new_column_definition(const NewColumn& column) {
     std::string out = quote_if_needed(column.name) + " " + column.type_name;
 
     if (!column.nullable)            out += " NOT NULL";
+    // SQL Anywhere: NULL explicito. Sem ele vale allow_nulls_by_default da
+    // conexao, que o protocolo TDS liga ao contrario do padrao do banco.
+    else if (is_anywhere())          out += " NULL";
     if (!column.default_value.empty()) out += " DEFAULT " + column.default_value;
 
     if (!column.comment.empty()) {
@@ -94,6 +404,21 @@ AlterScript generate_alter(const TableMeta& current,
     if (!current.columns_loaded &&
         (!wanted.alter_columns.empty() || !wanted.drop_columns.empty())) {
         script.error = "table columns are not loaded yet";
+        return script;
+    }
+
+    if (is_mssql()) {
+        mssql_alter(script, current, wanted);
+        if (script.error.empty() && script.statements.empty()) {
+            script.error = "nothing to change";
+        }
+        return script;
+    }
+    if (is_anywhere()) {
+        anywhere_alter(script, current, wanted);
+        if (script.error.empty() && script.statements.empty()) {
+            script.error = "nothing to change";
+        }
         return script;
     }
 
@@ -308,6 +633,23 @@ AlterScript generate_create_table(std::string_view schema,
     }
     script.statements.push_back(std::move(statement));
 
+    if (is_mssql()) {
+        // Comentario e' a propriedade estendida MS_Description, uma por
+        // objeto e por coluna.
+        const auto describe = [&script](AlterScript part) {
+            for (std::string& text : part.statements) script.statements.push_back(std::move(text));
+        };
+        if (!comment.empty()) {
+            describe(mssql_object_comment(mssql_table_ref(schema, table), comment));
+        }
+        for (const NewColumn& column : columns) {
+            if (column.comment.empty()) continue;
+            describe(mssql_object_comment(mssql_column_ref(schema, table, column.name),
+                                          column.comment));
+        }
+        return script;
+    }
+
     if (!is_mysql() && !comment.empty()) {
         script.statements.push_back("COMMENT ON TABLE " + qualified + " IS " +
                                     quote_literal(comment));
@@ -355,6 +697,21 @@ AlterScript generate_drop(std::string_view schema, std::string_view name,
     std::string statement = "DROP " + std::string(keyword) + " " +
                             qualified_name(schema, name);
 
+    if (is_anywhere()) {
+        // O tipo de usuario e' um DOMAIN, e nao leva o dono no nome. O
+        // "schema" e' um usuario, que sai por DROP USER.
+        if (kind == ObjKind::data_type) statement = "DROP DOMAIN " + quote_if_needed(name);
+        if (kind == ObjKind::schema)    statement = "DROP USER " + quote_if_needed(name);
+        if (cascade) {
+            script.warnings.push_back(
+                "SQL Anywhere has no CASCADE: the views that use the object become "
+                "invalid, and they are not dropped");
+        }
+        script.destructive.push_back(0);
+        script.statements.push_back(std::move(statement));
+        return script;
+    }
+
     if (cascade) {
         if (is_mysql()) {
             // O MySQL aceita a palavra em DROP TABLE mas a IGNORA. Emiti-la
@@ -362,6 +719,12 @@ AlterScript generate_drop(std::string_view schema, std::string_view name,
             // exatamente o campo que finge funcionar da diretiva 6.
             script.warnings.push_back(
                 "MySQL ignores CASCADE; dependent objects are not dropped");
+        } else if (is_mssql()) {
+            // O T-SQL nem aceita a palavra: o DROP e' recusado enquanto houver
+            // chave estrangeira apontando para a tabela.
+            script.warnings.push_back(
+                "SQL Server has no CASCADE; the drop is refused while a foreign "
+                "key references the object");
         } else {
             statement += " CASCADE";
             script.warnings.push_back(
@@ -423,6 +786,48 @@ AlterScript generate_create_index(std::string_view schema, std::string_view tabl
         return script;
     }
 
+    if (is_anywhere()) {
+        std::string statement = "CREATE ";
+        if (index.unique) statement += "UNIQUE ";
+        if (index.method == "CLUSTERED") {
+            statement += "CLUSTERED ";
+        } else if (!index.method.empty()) {
+            script.warnings.push_back("SQL Anywhere has no index method '" + index.method +
+                                      "'; a b-tree index is created");
+        }
+        statement += "INDEX " + quote_if_needed(index.name) + " ON " + qualified + " " +
+                     columns;
+        if (index.concurrently) {
+            script.warnings.push_back(
+                "SQL Anywhere has no CONCURRENTLY; the index is built with the table "
+                "locked");
+        }
+        script.statements.push_back(std::move(statement));
+        return script;
+    }
+
+    if (is_mssql()) {
+        // CLUSTERED / NONCLUSTERED fica ANTES de INDEX, e e' a unica coisa que
+        // o "metodo" significa aqui.
+        std::string statement = "CREATE ";
+        if (index.unique) statement += "UNIQUE ";
+        if (index.method == "CLUSTERED" || index.method == "NONCLUSTERED") {
+            statement += index.method + " ";
+        } else if (!index.method.empty()) {
+            script.warnings.push_back("SQL Server has no index method '" + index.method +
+                                      "'; a NONCLUSTERED b-tree is created");
+        }
+        statement += "INDEX " + quote_if_needed(index.name) + " ON " + qualified + " " +
+                     columns;
+        if (index.concurrently) {
+            script.warnings.push_back(
+                "SQL Server has no CONCURRENTLY (ONLINE = ON needs the Enterprise "
+                "edition); the index is built with the table locked for writes");
+        }
+        script.statements.push_back(std::move(statement));
+        return script;
+    }
+
     // PostgreSQL: comando proprio, com USING ANTES das colunas.
     std::string statement = "CREATE ";
     if (index.unique) statement += "UNIQUE ";
@@ -474,6 +879,14 @@ AlterScript generate_drop_index(std::string_view schema, std::string_view table,
         script.statements.push_back("ALTER TABLE " +
                                     qualified_name(schema, table) +
                                     " DROP INDEX " + quote_if_needed(index));
+    } else if (is_mssql()) {
+        // O nome do indice so' e' unico DENTRO da tabela.
+        script.statements.push_back("DROP INDEX " + quote_if_needed(index) + " ON " +
+                                    qualified_name(schema, table));
+    } else if (is_anywhere()) {
+        // dono.tabela.indice: com dois nomes o servidor leria "tabela.indice".
+        script.statements.push_back("DROP INDEX " + qualified_name(schema, table) + "." +
+                                    quote_if_needed(index));
     } else {
         // No PostgreSQL o indice e' objeto do SCHEMA, nao da tabela.
         script.statements.push_back("DROP INDEX " +
@@ -596,19 +1009,29 @@ AlterScript generate_add_foreign_key(std::string_view schema,
 
     std::string statement = "ALTER TABLE " + qualified_name(schema, table) +
                             " ADD ";
-    if (!key.name.empty()) {
+    // No SQL Anywhere o nome de uma chave estrangeira e' o "papel" dela -- o
+    // nome do indice que a sustenta, e o que DROP FOREIGN KEY recebe. Vai
+    // depois de FOREIGN KEY, nao numa clausula CONSTRAINT.
+    if (!key.name.empty() && !is_anywhere()) {
         statement += "CONSTRAINT " + quote_if_needed(key.name) + " ";
     }
 
     const std::string_view target_schema =
         key.target_schema.empty() ? schema : std::string_view(key.target_schema);
 
-    statement += "FOREIGN KEY " + column_list(key.columns) + " REFERENCES " +
+    statement += "FOREIGN KEY ";
+    if (!key.name.empty() && is_anywhere()) statement += quote_if_needed(key.name) + " ";
+    statement += column_list(key.columns) + " REFERENCES " +
                  qualified_name(target_schema, key.target_table) + " " +
                  column_list(key.target_columns);
 
-    if (!key.on_delete.empty()) statement += " ON DELETE " + key.on_delete;
-    if (!key.on_update.empty()) statement += " ON UPDATE " + key.on_update;
+    // O T-SQL nao tem RESTRICT; NO ACTION e' o mesmo efeito (a exclusao e'
+    // recusada), e e' o que o servidor guarda.
+    const auto action = [](const std::string& wanted) {
+        return is_mssql() && wanted == "RESTRICT" ? std::string("NO ACTION") : wanted;
+    };
+    if (!key.on_delete.empty()) statement += " ON DELETE " + action(key.on_delete);
+    if (!key.on_update.empty()) statement += " ON UPDATE " + action(key.on_update);
 
     if (key.on_delete == "CASCADE") {
         script.warnings.push_back(
@@ -619,9 +1042,11 @@ AlterScript generate_add_foreign_key(std::string_view schema,
     // PostgreSQL NAO -- e sem ele todo DELETE na tabela de destino varre a de
     // origem inteira. E' a causa mais comum de DELETE lento num banco com
     // muitas FKs.
-    if (!is_mysql()) {
+    // O SQL Anywhere tambem cria o indice sozinho (a chave E' um indice).
+    if (!is_mysql() && !is_anywhere()) {
         script.warnings.push_back(
-            "PostgreSQL does not index the referencing columns automatically; "
+            std::string(engine_name()) +
+            " does not index the referencing columns automatically; "
             "without an index, deletes on the target table scan this one");
     }
 
@@ -644,7 +1069,7 @@ AlterScript generate_drop_foreign_key(std::string_view schema,
     // O MySQL tem comando proprio; no PostgreSQL a FK e' uma constraint como
     // as outras.
     script.statements.push_back(
-        prefix + (is_mysql() ? " DROP FOREIGN KEY " : " DROP CONSTRAINT ") +
+        prefix + (is_mysql() || is_anywhere() ? " DROP FOREIGN KEY " : " DROP CONSTRAINT ") +
         quote_if_needed(name));
 
     script.destructive.push_back(0);
@@ -668,8 +1093,10 @@ AlterScript generate_create_view(std::string_view schema, std::string_view name,
     // CREATE OR REPLACE preserva as PERMISSOES concedidas sobre a view. Fazer
     // DROP + CREATE as perderia em silencio, e o usuario so' descobriria
     // quando alguem reclamasse de acesso negado -- dias depois.
-    std::string statement = or_replace ? "CREATE OR REPLACE VIEW "
-                                       : "CREATE VIEW ";
+    // No T-SQL e' CREATE OR ALTER (SQL Server 2016 SP1 em diante).
+    std::string statement = !or_replace ? "CREATE VIEW "
+                            : is_mssql() ? "CREATE OR ALTER VIEW "
+                                         : "CREATE OR REPLACE VIEW ";
     statement += qualified_name(schema, name) + " AS\n" +
                  std::string(strip_trailing_semicolon(definition));
 
@@ -780,6 +1207,52 @@ AlterScript generate_create_trigger(std::string_view schema,
         script.warnings.push_back(
             "MySQL before 8.0 allows only one trigger per timing and event "
             "on the same table");
+        return script;
+    }
+
+    if (is_anywhere()) {
+        // O corpo E' o codigo, num bloco BEGIN ... END; a linha nova e a
+        // antiga sao lidas pelos apelidos de REFERENCING.
+        std::string body(strip_trailing_semicolon(trigger.body));
+        std::string head = body.substr(0, 5);
+        std::transform(head.begin(), head.end(), head.begin(), [](char c) {
+            return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        });
+        if (head != "BEGIN") body = "BEGIN\n    " + body + ";\nEND";
+
+        std::string referencing;
+        if (trigger.event.find("INSERT") != std::string::npos ||
+            trigger.event.find("UPDATE") != std::string::npos) {
+            referencing = " NEW AS new_row";
+        }
+        if (trigger.event.find("DELETE") != std::string::npos ||
+            trigger.event.find("UPDATE") != std::string::npos) {
+            referencing = " OLD AS old_row" + referencing;
+        }
+        script.statements.push_back(
+            "CREATE TRIGGER " + quote_if_needed(trigger.name) + " " + trigger.timing + " " +
+            trigger.event + " ON " + qualified_name(schema, trigger.table) +
+            "\nREFERENCING" + referencing + "\nFOR EACH ROW\n" + body);
+        script.warnings.push_back(
+            "the row values are read as new_row.<column> and old_row.<column>");
+        return script;
+    }
+
+    if (is_mssql()) {
+        // No T-SQL o corpo E' o codigo, o gatilho dispara por COMANDO (nao ha'
+        // FOR EACH ROW) e so' existem AFTER e INSTEAD OF.
+        if (trigger.timing == "BEFORE") {
+            script.error = "SQL Server has no BEFORE triggers: use AFTER or INSTEAD OF";
+            return script;
+        }
+        script.statements.push_back(
+            "CREATE TRIGGER " + qualified_name(schema, trigger.name) + " ON " +
+            qualified_name(schema, trigger.table) + "\n" + trigger.timing + " " +
+            trigger.event + "\nAS\n" +
+            std::string(strip_trailing_semicolon(trigger.body)));
+        script.warnings.push_back(
+            "SQL Server triggers fire once per statement: read the changed rows "
+            "from the inserted and deleted tables");
         return script;
     }
 

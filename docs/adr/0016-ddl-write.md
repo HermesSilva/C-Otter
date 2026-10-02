@@ -79,7 +79,7 @@ acontece — o campo que finge funcionar da diretiva 6.
   anterior depois de gravar.
 - O alvo da recarga é guardado ao **abrir** a janela, não ao confirmar: quando o
   usuário confirma, o menu de contexto que originou a ação já fechou.
-- **Não verificado contra PostgreSQL.** A geração tem 20 testes unitários, mas o
-  efeito no servidor não foi observado nesta sessão: o perfil local se perdeu e
-  o `pg_hba.conf` exige senha, que alterar seria mexer na configuração do
-  servidor do usuário.
+- ~~**Não verificado contra PostgreSQL.**~~ **Verificado em 2026-09-30** contra
+  PostgreSQL 18.2 por `spikes/dbeaver_import/alter_live_pg.cpp` (81 verificações,
+  0 falhas), usando o perfil salvo — sem senha na linha de comando. Ver
+  `docs/DDL-WRITE.md` §4.

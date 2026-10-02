@@ -41,6 +41,27 @@ using AesIv  = std::array<std::uint8_t, kAesBlockSize>;
 [[nodiscard]] Result<std::vector<std::uint8_t>> aes128_cbc_decrypt(
     std::span<const std::uint8_t> input, const AesKey& key);
 
+// --- AES em modo CFB8, chave de 128, 192 ou 256 bits ------------------------------
+//
+// O segundo formato de terceiros que o projeto le': as senhas que o pgAdmin 4
+// guarda no pgadmin4.db (`pgadmin/utils/crypto.py`: AES + CFB8, IV de 16 bytes
+// na frente). Ver db/connection_import.hpp e o ADR 0023.
+//
+// CFB8 e' um modo de FLUXO: um byte por vez, sem padding -- o texto cifrado
+// tem o tamanho do texto. Por isso chave errada NAO da' erro: da' lixo. Quem
+// chama precisa conferir o resultado.
+
+// Decifra IV || texto cifrado. Falha so' quando a chave nao tem 16, 24 ou 32
+// bytes, ou o buffer nem tem o IV.
+[[nodiscard]] Result<std::vector<std::uint8_t>> aes_cfb8_decrypt(
+    std::span<const std::uint8_t> input, std::span<const std::uint8_t> key);
+
+// Cifra e devolve IV || texto cifrado. Existe para os testes e para os
+// vetores do NIST: o programa nao grava nada neste formato.
+[[nodiscard]] Result<std::vector<std::uint8_t>> aes_cfb8_encrypt(
+    std::span<const std::uint8_t> plaintext, std::span<const std::uint8_t> key,
+    const AesIv& iv);
+
 // IV aleatorio do gerador do sistema. Reutilizar IV em CBC com a mesma chave
 // vaza se duas mensagens comecam igual.
 [[nodiscard]] Result<AesIv> random_iv();

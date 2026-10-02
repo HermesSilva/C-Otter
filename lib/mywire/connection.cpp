@@ -219,7 +219,7 @@ Result<Connection> Connection::connect(const ConnectParams& params) {
     }
 
     Result<net::Socket> socket =
-        net::Socket::connect(params.host, params.port, params.timeout);
+        net::connect_to(params.proxy, params.host, params.port, params.timeout);
     if (!socket) {
         return std::unexpected(socket.error().with_context(
             "connecting to " + params.host + ":" + std::to_string(params.port)));
@@ -232,6 +232,7 @@ Result<Connection> Connection::connect(const ConnectParams& params) {
     connection.socket_.set_write_timeout(params.timeout);
     connection.host_     = params.host;
     connection.port_     = params.port;
+    connection.proxy_    = params.proxy;
     connection.user_     = params.user;
     connection.password_ = params.password;
 
@@ -786,6 +787,7 @@ Status Connection::cancel_current_query() const {
     ConnectParams params;
     params.host     = host_;
     params.port     = port_;
+    params.proxy    = proxy_;   // o servidor pode so' ser alcancavel por ele
     params.user     = user_;
     params.password = password_;
     params.timeout  = std::chrono::seconds(5);

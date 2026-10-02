@@ -1,5 +1,9 @@
 #include "ui/main_shell.hpp"
 
+#include "db/connection_import.hpp"
+
+#include <filesystem>
+
 #include "base/i18n.hpp"
 #include "db/registry.hpp"
 #include "db/aggregate.hpp"
@@ -9,6 +13,8 @@
 #include "sql/paging.hpp"
 #include "ui/app_window.hpp"   // mono_font(), para o editor SQL
 #include "ui/file_dialog.hpp"
+#include "ui/icon_images.hpp"
+#include "ui/hint.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 
@@ -17,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -69,16 +76,6 @@ std::string pad_to(std::string_view text, std::size_t width) {
     return text.size() >= width ? std::string(1, ' ')
                                 : std::string(width - text.size(), ' ');
 }
-
-constexpr std::string_view kWelcomeSql =
-    "-- C-Otter: every JOIN is an OTTER JOIN\n"
-    "--\n"
-    "-- Ctrl+Enter executa | Ctrl+Espaço completa\n"
-    "\n"
-    "SELECT table_name, column_name, data_type\n"
-    "  FROM information_schema.columns\n"
-    " WHERE table_schema = 'public'\n"
-    " ORDER BY table_name, ordinal_position;\n";
 
 // Tema da lontra aplicado ao editor: as cores vem da mesma paleta do logo que
 // o resto da UI, para que o painel de SQL nao pareca um corpo estranho.
@@ -156,13 +153,21 @@ MainShell::MainShell()
         static_cast<MainShell*>(state.userData)->suggest(state);
     };
 
-    // Cria a Session vazia ANTES do primeiro documento: new_document() amarra
+    // Antes de qualquer documento: o nome de uma aba nova e' escolhido contra
+    // os arquivos desta pasta.
+    scripts_dir_ = scripts_directory();
+
+    // Cria a Session vazia ANTES de qualquer documento: new_document() amarra
     // a aba a' conexao ativa, e sem nenhuma conexao existindo ela nasceria
     // com id 0 -- que nao pertence a janela nenhuma, deixando a aba invisivel.
     (void)session();
 
-    // Primeiro documento, com o texto de boas-vindas.
-    new_document().editor().SetText(std::string(kWelcomeSql));
+    // NENHUM documento nasce aqui. Havia um script de boas-vindas, e com ele
+    // o programa abria sempre com uma aba de conexao sem nome e sem conexao
+    // -- o usuario pediu a area vazia quando nao ha' script (2026-10-01), que
+    // e' tambem como o DBeaver abre. As abas vem dos scripts gravados
+    // (restore_scripts, mais abaixo), de conectar (open_connection) ou de
+    // "New script".
 
     // O assistente conecta e, ao concluir, tambem guarda o perfil ativo.
     // "Testar" reutiliza a conexao ativa: criar uma permanente a cada clique
@@ -171,14 +176,14 @@ MainShell::MainShell()
         session().connect_async(profile.to_conn_config());
     });
 
-    connection_dialog_.set_on_connect([this](const db::ConnectionProfile& profile) {
+    connection_dialog_.set_on_connect([this](const db::ConnectionProfile& wanted) {
+        const db::ConnectionProfile profile = remember_profile(wanted);
         active_profile_ = profile;
-        remember_profile(profile);
         open_connection(profile);
     });
-    connection_dialog_.set_on_save([this](const db::ConnectionProfile& profile) {
+    connection_dialog_.set_on_save([this](const db::ConnectionProfile& wanted) {
+        const db::ConnectionProfile profile = remember_profile(wanted);
         active_profile_ = profile;
-        remember_profile(profile);
 
         // A conexao ABERTA tambem recebe o perfil novo.
         //
@@ -193,6 +198,10 @@ MainShell::MainShell()
         // "nova conexao" ainda nao tem id atribuido.
         bool matched = false;
         for (Connection& connection : connections_) {
+            // So' a conexao RAIZ: a sessao de um banco expandido na arvore
+            // tem perfil derivado, e nao e' ela que o usuario editou.
+            if (connection.parent_id != 0) continue;
+
             if (connection.profile.driver_id == profile.driver_id &&
                 connection.profile.host == profile.host &&
                 connection.profile.port == profile.port &&
@@ -200,6 +209,16 @@ MainShell::MainShell()
                 connection.profile.user == profile.user) {
                 connection.profile = profile;
                 matched = true;
+
+                // As opcoes de listagem de bancos valem na hora: marcar
+                // "Show template databases" e so' ver o efeito ao reconectar
+                // pareceria que a caixa nao funciona.
+                const db::PostgresOptions& pg = profile.postgres;
+                connection.session->set_database_listing(
+                    pg.show_non_default_databases && pg.show_template_databases,
+                    pg.show_non_default_databases &&
+                        pg.show_unavailable_databases);
+                connection.session->reload_catalog_async();
             }
         }
 
@@ -215,8 +234,22 @@ MainShell::MainShell()
         }
     });
 
+    // A copia automatica da pasta antiga (%APPDATA%\C-Otter, de antes do ADR
+    // 0020) SAIU, a pedido do usuario (2026-10-01): ela trazia de volta, a
+    // cada pasta nova, conexoes de teste que ele nao criou ali ("MySQL de
+    // teste", "_1", "_2"). Nenhuma conexao nasce sozinha a partir de dados
+    // do proprio C-Otter; so' as das OUTRAS ferramentas, na primeira execucao.
+    //
+    // Antes de qualquer gravacao: a pasta de dados ainda esta' vazia?
+    const bool fresh_store = db::store_is_fresh(db::otter_store_location());
+    import_external_on_first_run(fresh_store);
+
     // Conexoes salvas na execucao anterior (ADR 0012).
     load_saved_profiles();
+
+    // Os scripts que estavam abertos, cada um na conexao dele -- depois dos
+    // perfis, que e' por onde a conexao de cada script e' achada.
+    restore_scripts();
 
     // Abre primeiro: open_new() reinicia o perfil, e so' depois disso faz
     // sentido preencher a partir do ambiente (como psql faz).
@@ -227,13 +260,45 @@ MainShell::MainShell()
     // open_edit em vez de open_new: com um perfil conhecido, parar no
     // catalogo de drivers obrigaria a escolher PostgreSQL de novo para so'
     // entao ver o que ja' estava salvo.
+    //
+    // Com alguma variavel PG* definida, so' um perfil PostgreSQL serve de
+    // base. As variaveis sao a convencao do psql: aplicadas sobre um perfil
+    // MySQL, mudavam host/porta/banco e deixavam o DRIVER MySQL -- que falava
+    // o protocolo errado com a porta 5432 e morria em "reading packet header:
+    // timed out". Pior: remember_profile gravava o hibrido no disco, e o
+    // perfil "MySQL de teste" passou a apontar para o PostgreSQL.
+    const bool pg_env = std::getenv("PGHOST") != nullptr ||
+                        std::getenv("PGPORT") != nullptr ||
+                        std::getenv("PGDATABASE") != nullptr ||
+                        std::getenv("PGUSER") != nullptr ||
+                        std::getenv("PGPASSWORD") != nullptr;
+
+    // Com PGHOST definido, o perfil-base tem de ser DAQUELE host. Antes valia
+    // "o primeiro PostgreSQL salvo": com as conexoes importadas na primeira
+    // execucao (ADR 0023), o primeiro podia ser um servidor de producao, e o
+    // ambiente trocava so' o host -- sobrava um hibrido com a porta e o
+    // usuario de outro servidor ("VULTR_1  localhost:54045").
+    const char* env_host = std::getenv("PGHOST");
+
     const db::StoredProfile* last_usable = nullptr;
     for (const db::StoredProfile& stored : saved_profiles_) {
-        if (stored.supported) { last_usable = &stored; break; }
+        if (!stored.supported) continue;
+        if (pg_env && stored.profile.driver_id != "postgresql") continue;
+        if (env_host != nullptr && stored.profile.host != env_host) continue;
+        // Entre os do mesmo host, o que tem senha salva: e' o que conecta.
+        if (last_usable == nullptr ||
+            (last_usable->profile.password.empty() && !stored.profile.password.empty())) {
+            last_usable = &stored;
+        }
+        if (!pg_env) break;
     }
 
     if (last_usable != nullptr) {
         connection_dialog_.open_edit(last_usable->profile);
+    } else if (pg_env) {
+        // Perfil novo ja' em PostgreSQL, na aba de configuracao: o ambiente
+        // escolheu o driver, e parar no catalogo pediria a escolha de novo.
+        connection_dialog_.open_configure(db::ConnectionProfile{});
     } else {
         connection_dialog_.open_new();
     }
@@ -263,6 +328,14 @@ MainShell::MainShell()
 
 
 
+    // Perfil de atalhos, tema e idioma da execucao anterior. Antes do tema
+    // por ambiente, que continua valendo por cima -- e' o que as capturas
+    // usam.
+    load_settings();
+    for (auto& document : documents_) {
+        apply_editor_palette(document->editor());
+    }
+
     // Tema inicial por ambiente, pelo mesmo motivo: conferir os tres temas
     // exige tres capturas, e trocar pelo menu a cada uma e' fragil.
     if (const char* theme = std::getenv("OTTER_THEME")) {
@@ -284,13 +357,26 @@ MainShell::MainShell()
     // clique em "Conectar" erra o alvo com frequencia, e uma tela conferida a'
     // mao vale mais que um clique que talvez tenha acontecido.
     if (std::getenv("OTTER_AUTOCONNECT") != nullptr) {
+        // SEM gravar o perfil. Gravava, "para exercitar o caminho normal" -- e
+        // cada captura de conferencia deixava uma conexao que o usuario nao
+        // criou: "localhost_1", "MySQL de teste_1", "MySQL de teste_2". Ele
+        // pediu o fim da criacao automatica (2026-10-01); uma conexao montada
+        // a partir de variaveis de ambiente e' de quem rodou o script, nao do
+        // arquivo de conexoes.
         active_profile_ = profile;
-        // Mesmo caminho da conexao normal, incluindo o registro em disco: um
-        // atalho que pula etapas deixa de exercitar o que ele deveria testar.
-        remember_profile(profile);
-        open_connection(profile);
+        open_connection(active_profile_);
         connection_dialog_.close();
     }
+
+    // O dialogo so' se abre sozinho quando NAO ha' conexao salva -- e' a
+    // primeira execucao, e nao ha' mais nada a fazer no programa. Com
+    // conexoes na arvore, abri-lo a cada inicio punha uma janela modal entre
+    // o usuario e o duplo clique que ele ia dar (pedido dele, 2026-09-30); o
+    // DBeaver tambem abre direto no navegador.
+    //
+    // Fechado aqui, e nao deixando de abrir la' em cima: o perfil do dialogo
+    // e' onde as variaveis PG* sao aplicadas, e o autoconnect le dele.
+    if (!saved_profiles_.empty()) connection_dialog_.close();
 
     // Abre o dialogo de conexao ja' na etapa de configuracao, para conferir a
     // arvore de paginas numa captura (docs/DIALOG-PARITY.md).
@@ -311,6 +397,13 @@ SqlDocument& MainShell::new_document() {
     document.editor().SetAutoCompleteConfig(autocomplete_config_.get());
     apply_editor_palette(document.editor());
 
+    // Os dois menus de contexto do editor: sobre o texto e sobre a regua. O
+    // widget abre o popup e chama de volta para preenche-lo.
+    document.editor().SetTextContextMenuCallback(
+        [this](TextEditor::PopupData&) { draw_editor_context_menu(); });
+    document.editor().SetLineNumberContextMenuCallback(
+        [this](TextEditor::PopupData&) { draw_ruler_context_menu(); });
+
     // Nasce na conexao ATIVA. E' o padrao certo para quem abre um script pelo
     // menu ou pelo Navigator: o alvo e' a base que se esta' olhando. Quem
     // cria pelo "+" de uma janela de conexao sobrescreve isto logo depois,
@@ -319,6 +412,11 @@ SqlDocument& MainShell::new_document() {
         document.set_connection_id(connections_[active_connection_].id);
     }
 
+    // O nome da aba e' o do arquivo em que ela sera' gravada ("Script",
+    // "Script-1", ... como no DBeaver). Escolhido ja', e nao na primeira
+    // gravacao: o rotulo nao pode mudar no meio da digitacao.
+    document.set_default_title(next_script_name());
+
     active_document_ = documents_.size() - 1;
     return document;
 }
@@ -326,14 +424,135 @@ SqlDocument& MainShell::new_document() {
 void MainShell::close_document(std::size_t index) {
     if (index >= documents_.size()) return;
 
-    // Nunca ficamos sem nenhuma aba: fechar a última abre uma vazia.
+    // Fechar a ultima aba deixa a lista VAZIA -- e a janela da conexao some
+    // com ela (draw_editor_panel). Antes uma aba vazia renascia no lugar, e
+    // nao havia como fechar a janela de uma conexao. active_document() ja'
+    // devolve nulo para a lista vazia; quem o chama trata.
+    retire_script(*documents_[index]);
     documents_.erase(documents_.begin() + static_cast<std::ptrdiff_t>(index));
-    if (documents_.empty()) {
-        new_document();
+    if (!documents_.empty() && active_document_ >= documents_.size()) {
+        active_document_ = documents_.size() - 1;
+    }
+}
+
+// So' editores de OBJETO: um script e' gravado sozinho (ui/script_session.cpp)
+// e fechar a aba dele nao perde nada.
+std::size_t MainShell::connection_unsaved_documents(std::size_t connection_id) const {
+    std::size_t count = 0;
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        if (document->connection_id() == connection_id && document->is_object() &&
+            document->modified()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::size_t MainShell::connection_pending_cell_edits(std::size_t connection_id) const {
+    std::size_t count = 0;
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        if (document->connection_id() == connection_id) {
+            count += document->edits().change_count();
+        }
+    }
+    return count;
+}
+
+// Fecha a ABA DA CONEXAO: todos os scripts e editores de objeto dela. A
+// sessao continua como estava -- fechar um editor nao desconecta, no DBeaver
+// tambem nao; quem desconecta e' a arvore.
+void MainShell::close_connection_documents(std::size_t connection_id) {
+    for (const std::unique_ptr<SqlDocument>& document : documents_) {
+        if (document->connection_id() == connection_id) retire_script(*document);
+    }
+    std::erase_if(documents_,
+                  [connection_id](const std::unique_ptr<SqlDocument>& document) {
+                      return document->connection_id() == connection_id;
+                  });
+    if (!documents_.empty() && active_document_ >= documents_.size()) {
+        active_document_ = documents_.size() - 1;
+    }
+
+    // A janela volta ao no' dos editores quando ganhar outro script: o no'
+    // em que ela estava pode ter deixado de existir ao ficar vazio, e sem
+    // isto ela renasceria flutuando sobre a grade.
+    if (Connection* connection = connection_by_id(connection_id)) {
+        connection->docked = false;
+    }
+}
+
+// O "x" da aba da conexao (e "tab close" no canal de comandos). Com trabalho
+// nao gravado pergunta antes, pela mesma razao de request_quit: o que se
+// perde aqui nao tem desfazer.
+void MainShell::apply_close_tab_request() {
+    if (close_tab_request_ == 0) return;
+    const std::size_t connection_id = std::exchange(close_tab_request_, 0);
+
+    if (connection_unsaved_documents(connection_id) == 0 &&
+        connection_pending_cell_edits(connection_id) == 0) {
+        close_connection_documents(connection_id);
         return;
     }
-    if (active_document_ >= documents_.size()) {
-        active_document_ = documents_.size() - 1;
+    confirm_close_tab_ = connection_id;
+}
+
+void MainShell::draw_close_tab_confirm() {
+    if (confirm_close_tab_ == 0) return;
+
+    const Connection* connection = connection_by_id(confirm_close_tab_);
+    if (connection == nullptr) {
+        confirm_close_tab_ = 0;   // a conexao foi removida com o dialogo aberto
+        return;
+    }
+
+    ImGui::OpenPopup("###CloseTabConfirm");
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(TRW("Close tab", "###CloseTabConfirm"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        // QUAL aba: o pedido pode ter vindo do "x" de uma aba que nao esta'
+        // na frente.
+        ImGui::TextUnformatted(connection_title(*connection).c_str());
+        ImGui::TextColored(col4(colors().warn), "%s",
+                           TR("There is work that was not saved."));
+        ImGui::Spacing();
+
+        if (const std::size_t scripts =
+                connection_unsaved_documents(confirm_close_tab_);
+            scripts > 0) {
+            ImGui::BulletText(TR("%zu object editor(s) with unsaved changes"), scripts);
+        }
+        if (const std::size_t cells =
+                connection_pending_cell_edits(confirm_close_tab_);
+            cells > 0) {
+            ImGui::BulletText(TR("%zu cell edit(s) not written to the database"),
+                              cells);
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // "Cancelar" e' o padrao, como na confirmacao de saida.
+        if (ImGui::Button(TR("Cancel"), ImVec2(120, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            confirm_close_tab_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, col(colors().error));
+        if (ImGui::Button(TR("Close and discard"), ImVec2(160, 0))) {
+            close_connection_documents(std::exchange(confirm_close_tab_, 0));
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::EndPopup();
     }
 }
 
@@ -356,6 +575,8 @@ void MainShell::close_others(std::size_t keep_index) {
         if (i == keep_index || documents_[i]->pinned() ||
             documents_[i]->connection_id() != keep_conn) {
             kept.push_back(std::move(documents_[i]));
+        } else {
+            retire_script(*documents_[i]);
         }
     }
     documents_ = std::move(kept);
@@ -369,10 +590,13 @@ void MainShell::close_others(std::size_t keep_index) {
     }
 }
 
+// Editores de OBJETO com alteracao por gravar. Os scripts nao contam: sao
+// gravados sozinhos, e perguntar por eles ao sair era o que o usuario pediu
+// para acabar (2026-10-01).
 std::size_t MainShell::unsaved_documents() const {
     std::size_t count = 0;
     for (const std::unique_ptr<SqlDocument>& document : documents_) {
-        if (document->modified()) ++count;
+        if (document->is_object() && document->modified()) ++count;
     }
     return count;
 }
@@ -390,6 +614,10 @@ std::size_t MainShell::pending_cell_edits() const {
 // pulada quando NAO ha' o que perder -- perguntar sempre treina a clicar em
 // "sair" sem ler.
 void MainShell::request_quit() {
+    // Os scripts primeiro, sem esperar o atraso da digitacao: o que foi
+    // digitado no ultimo instante tambem fica.
+    flush_scripts();
+
     if (unsaved_documents() == 0 && pending_cell_edits() == 0) {
         wants_quit_ = true;
         return;
@@ -417,8 +645,8 @@ void MainShell::draw_quit_confirm() {
 
         // Diz O QUE se perde, com numeros. "Alteracoes nao salvas" nao ajuda
         // a decidir; "3 scripts e 37 celulas" ajuda.
-        if (const std::size_t scripts = unsaved_documents(); scripts > 0) {
-            ImGui::BulletText(TR("%zu script(s) with unsaved text"), scripts);
+        if (const std::size_t editors = unsaved_documents(); editors > 0) {
+            ImGui::BulletText(TR("%zu object editor(s) with unsaved changes"), editors);
         }
         if (const std::size_t cells = pending_cell_edits(); cells > 0) {
             ImGui::BulletText(TR("%zu cell edit(s) not written to the database"),
@@ -729,24 +957,10 @@ void MainShell::execute_current_sql() {
     SqlDocument* document = active_document();
     if (document == nullptr) return;
 
-    // Pela sessao do DOCUMENTO. Usar session() aqui era o defeito: com duas
-    // conexoes abertas, Ctrl+Enter numa aba da primeira rodava contra a que
-    // estivesse selecionada no Raft.
-    Session& target = session_for(*document);
-    if (target.state() != SessionState::connected || target.busy()) return;
-
-    std::string sql = document->sql_to_execute();
-    if (sql.empty()) return;
-
-    // Nova consulta: volta para a primeira pagina e descarta a ordenacao.
-    //
-    // Manter a coluna de ordenacao seria errado -- a consulta nova pode nem
-    // ter essa coluna, e o servidor rejeitaria o ORDER BY.
-    document->set_paged_sql(sql);
-    document->set_page(0);
-    document->set_sort({});
-    document->set_filter({});
-    execute_page(*document, 0);
+    // Pela sessao e pelo dialeto do DOCUMENTO, e so' a instrucao sob o
+    // cursor (ou a selecao) -- ver run_sql e SqlDocument::sql_to_execute.
+    run_sql(*document, document->sql_to_execute(document_dialect(*document)),
+            RunMode::same_tab);
 }
 
 namespace {
@@ -765,6 +979,36 @@ const std::vector<FileFilter>& sql_filters() {
 void MainShell::open_script_file() {
     const auto path = open_file_dialog(TR("Open script"), sql_filters());
     if (!path) return;   // cancelou
+
+    // Ja' aberto: traz a aba para a frente. Duas abas do mesmo arquivo
+    // gravariam uma por cima da outra, cada uma com o seu texto.
+    for (std::size_t i = 0; i < documents_.size(); ++i) {
+        if (documents_[i]->is_object()) continue;
+        std::error_code ec;
+        if (documents_[i]->file_path().empty() ||
+            !std::filesystem::equivalent(documents_[i]->file_path(), *path, ec)) {
+            continue;
+        }
+        active_document_    = i;
+        select_document_id_ = documents_[i]->id();
+        focus_document_id_  = documents_[i]->id();
+        focus_editor_       = true;
+        return;
+    }
+
+    // Um script fechado da pasta `.script`: volta com a conexao que tinha.
+    for (const ScriptEntry& closed : closed_scripts_) {
+        std::error_code ec;
+        if (!std::filesystem::equivalent(script_path(scripts_dir_, closed.file), *path, ec)) {
+            continue;
+        }
+        const ScriptEntry entry = closed;   // open_stored_script mexe na lista
+        if (const SqlDocument* document = open_stored_script(entry)) {
+            focus_document_id_ = document->id();
+            focus_editor_      = true;
+        }
+        return;
+    }
 
     std::ifstream file(*path, std::ios::binary);
     if (!file) {
@@ -785,37 +1029,54 @@ void MainShell::open_script_file() {
     document.editor().SetText(buffer.str());
     document.set_file_path(*path);
     document.mark_saved();   // recem-aberto nao esta' modificado
+    // O arquivo e' de fora da pasta de scripts: continua onde esta', e a
+    // gravacao automatica escreve NELE -- copia-lo para `.script` criaria
+    // duas versoes do mesmo script.
+    document.autosave().on_disk = true;
 }
 
 void MainShell::save_script_file(bool save_as) {
     SqlDocument* document = active_document();
     if (document == nullptr) return;
 
-    std::string path = document->file_path();
+    if (document->is_object()) return;
 
-    if (path.empty() || save_as) {
-        // Sugere o titulo da aba com .sql: "Script 2" vira "Script 2.sql".
-        const auto chosen = save_file_dialog(
-            TR("Save script"), sql_filters(), document->title() + ".sql");
-        if (!chosen) return;
-        path = *chosen;
+    // "Save" e' a gravacao automatica adiantada: o script ja' tem o lugar
+    // dele em `.script` (ou e' um arquivo aberto de fora), e nao ha' o que
+    // perguntar. So' "Save as" abre o dialogo.
+    if (!save_as) {
+        if (save_script_now(*document) && !document->file_path().empty() &&
+            document->autosave().on_disk) {
+            document->set_status(
+                std::string(TRF("saved to %s", document->file_path().c_str())));
+        }
+        return;
     }
 
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file) {
+    // Sugere o titulo da aba com .sql: "Script-2" vira "Script-2.sql".
+    const auto chosen = save_file_dialog(
+        TR("Save script"), sql_filters(), document->title() + ".sql");
+    if (!chosen) return;
+    const std::string path = *chosen;
+
+    if (!write_script(path, document->editor().GetText())) {
         document->set_status(std::string(TRF("cannot write %s", path.c_str())));
         return;
     }
 
-    const std::string text = document->editor().GetText();
-    file.write(text.data(), static_cast<std::streamsize>(text.size()));
-
-    if (!file) {
-        document->set_status(std::string(TRF("write failed: %s", path.c_str())));
-        return;
+    // "Salvar como" MUDA o script de lugar: a copia automatica em `.script`
+    // sai, senao ficariam dois arquivos e so' um deles acompanharia a
+    // digitacao.
+    const std::string previous = document->file_path();
+    std::error_code ec;
+    if (!previous.empty() && is_stored_script(scripts_dir_, previous) &&
+        !std::filesystem::equivalent(previous, path, ec)) {
+        std::filesystem::remove(previous, ec);
     }
 
     document->set_file_path(path);
+    document->autosave().on_disk = true;
+    document->autosave().pending = false;
 
     // O ponto de salvamento e' o que faz o indicador de modificado funcionar.
     // Sem "salvar", ele aparecia na primeira edicao e nunca mais saia -- era
@@ -833,7 +1094,7 @@ void MainShell::explain_current_sql(bool analyze) {
     Session& target = session_for(*document);
     if (target.state() != SessionState::connected || target.busy()) return;
 
-    std::string sql = document->sql_to_execute();
+    std::string sql = document->sql_to_execute(document_dialect(*document));
     if (sql.empty()) return;
 
     plan_analyze_ = analyze;
@@ -926,24 +1187,23 @@ void MainShell::draw_plan_node(const db::PlanNode& node, double max_cost,
     // Condicoes no tooltip: ocupam muito espaco na linha e quase sempre sao
     // o que se quer ler depois de identificar o no' caro.
     if (ImGui::IsItemHovered()) {
-        std::string tip = node.type;
-        if (!node.relation.empty())        tip += "\non " + node.relation;
-        if (!node.index_condition.empty()) tip += "\nIndex Cond: " + node.index_condition;
-        if (!node.join_condition.empty())  tip += "\nJoin: " + node.join_condition;
-        if (!node.filter.empty())          tip += "\nFilter: " + node.filter;
-        if (!node.sort_keys.empty())       tip += "\nSort: " + node.sort_keys;
+        char cost[64];
+        std::snprintf(cost, sizeof cost, "%.2f..%.2f", node.startup_cost,
+                      node.total_cost);
 
-        char buffer[128];
-        std::snprintf(buffer, sizeof buffer,
-                      "\n\ncost %.2f..%.2f  width %d",
-                      node.startup_cost, node.total_cost, node.row_width);
-        tip += buffer;
-        if (node.loops > 1) {
-            std::snprintf(buffer, sizeof buffer, "\nloops %lld",
-                          static_cast<long long>(node.loops));
-            tip += buffer;
-        }
-        ImGui::SetTooltip("%s", tip.c_str());
+        // Os rotulos do plano sao os do EXPLAIN: quem le um plano procura por
+        // "Index Cond" e "Filter", nao por uma traducao deles.
+        Hint(node.type)
+            .accent(TR("Relation"), node.relation)
+            .row("Index Cond", node.index_condition)
+            .row("Join", node.join_condition)
+            .row("Filter", node.filter)
+            .row("Sort", node.sort_keys)
+            .row(TR("Cost"), cost)
+            .row(TR("Width"), std::to_string(node.row_width))
+            .row(TR("Loops"), node.loops > 1 ? std::to_string(node.loops)
+                                             : std::string{})
+            .show();
     }
 
     if (open) {
@@ -1061,49 +1321,9 @@ void MainShell::execute_script() {
     SqlDocument* document = active_document();
     if (document == nullptr) return;
 
-    Session& target = session_for(*document);
-    if (target.state() != SessionState::connected || target.busy()) return;
-
-    const std::string text = document->editor().GetText();
-    if (text.empty()) return;
-
-    // O splitter respeita strings, comentarios, $$ ... $$ e blocos BEGIN/END.
-    // Um split por ';' quebraria em qualquer funcao armazenada.
-    const std::vector<sql::Statement> found =
-        sql::split_script(text, active_dialect());
-
-    std::vector<std::string> statements;
-    statements.reserve(found.size());
-    for (const sql::Statement& statement : found) {
-        if (!statement.empty()) statements.emplace_back(statement.text);
-    }
-
-    if (statements.empty()) return;
-
-    // Um comando so': usa o caminho normal, que pagina o resultado. Paginar
-    // nao faz sentido para script -- o que interessa e' o efeito de cada
-    // comando, nao navegar pelas linhas do ultimo.
-    if (statements.size() == 1) {
-        execute_current_sql();
-        return;
-    }
-
-    executing_document_id_ = document->id();
-    document->set_executing(true);
-    document->set_status({});
-
-    // Script nao e' paginado: os botoes de pagina somem, e a contagem exibida
-    // passa a ser a do resultado inteiro do ultimo SELECT.
-    document->reset_paging();
-
-    // Parar ou seguir no primeiro erro, do perfil (pagina "Processamento
-    // SQL"). Era sempre parar, fixo na chamada.
-    const Connection* script_owner = connection_by_id(document->connection_id());
-    const bool stop_on_error =
-        script_owner == nullptr ||
-        script_owner->profile.editor.stop_script_on_error;
-
-    target.execute_script_async(std::move(statements), stop_on_error);
+    // O divisor, os comandos de cliente (@set, @echo) e a expansao de
+    // variaveis estao em run_script.
+    run_script(*document, 0, /*separate_tabs=*/false);
 }
 
 // Conta o resultado inteiro -- o `resultset.count` do DBeaver.
@@ -1182,6 +1402,15 @@ void MainShell::execute_page(SqlDocument& document, std::size_t page) {
 }
 
 void MainShell::draw() {
+    // O dialeto do SQL gerado (aspas, e qual conjunto de geradores -- ver
+    // db/object_info.cpp) e' o da conexao EM USO, decidido a cada quadro.
+    //
+    // Era definido uma vez, ao conectar, e ficava com o da ULTIMA conexao
+    // aberta: com um PostgreSQL e um MySQL lado a lado, o menu de uma tabela
+    // do MySQL gerava `ALTER TABLE "t"`, que o servidor recusa.
+    if (active_connection_ < connections_.size()) {
+        db::set_sql_dialect_for(connections_[active_connection_].profile.driver_id);
+    }
     // A navegacao por teclado do ImGui consome as setas dentro do NewFrame --
     // ANTES de qualquer codigo nosso rodar. Desliga-la no meio do quadro nao
     // adianta: a tecla ja' foi consumida.
@@ -1222,8 +1451,17 @@ void MainShell::draw() {
     if (ddl_pending_reload_ && !session().busy()) {
         ddl_pending_reload_ = false;
 
-        if (!session().last_script_failed() && !ddl_reload_table_.empty()) {
-            session().invalidate_table(ddl_reload_schema_, ddl_reload_table_);
+        const bool failed = session().last_script_failed();
+
+        // O editor de objeto segue o objeto renomeado e limpa as edicoes
+        // pendentes -- ou mostra o erro do servidor, se o comando falhou.
+        finish_object_ddl(failed);
+
+        if (!failed) {
+            // A LISTA de objetos tambem: so' invalidar a tabela nao fazia uma
+            // tabela recem-criada aparecer, nem a removida sumir -- era
+            // preciso reconectar para ver o efeito do proprio comando.
+            session().reload_catalog_async();
         }
         ddl_reload_schema_.clear();
         ddl_reload_table_.clear();
@@ -1247,9 +1485,21 @@ void MainShell::draw() {
                 // COUNT(*) devolve texto pelo protocolo; converter aqui
                 // evita depender do tipo que cada driver reporta.
                 const std::string text(result->text(0, 0));
+
+                // "Select row count": o numero vai para o aviso, e NAO para
+                // o total da grade -- a consulta contada pode nao ser a que
+                // esta' exibida.
+                if (count_to_toast_) {
+                    show_toast(std::string(TRF("Row count: %s", text.c_str())));
+                } else
                 try {
+                    // A contagem e' da aba que a pediu, nao da que estiver
+                    // a' vista agora.
+                    const std::size_t shown = document->active_result_tab_id();
+                    document->select_result_tab_by_id(document->executing_tab_id());
                     document->set_total_rows(
                         static_cast<std::size_t>(std::stoull(text)));
+                    document->select_result_tab_by_id(shown);
                 } catch (const std::exception&) {
                     // Numero ilegivel: deixa sem total, e o "+" volta. Um
                     // numero errado seria pior que a ausencia dele.
@@ -1258,7 +1508,59 @@ void MainShell::draw() {
 
             document->set_executing(false);
             counting_document_id_ = 0;
+            count_to_toast_       = false;
             break;
+        }
+    }
+
+    // "Filter by value": os distintos da coluna chegaram. Mesmo canal da
+    // grade, e pela mesma razao da contagem e' colhido ANTES dela.
+    if (distinct_document_id_ != 0) {
+        SqlDocument* asker = nullptr;
+        for (auto& document : documents_) {
+            if (document->id() == distinct_document_id_) asker = document.get();
+        }
+        if (asker == nullptr) {
+            distinct_document_id_  = 0;
+            grid_distinct_loading_ = false;
+        } else if (!session_for(*asker).busy()) {
+            grid_distinct_.clear();
+            if (auto result = session_for(*asker).take_result();
+                result.has_value() && result->column_count() >= 2) {
+                for (std::size_t r = 0; r < result->row_count(); ++r) {
+                    db::DistinctValue value;
+                    value.is_null = result->is_null(r, 0);
+                    if (!value.is_null) value.text = std::string(result->text(r, 0));
+                    value.count = static_cast<std::size_t>(
+                        std::strtoull(std::string(result->text(r, 1)).c_str(),
+                                      nullptr, 10));
+                    grid_distinct_.push_back(std::move(value));
+                }
+            } else if (asker->result().has_value()) {
+                // A consulta dos distintos falhou (coluna de tipo sem
+                // igualdade, por exemplo): os das linhas carregadas, dizendo
+                // que sao so' esses.
+                grid_distinct_ = db::distinct_values(*asker->result(),
+                                                     grid_distinct_column_);
+                grid_distinct_partial_ = true;
+            }
+            grid_distinct_loading_ = false;
+            asker->set_executing(false);
+            distinct_document_id_ = 0;
+        }
+    }
+
+    // "Apply and commit": o COMMIT terminou; agora sim a releitura.
+    if (reread_after_commit_ != 0) {
+        SqlDocument* saved = nullptr;
+        for (auto& document : documents_) {
+            if (document->id() == reread_after_commit_) saved = document.get();
+        }
+        if (saved == nullptr) {
+            reread_after_commit_ = 0;
+        } else if (!session_for(*saved).busy() && executing_document_id_ == 0) {
+            reread_after_commit_ = 0;
+            if (!saved->paged_sql().empty()) execute_page(*saved, saved->page());
         }
     }
 
@@ -1277,11 +1579,20 @@ void MainShell::draw() {
         for (auto& document : documents_) {
             if (document->id() != executing_document_id_) continue;
 
+            // O resultado vai para a aba que o PEDIU. O usuario pode ter
+            // trocado de aba de resultado enquanto a consulta rodava; a que
+            // ele esta' olhando volta ao fim da colheita.
+            const std::size_t shown_tab = document->active_result_tab_id();
+            const bool rerouted =
+                document->executing_tab_id() != shown_tab &&
+                document->select_result_tab_by_id(document->executing_tab_id());
+
             // Gravacao de edicoes: o buffer so' e' limpo quando os UPDATE
             // passaram. Limpar antes de saber perderia o trabalho se a
             // transacao falhasse -- e o usuario nao teria como refaze-lo.
             if (document->edits().has_changes() && saving_edits_) {
                 saving_edits_ = false;
+                if (active_runner.last_script_failed()) commit_after_save_ = false;
                 if (!active_runner.last_script_failed()) {
                     document->edits().clear();
 
@@ -1294,7 +1605,14 @@ void MainShell::draw() {
                     // usuario concluia que a gravacao nao funcionou. Foi o
                     // que a captura mostrou: 8888.50 no MySQL, 5000.00 na
                     // tela.
-                    if (!document->paged_sql().empty()) {
+                    if (commit_after_save_) {
+                        // "Apply and commit": o COMMIT primeiro, a releitura
+                        // quando ele terminar (ver acima) -- os dois usam o
+                        // mesmo worker.
+                        commit_after_save_ = false;
+                        active_runner.commit_async();
+                        reread_after_commit_ = document->id();
+                    } else if (!document->paged_sql().empty()) {
                         execute_page(*document, document->page());
 
                         // execute_page ja' armou executing_document_id_ para a
@@ -1364,6 +1682,12 @@ void MainShell::draw() {
                 std::getenv("OTTER_SHOW_EXPORT") != nullptr;
             if (auto_export) show_export_ = true;
 
+            // "Export from Query": a janela abre quando o resultado chega.
+            if (export_after_run_ == document->id()) {
+                export_after_run_ = 0;
+                if (document->result().has_value()) show_export_ = true;
+            }
+
             // A mensagem do worker conta as linhas que CHEGARAM, incluindo a
             // linha-sonda da paginacao. Refaz aqui, onde se sabe que ela
             // existe: a barra de status dizer "201 linhas" depois de mostrar
@@ -1376,6 +1700,10 @@ void MainShell::draw() {
                 document->set_status(active_runner.status_message());
             }
             document->set_executing(false);
+
+            // A releitura apos gravar (execute_page, acima) ja' fixou a aba
+            // de destino dela; so' entao a vista do usuario volta.
+            if (rerouted) document->select_result_tab_by_id(shown_tab);
             break;
         }
 
@@ -1386,23 +1714,20 @@ void MainShell::draw() {
         else                       executing_document_id_ = 0;
     }
 
-    // Atalhos globais. Registrados aqui, e nao so' rotulados no menu: um
-    // atalho anunciado que nao funciona e' pior que nenhum.
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Enter)) {
-        execute_current_sql();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Alt | ImGuiKey_X)) {
-        execute_script();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
-        open_script_file();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F)) {
-        format_current_sql();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E)) {
-        explain_current_sql(/*analyze=*/false);
-    }
+    // Comandos escolhidos em menu no quadro anterior, e a fila de "executar
+    // em abas separadas".
+    poll_command_file();
+    run_queued_commands();
+    process_run_queue();
+    tick_connections();
+
+    // Atalhos. Os do editor SQL vem do registro (ui/commands.hpp), com a
+    // tecla do perfil ativo: os globais aqui, os de contexto `editor` e
+    // `navigator` onde cada painel e' desenhado. Registrados, e nao so'
+    // rotulados no menu -- um atalho anunciado que nao funciona e' pior que
+    // nenhum.
+    dispatch_shortcuts(CommandContext::global);
+
     // F5 reexecuta a consulta da aba ativa, como no DBeaver. Sem documento
     // com consulta, nao faz nada -- em vez de um erro sobre nada.
     if (ImGui::IsKeyPressed(ImGuiKey_F5, /*repeat=*/false)) {
@@ -1417,50 +1742,40 @@ void MainShell::draw() {
     // inversa faria "salvar como" nunca acontecer.
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
         save_script_file(/*save_as=*/true);
-    } else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
-        save_script_file(/*save_as=*/false);
+    } else if (!grid_focused_ &&
+               ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+        // Com a GRADE em foco, Ctrl+S e' "Apply changes" -- o contexto
+        // `resultset.focused` do DBeaver. Sem o teste, gravar a linha
+        // salvaria tambem o script.
+        //
+        // Num editor de objeto, Ctrl+S e' o "Save" dele: revisa o SQL das
+        // propriedades alteradas. Nao ha' arquivo para gravar.
+        SqlDocument* target_document = active_document();
+        if (target_document != nullptr && target_document->is_object()) {
+            if (target_document->modified()) {
+                save_object_edits(
+                    *target_document,
+                    session_for(*target_document)
+                        .object_info(target_document->object()->ref)
+                        .info);
+            }
+        } else {
+            save_script_file(/*save_as=*/false);
+        }
     }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
-        connection_dialog_.open_new();
-    }
-    // Ctrl+T abre uma aba; Ctrl+W fecha a atual -- convencao de navegador.
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_T)) {
-        new_document();
-    }
+    // Ctrl+W fecha o script, nos dois perfis. "Novo script" saiu daqui: a
+    // tecla depende do perfil (Ctrl+] no DBeaver, Ctrl+T no C-Otter).
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_W)) {
         close_document(active_document_);
     }
-    // Commit e rollback: mesmos atalhos do DBeaver.
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_C)) {
-        session().commit_async();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_R)) {
-        session().rollback_async();
-    }
+    // Commit, rollback, auto-commit e nova conexao sairam daqui: sao comandos
+    // da tabela (app_commit...), com a tecla de cada perfil -- no DBeaver,
+    // Ctrl+Shift+C e' "Advanced copy" da grade, e commit e' Ctrl+Alt+Shift+K.
 
-    // Paginacao (resultset.fetch.page). A acao ja' existia nos botoes da
-    // barra da grade; faltava a tecla.
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_N)) {
-        if (SqlDocument* document = active_document();
-            document != nullptr && document->paged() && document->has_more()) {
-            execute_page(*document, document->page() + 1);
-        }
-    }
+    // "Buscar a proxima pagina" e "buscar tudo" (Ctrl+Alt+N, Ctrl+Shift+=)
+    // sairam daqui: sao comandos da tabela (ui/commands.cpp), despachados
+    // acima com a tecla do perfil ativo.
 
-    // Exportar o resultado. Nao ha' tecla no DBeaver -- a exportacao dele e'
-    // um assistente chamado pelo menu --, mas a acao existe aqui e ficava
-    // so' num botao de 24 px.
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_X)) {
-        if (SqlDocument* document = active_document();
-            document != nullptr && document->result().has_value()) {
-            show_export_ = true;
-        }
-    }
-
-    // Alternar auto-commit (ConnectionCommands.CMD_TOGGLE_AUTOCOMMIT).
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_A)) {
-        session().set_auto_commit_async(!session().auto_commit());
-    }
 
     // Desfazer e refazer, GLOBAIS.
     //
@@ -1472,7 +1787,7 @@ void MainShell::draw() {
     // O editor tambem le' estas teclas quando tem foco. Nao ha' duplicidade:
     // `ImGui::GetIO().WantTextInput` e' verdadeiro justamente quando ele esta'
     // consumindo teclado, e aqui a leitura e' pulada nesse caso.
-    if (!ImGui::GetIO().WantTextInput) {
+    if (!ImGui::GetIO().WantTextInput && !grid_focused_) {
         if (SqlDocument* document = active_document()) {
             if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z) &&
                 document->editor().CanUndo()) {
@@ -1489,11 +1804,39 @@ void MainShell::draw() {
     draw_toolbar();
     draw_dockspace();
 
-    draw_raft_panel();
+    tree_previous_active_ = active_connection_;
     draw_navigator_panel();
     draw_editor_panel();
-    draw_grid_panel();
-    draw_query_log_panel();
+
+    // Depois dos editores: o que foi digitado neste quadro ja' conta.
+    autosave_scripts();
+
+    // "Toggle results panel" esconde a parte de baixo inteira -- resultado e
+    // os paineis que moram com ele --, e o editor ocupa o espaco.
+    // Com um EDITOR DE OBJETO na frente, a parte de baixo tambem some: os
+    // dados dele estao na aba Data, e o editor do DBeaver ocupa a altura toda.
+    // Metade da janela dizendo "os dados estao na outra aba" seria espaco
+    // tirado justamente das colunas e do DDL.
+    const SqlDocument* front_document = active_document();
+    const bool object_in_front = front_document != nullptr && front_document->is_object();
+    if (bottom_hidden_for_object_ && !object_in_front && !results_hidden_) {
+        reselect_result_ = 2;   // ao voltar, a aba "Result" e' a da frente
+    }
+    bottom_hidden_for_object_ = object_in_front;
+
+    if (!results_hidden_ && !object_in_front) {
+        if (reselect_result_ > 0 && --reselect_result_ == 0) {
+            ImGui::SetWindowFocus("###ResultPanel");
+            focus_editor_ = true;   // o teclado continua no texto
+        }
+        draw_grid_panel();
+        if (show_log_) draw_query_log_panel();
+        draw_output_panel();
+        draw_variables_panel();
+        draw_outline_panel();
+    }
+    draw_terminal_panel();
+    draw_editor_extras();
     draw_status_bar();
 
     // Traduz o estado da sessao para o que o assistente precisa exibir.
@@ -1517,7 +1860,13 @@ void MainShell::draw() {
         ddl_dialog_.draw(connected && !session().busy(), transactional);
     }
     draw_ddl_forms();
+    draw_object_forms();
+    draw_import_data_window();
+    draw_tool_windows();
+    draw_app_windows();
     draw_value_panel();
+    draw_grid_panels();
+    draw_filter_settings();
 
     if (show_about_) draw_about_window();
     if (show_plan_) draw_plan_window();
@@ -1530,9 +1879,15 @@ void MainShell::draw() {
     if (show_demo_)  ImGui::ShowDemoWindow(&show_demo_);
 
     draw_rename_tab();
+    draw_goto_dialog();
+    draw_fetch_all_confirm();
+    draw_save_confirm();
 
     // Por ultimo: e' modal, e precisa ficar por cima de tudo que veio antes.
     draw_quit_confirm();
+    draw_close_tab_confirm();
+    draw_erase_connection_confirm();
+    draw_auth_prompt();
 }
 
 // Renomear a aba de script.
@@ -1590,6 +1945,169 @@ void MainShell::draw_rename_tab() {
     }
 }
 
+// Executa a consulta SEM a reescrita de paginacao. Ver o comentario do
+// atalho Ctrl+Shift+= para a razao de existir um caminho que contraria o
+// ADR 0011.
+void MainShell::fetch_all_rows(SqlDocument& document) {
+    Session& target = session_for(document);
+    if (target.state() != SessionState::connected || target.busy()) return;
+    if (document.paged_sql().empty()) return;
+
+    // A ordenacao e o filtro escolhidos precisam sobreviver: sao parte do que
+    // esta' na tela. So' o LIMIT/OFFSET e' que sai.
+    const Connection* owner = connection_by_id(document.connection_id());
+    const sql::Dialect& dialect =
+        owner != nullptr ? sql::dialect_for(owner->profile.driver_id)
+                         : active_dialect();
+
+    const sql::PagedQuery paged = sql::make_unpaged_query(
+        document.paged_sql(), dialect, document.sort(), document.filter());
+
+    document.set_page(0);
+    document.set_paged(false);   // deixa de ser pagina: a barra para de dizer "1-200 de"
+    document.set_has_more(false);
+
+    executing_document_id_ = document.id();
+    document.set_executing(true);
+    document.set_status({});
+
+    target.execute_async(paged.sql);
+}
+
+void MainShell::draw_fetch_all_confirm() {
+    if (confirm_fetch_all_ == 0) return;
+
+    SqlDocument* document = nullptr;
+    for (std::unique_ptr<SqlDocument>& d : documents_) {
+        if (d->id() == confirm_fetch_all_) { document = d.get(); break; }
+    }
+    if (document == nullptr) { confirm_fetch_all_ = 0; return; }
+
+    constexpr const char* kPopup = "###FetchAll";
+    ImGui::OpenPopup(kPopup);
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(TRW("Fetch all rows", "###FetchAll"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::size_t total = document->total_rows().value_or(0);
+
+        ImGui::Text(TR("This result has %zu rows."), total);
+        ImGui::TextColored(col4(colors().text_dim), "%s",
+                           TR("Fetching all of them uses memory and may take "
+                              "a while. You can cancel from the status bar."));
+        ImGui::Spacing();
+        // Exportar e' o caminho recomendado pelo ADR 0011 para varrer a
+        // tabela; oferece-lo aqui evita que a espera seja a unica saida.
+        ImGui::TextColored(col4(colors().text_dim), "%s",
+                           TR("To save them to a file, use Export instead."));
+        ImGui::Spacing();
+
+        if (ImGui::Button(TR("Fetch all"), ImVec2(120, 0))) {
+            fetch_all_rows(*document);
+            confirm_fetch_all_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(TR("Cancel"), ImVec2(120, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            confirm_fetch_all_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// Ir para a linha ou a coluna (resultset.grid.gotoRow / gotoColumn).
+//
+// Numerado a partir de 1 na tela, como a barra de status ja' mostra -- a
+// primeira linha e' "1", nao "0". O indice interno continua base zero.
+void MainShell::draw_goto_dialog() {
+    if (!goto_open_) return;
+
+    SqlDocument* document = active_document();
+    if (document == nullptr || !document->result().has_value()) {
+        goto_open_ = false;
+        return;
+    }
+    const db::ResultSet& rs = *document->result();
+
+    const bool by_row = goto_kind_ == GotoKind::row;
+    const std::size_t count = by_row ? rs.row_count() : rs.column_count();
+    if (count == 0) { goto_open_ = false; return; }
+
+    constexpr const char* kPopup = "###GotoCell";
+    ImGui::OpenPopup(kPopup);
+
+    const ImGuiViewport* goto_vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(goto_vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(by_row ? TRW("Go to row", "###GotoCell")
+                                      : TRW("Go to column", "###GotoCell"),
+                               nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+
+        ImGui::SetNextItemWidth(220);
+        // CharsDecimal: uma letra aqui nao tem leitura possivel, e recusar a
+        // digitacao diz isso antes de o usuario apertar OK.
+        const bool entered = ImGui::InputText(
+            "##goto", goto_buffer_, sizeof goto_buffer_,
+            ImGuiInputTextFlags_CharsDecimal |
+                ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::TextColored(col4(colors().text_dim), TR("1 to %zu"), count);
+
+        // Na coluna, o numero sozinho nao diz para onde se vai: mostrar o
+        // NOME confirma o destino antes do salto.
+        if (!by_row && goto_buffer_[0] != '\0') {
+            const auto typed = std::strtoull(goto_buffer_, nullptr, 10);
+            if (typed >= 1 && typed <= count) {
+                ImGui::TextColored(
+                    col4(colors().accent_light), "%s",
+                    rs.column(static_cast<std::size_t>(typed - 1))
+                        .info().name.c_str());
+            }
+        }
+
+        ImGui::Spacing();
+        const bool confirmed = entered || ImGui::Button(TR("OK"), ImVec2(100, 0));
+
+        if (confirmed) {
+            const auto typed = std::strtoull(goto_buffer_, nullptr, 10);
+            if (typed >= 1 && typed <= count) {
+                // Fora da grade nao ha' selecao; criar uma aqui e' o que faz
+                // o salto ser visivel.
+                if (!has_selection_ || selected_document_ != document->id()) {
+                    selected_document_ = document->id();
+                    selected_row_      = 0;
+                    selected_column_   = 0;
+                    has_selection_     = true;
+                }
+                const auto index = static_cast<std::size_t>(typed - 1);
+                if (by_row) selected_row_    = index;
+                else        selected_column_ = index;
+                // O bloco volta a ser uma celula: o destino do salto.
+                anchor_row_    = selected_row_;
+                anchor_column_ = selected_column_;
+                scroll_to_selection_ = true;
+                goto_open_ = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(TR("Cancel"), ImVec2(100, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            goto_open_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void MainShell::draw_dockspace() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
 
@@ -1628,15 +2146,22 @@ void MainShell::draw_dockspace() {
         ImGuiID left = 0, center = 0;
         ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Left, 0.24f, &left, &center);
 
-        ImGuiID left_top = 0, left_bottom = 0;
-        ImGui::DockBuilderSplitNode(left, ImGuiDir_Up, 0.28f, &left_top, &left_bottom);
-
+        // "Toggle editor layout": resultado embaixo (padrao) ou ao lado.
+        //
+        // O no' NOVO do corte e' o do RESULTADO; o que sobra -- e que herda o
+        // papel de no' central do dockspace -- e' o do editor. Era o inverso,
+        // e o no' central nunca se recolhe: com o resultado escondido
+        // ("Toggle results panel", ou um editor de objeto na frente) a
+        // metade de baixo ficava vazia em vez de ir para o editor.
         ImGuiID center_top = 0, center_bottom = 0;
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Up, 0.42f,
-                                    &center_top, &center_bottom);
+        ImGui::DockBuilderSplitNode(center,
+                                    side_by_side_ ? ImGuiDir_Right : ImGuiDir_Down,
+                                    side_by_side_ ? 0.5f : 0.58f,
+                                    &center_bottom, &center_top);
 
-        ImGui::DockBuilderDockWindow("###RaftPanel",      left_top);
-        ImGui::DockBuilderDockWindow("###NavigatorPanel", left_bottom);
+        // Uma arvore so' na lateral (ADR 0018). Eram dois paineis, Raft em
+        // cima e Navigator embaixo; o DBeaver tem um.
+        ImGui::DockBuilderDockWindow("###NavigatorPanel", left);
         ImGui::DockBuilderDockWindow("###ResultPanel",    center_bottom);
         ImGui::DockBuilderDockWindow("###QueriesPanel",   center_bottom);
         ImGui::DockBuilderFinish(dock_id);
@@ -1645,9 +2170,21 @@ void MainShell::draw_dockspace() {
         // onde ficava a antiga "SQL". Sem isto, conectar a uma segunda base
         // faria a janela dela nascer flutuando no meio da tela.
         editor_dock_id_ = center_top;
+        result_dock_id_ = center_bottom;
     }
 
+    // A faixa das abas de um no' ancorado usa a cor de TITULO ativo quando a
+    // janela dele tem o foco -- e essa cor (ambar a 40%) e' mais clara que a
+    // aba selecionada: a aba virava um buraco escuro com uma faixa por cima
+    // (relato do usuario, 2026-10-01). Aqui a faixa fica so' um tom acima do
+    // fundo; quem marca o foco e' a ABA, que e' o que se le'. As barras de
+    // titulo das janelas flutuantes (dialogos) nao passam por aqui e
+    // continuam com o destaque.
+    const Palette& palette = colors();
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive,
+                          col(mix(palette.bg_darkest, palette.accent, 0.10f)));
     ImGui::DockSpace(dock_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    ImGui::PopStyleColor();
     ImGui::End();
 }
 
@@ -1655,21 +2192,21 @@ void MainShell::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
 
     if (ImGui::BeginMenu(TR("File"))) {
-        if (ImGui::MenuItem(TR("New connection..."), "Ctrl+Shift+N")) {
-            connection_dialog_.open_new();
-        }
+        command_menu_item(Command::app_new_connection);
+        command_menu_item(Command::app_new_connection_url);
         if (ImGui::MenuItem(TR("Edit connection..."), nullptr, false,
                             session().state() == SessionState::connected)) {
             connection_dialog_.open_edit(active_profile_);
         }
-        if (ImGui::MenuItem(TR("Import from DBeaver..."))) {
+        if (ImGui::MenuItem(TR("Import connections..."))) {
             show_import_ = true;
             import_scanned_ = false;
             import_status_.clear();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(TR("New SQL tab"), "Ctrl+T")) new_document();
-        if (ImGui::MenuItem(TR("Open script..."), "Ctrl+O")) open_script_file();
+        // Do registro: a tecla ao lado e' a do perfil de atalhos ativo.
+        command_menu_item(Command::new_script);
+        command_menu_item(Command::open_script);
         if (ImGui::MenuItem(TR("Save script"), "Ctrl+S", false,
                             active_document() != nullptr)) {
             save_script_file(/*save_as=*/false);
@@ -1679,13 +2216,13 @@ void MainShell::draw_menu_bar() {
             save_script_file(/*save_as=*/true);
         }
         if (ImGui::MenuItem(TR("Close tab"), "Ctrl+W",
-                            false, documents_.size() > 1)) {
+                            false, !documents_.empty())) {
             close_document(active_document_);
         }
-        if (ImGui::MenuItem(TR("Disconnect"), nullptr, false,
-                            session().state() == SessionState::connected)) {
-            session().disconnect();
-        }
+        command_menu_item(Command::edit_open_local_file);
+        command_menu_item(Command::app_script_associate);
+        command_menu_item(Command::app_show_in_explorer);
+        command_menu_item(Command::app_disconnect);
         ImGui::Separator();
         if (ImGui::MenuItem(TR("Exit"), "Alt+F4")) request_quit();
         ImGui::EndMenu();
@@ -1713,44 +2250,49 @@ void MainShell::draw_menu_bar() {
         ImGui::EndMenu();
     }
 
-    if (ImGui::BeginMenu("SQL")) {
+    draw_navigate_menu();
+
+    // "SQL Editor", como no DBeaver (`SQLEditorMenu`). Os tres comandos de
+    // transacao ficam no fim: la' moram no menu Database.
+    if (ImGui::BeginMenu(TR("SQL Editor"))) {
         const bool can_run = session().state() == SessionState::connected &&
                              !session().busy();
-        if (ImGui::MenuItem(TR("Execute"), "Ctrl+Enter", false, can_run)) {
-            execute_current_sql();
-        }
-        if (ImGui::MenuItem(TR("Execute script"), "Alt+X", false, can_run)) {
-            execute_script();
-        }
+        draw_sql_editor_menu();
+
         ImGui::Separator();
-        if (ImGui::MenuItem(TR("Format SQL"), "Ctrl+Shift+F", false,
-                            active_document() != nullptr)) {
-            format_current_sql();
-        }
-        if (ImGui::MenuItem(TR("Explain plan"), "Ctrl+Shift+E", false, can_run)) {
-            explain_current_sql(/*analyze=*/false);
+        if (ImGui::BeginMenu(TR("Format"))) {
+            command_menu_item(Command::format);
+            command_menu_item(Command::morph_delimited);
+            command_menu_item(Command::comment_single);
+            command_menu_item(Command::comment_block);
+            command_menu_item(Command::word_wrap);
+            ImGui::EndMenu();
         }
         ImGui::Separator();
 
         const bool auto_commit = session().auto_commit();
         const bool in_txn = session().txn_state() != db::TxnState::idle;
 
-        bool toggle = auto_commit;
-        if (ImGui::MenuItem(TR("Auto-commit"), "Ctrl+Shift+A", &toggle, can_run)) {
-            session().set_auto_commit_async(toggle);
-        }
-        if (ImGui::MenuItem(TR("Commit"), "Ctrl+Shift+C", false,
-                            can_run && !auto_commit && in_txn)) {
-            session().commit_async();
-        }
-        if (ImGui::MenuItem(TR("Rollback"), "Ctrl+Shift+R", false,
-                            can_run && !auto_commit && in_txn)) {
-            session().rollback_async();
-        }
+        (void)can_run;
+        (void)auto_commit;
+        (void)in_txn;
+        command_menu_item(Command::app_auto_commit);
+        command_menu_item(Command::app_commit);
+        command_menu_item(Command::app_rollback);
+        command_menu_item(Command::run_script_native);
+        command_menu_item(Command::ddl_by_result);
         ImGui::EndMenu();
     }
 
+    draw_database_menu();
+    draw_window_menu();
+
     if (ImGui::BeginMenu(TR("Help"))) {
+        command_menu_item(Command::app_help);
+        command_menu_item(Command::app_collect_diagnostics);
+        command_menu_item(Command::app_clear_history);
+        command_menu_item(Command::app_reset_settings);
+        ImGui::Separator();
         // Seletor de tema: troca em tempo real, sem reiniciar.
         if (ImGui::BeginMenu(TR("Theme"))) {
             const std::string active_theme = current_theme().id;
@@ -1758,6 +2300,10 @@ void MainShell::draw_menu_bar() {
                 const bool selected = active_theme == theme.id;
                 if (ImGui::MenuItem(TR(theme.name.c_str()), nullptr, selected)) {
                     set_theme(theme.id);
+                    // Lembrado para a proxima execucao: era esquecido ao
+                    // fechar.
+                    settings_.theme = std::string(theme.id);
+                    save_settings();
                     // Os editores já criados guardam a paleta antiga.
                     for (auto& document : documents_) {
                         apply_editor_palette(document->editor());
@@ -1775,10 +2321,16 @@ void MainShell::draw_menu_bar() {
                 if (ImGui::MenuItem(language.native_name.c_str(), nullptr,
                                     selected)) {
                     i18n::set_language(language.code);
+                    settings_.language = language.code;
+                    save_settings();
                 }
             }
             ImGui::EndMenu();
         }
+
+        // Perfil de atalhos e conjunto de icones: DBeaver ou C-Otter.
+        draw_keymap_menu();
+        draw_icon_set_menu();
         ImGui::Separator();
         ImGui::MenuItem(TR("Icon gallery"), nullptr, &show_icons_);
         ImGui::MenuItem(TR("ImGui demo"), nullptr, &show_demo_);
@@ -1810,311 +2362,11 @@ std::string MainShell::dbms_name(const std::string& driver_id) {
 }
 
 
-// Lista UNICA de conexoes, como a do DBeaver.
-//
-// Eram tres blocos: os botoes "Nova conexao"/"Editar", as conexoes ABERTAS, e
-// as "salvas" sob um rotulo esmaecido. O DBeaver nao divide: cada perfil e'
-// uma linha so', conectada ou nao, e o estado vive no ponto colorido a'
-// esquerda. Quem vinha de la' via a mesma conexao ora em cima ora embaixo,
-// dependendo de haver sessao aberta -- e o rotulo "salvas", em caixa baixa,
-// parecia um item da lista e nao um cabecalho.
-//
-// O detalhe (versao, host, modo de transacao) saiu do corpo do painel para o
-// tooltip: empilhado sob a conexao ativa, ele empurrava as demais para baixo
-// e mudava a altura da lista conforme o que estava selecionado.
-void MainShell::draw_raft_panel() {
-    if (ImGui::Begin(TRW("Raft", "###RaftPanel"))) {
-        const Palette& p = colors();
-
-        std::size_t close_requested = connections_.size();
-        std::size_t drawn = 0;
-
-        // As pastas que aparecem, em ordem. O campo `folder` do perfil ja'
-        // existia e era editavel no dialogo, mas a arvore nunca agrupava --
-        // preencher a pasta nao mudava nada na tela.
-        //
-        // Ordem estavel, nao alfabetica: a primeira pasta a aparecer fica em
-        // cima. Reordenar a lista a cada conexao nova moveria as de baixo.
-        std::vector<std::string> folders;
-        auto note_folder = [&folders](const std::string& name) {
-            if (name.empty()) return;
-            if (std::find(folders.begin(), folders.end(), name) == folders.end()) {
-                folders.push_back(name);
-            }
-        };
-        for (const Connection& connection : connections_) {
-            note_folder(connection.profile.folder);
-        }
-        for (const db::StoredProfile& stored : saved_profiles_) {
-            note_folder(stored.profile.folder);
-        }
-
-        // Cada pasta e' um no' que contem as conexoes dela; as SEM pasta
-        // ficam na raiz, depois -- como no DBeaver, onde arrastar para fora
-        // de uma pasta devolve a conexao ao nivel de cima.
-        for (const std::string& folder : folders) {
-            ImGui::PushID(folder.c_str());
-
-            const bool open = ImGui::TreeNodeEx(
-                "##folder", ImGuiTreeNodeFlags_DefaultOpen |
-                                ImGuiTreeNodeFlags_SpanAvailWidth);
-            ImGui::SameLine(0.0f, 0.0f);
-            icon_inline(Icon::folder, p.accent_light);
-            ImGui::SameLine(0.0f, 6.0f);
-            ImGui::TextUnformatted(folder.c_str());
-
-            if (open) {
-                drawn += draw_raft_entries(folder, close_requested);
-                ImGui::TreePop();
-            } else {
-                // Contadas mesmo fechadas: senao um painel so' com pastas
-                // recolhidas diria "nenhuma conexao".
-                drawn += count_raft_entries(folder);
-            }
-            ImGui::PopID();
-        }
-
-        drawn += draw_raft_entries(std::string{}, close_requested);
-
-        if (close_requested < connections_.size()) {
-            close_connection(close_requested);
-        }
-
-        if (drawn == 0) {
-            ImGui::TextColored(col4(p.text_dim), TR("no connection"));
-        }
-
-        // Menu do painel vazio: e' por onde se cria conexao agora que os
-        // botoes sairam do topo. O DBeaver faz igual -- botao direito na area
-        // vazia da arvore oferece "Create New Connection".
-        if (ImGui::BeginPopupContextWindow(
-                "##raftmenu", ImGuiPopupFlags_MouseButtonRight |
-                              ImGuiPopupFlags_NoOpenOverItems)) {
-            if (ImGui::MenuItem(TR("New connection..."))) {
-                connection_dialog_.open_new();
-            }
-            ImGui::EndPopup();
-        }
-    }
-    ImGui::End();
-}
-
-// Um perfil salvo ja' esta' aberto como conexao?
-//
-// Sem isto ele apareceria duas vezes na mesma lista: uma como conexao viva e
-// outra como atalho para ela mesma.
-bool MainShell::raft_profile_is_open(const db::ConnectionProfile& profile) const {
-    for (const Connection& connection : connections_) {
-        if (connection.profile.host == profile.host &&
-            connection.profile.port == profile.port &&
-            connection.profile.database == profile.database &&
-            connection.profile.user == profile.user) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Quantas entradas a pasta tem, sem desenhar. Serve para a pasta recolhida
-// ainda contar para o "nenhuma conexao".
-std::size_t MainShell::count_raft_entries(const std::string& folder) const {
-    std::size_t total = 0;
-    for (const Connection& connection : connections_) {
-        if (connection.profile.folder != folder) continue;
-        const SessionState state = connection.session->state();
-        if (state == SessionState::disconnected &&
-            connection.profile.host.empty()) {
-            continue;
-        }
-        ++total;
-    }
-    for (const db::StoredProfile& stored : saved_profiles_) {
-        if (stored.profile.folder != folder) continue;
-        if (!raft_profile_is_open(stored.profile)) ++total;
-    }
-    return total;
-}
-
-// As conexoes de UMA pasta ("" = raiz): primeiro as que tem sessao, depois os
-// perfis salvos que ainda nao foram abertos. Sem separador entre os dois
-// grupos -- para quem olha, e' uma lista so'.
-std::size_t MainShell::draw_raft_entries(const std::string& folder,
-                                         std::size_t& close_requested) {
-    const Palette& p = colors();
-    std::size_t drawn = 0;
-
-    {
-        for (std::size_t i = 0; i < connections_.size(); ++i) {
-            const Connection& connection = connections_[i];
-            if (connection.profile.folder != folder) continue;
-
-            const SessionState state = connection.session->state();
-            if (state == SessionState::disconnected &&
-                connection.profile.host.empty()) {
-                continue;
-            }
-            ++drawn;
-
-            ImGui::PushID(static_cast<int>(i));
-
-            const bool active    = i == active_connection_;
-            const bool connected = state == SessionState::connected;
-
-            const std::uint32_t status_color =
-                connected                       ? p.ok
-                : state == SessionState::failed ? p.error
-                : state == SessionState::connecting ? p.warn
-                                                    : p.text_dim;
-
-            ImGui::TextColored(col4(status_color), "●");
-            ImGui::SameLine(0.0f, 6.0f);
-
-            // Icone do SGBD, na cor do estado: identifica o banco sem ler o
-            // nome, que e' o que o logo faz no DBeaver.
-            icon_inline(driver_icon(connection.profile.driver_id), status_color);
-            ImGui::SameLine(0.0f, 6.0f);
-
-            // Selecionavel de largura total: trocar de conexao e' um clique
-            // em qualquer ponto da linha, como no DBeaver.
-            ImGui::PushStyleColor(ImGuiCol_Text, col(active ? p.text_bright
-                                                            : p.text));
-            if (ImGui::Selectable(connection.profile.effective_name().c_str(),
-                                  active, ImGuiSelectableFlags_SpanAllColumns)) {
-                active_connection_ = i;
-                active_profile_    = connection.profile;
-            }
-            ImGui::PopStyleColor();
-
-            // Tooltip com o que antes ficava empilhado na lista.
-            if (ImGui::IsItemHovered()) {
-                const db::ConnectionTypeInfo& type =
-                    db::connection_type_info(connection.profile.type);
-
-                ImGui::BeginTooltip();
-                ImGui::TextColored(col4(type.color), "%s", type.name);
-                if (connected) {
-                    ImGui::Text("%s %s",
-                                dbms_name(connection.profile.driver_id).c_str(),
-                                connection.session->server_version().c_str());
-                    ImGui::Text("%s@%s:%u", connection.profile.user.c_str(),
-                                connection.profile.host.c_str(),
-                                connection.profile.port);
-                    ImGui::TextUnformatted(connection.profile.auto_commit
-                                               ? TR("auto-commit")
-                                               : TR("manual transaction"));
-                    if (connection.profile.read_only) {
-                        ImGui::TextColored(col4(p.warn), TR("read only"));
-                    }
-                } else if (state == SessionState::failed) {
-                    ImGui::TextColored(col4(p.error), "%s",
-                                       connection.session->status_message().c_str());
-                }
-                if (!connection.profile.description.empty()) {
-                    ImGui::TextUnformatted(connection.profile.description.c_str());
-                }
-                ImGui::EndTooltip();
-            }
-
-            if (ImGui::BeginPopupContextItem("##connmenu")) {
-                if (ImGui::MenuItem(TR("Edit connection..."))) {
-                    active_connection_ = i;
-                    active_profile_    = connection.profile;
-                    connection_dialog_.open_edit(connection.profile);
-                }
-                if (ImGui::MenuItem(TR("Disconnect"), nullptr, false, connected)) {
-                    connection.session->disconnect();
-                }
-                if (ImGui::MenuItem(TR("Close connection"))) {
-                    close_requested = i;
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem(TR("Copy name"))) {
-                    ImGui::SetClipboardText(
-                        connection.profile.effective_name().c_str());
-                }
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
-        }
-    }
-
-    // A remocao em si fica no chamador: apagar do vector aqui invalidaria o
-    // iterador e a referencia devolvida por session().
-    drawn += draw_saved_profiles(folder);
-    return drawn;
-}
-
-// Perfis salvos que ainda nao foram abertos.
-//
-// Sem estas linhas, importar do DBeaver gravava o perfil e nao mudava nada na
-// tela: o laco de cima so' mostra conexoes com sessao, e o unico caminho ate'
-// o que foi importado era reabrir o dialogo de conexao. Foi o que a captura
-// de tela mostrou depois de importar -- "1 conexao importada" e nenhuma linha
-// nova.
-//
-// Nao ha' cabecalho separando-as das de cima: continuam a MESMA lista, como
-// no DBeaver. O que distingue e' o ponto de estado a' esquerda.
-std::size_t MainShell::draw_saved_profiles(const std::string& folder) {
-    const Palette& p = colors();
-
-    std::size_t drawn = 0;
-
-    for (std::size_t i = 0; i < saved_profiles_.size(); ++i) {
-        const db::StoredProfile& stored = saved_profiles_[i];
-        if (stored.profile.folder != folder) continue;
-        if (raft_profile_is_open(stored.profile)) continue;
-        ++drawn;
-
-        ImGui::PushID(static_cast<int>(1000 + i));
-
-        // O ponto de estado, apagado: a linha tem a mesma forma da conexao
-        // aberta logo acima, e o que muda e' a cor. Sem ele, os dois grupos
-        // teriam recuo diferente e voltariam a parecer listas distintas.
-        ImGui::TextColored(col4(p.text_dim), "○");
-        ImGui::SameLine(0.0f, 6.0f);
-
-        // Mesmo icone da conexao aberta, esmaecido: a linha tem a mesma
-        // forma, e o que muda e' a cor -- continua sendo uma lista so'.
-        icon_inline(driver_icon(stored.profile.driver_id), p.text_dim);
-        ImGui::SameLine(0.0f, 6.0f);
-
-        ImGui::BeginDisabled(!stored.supported);
-
-        // Duplo clique conecta; clique simples so' seleciona. Conectar no
-        // primeiro clique abriria conexao a cada roçada do mouse na lista.
-        if (ImGui::Selectable(stored.profile.effective_name().c_str(), false,
-                              ImGuiSelectableFlags_SpanAllColumns |
-                              ImGuiSelectableFlags_AllowDoubleClick)) {
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                open_connection(stored.profile);
-            }
-        }
-        ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s@%s:%u\n%s", stored.profile.user.c_str(),
-                              stored.profile.host.c_str(), stored.profile.port,
-                              stored.supported
-                                  ? TR("double-click to connect")
-                                  : TR(stored.unsupported_reason.c_str()));
-        }
-
-        if (ImGui::BeginPopupContextItem("##savedmenu")) {
-            if (ImGui::MenuItem(TR("Connect"), nullptr, false, stored.supported)) {
-                open_connection(stored.profile);
-            }
-            if (ImGui::MenuItem(TR("Edit connection..."))) {
-                connection_dialog_.open_edit(stored.profile);
-            }
-            ImGui::EndPopup();
-        }
-        ImGui::PopID();
-    }
-
-    return drawn;
-}
-
 bool MainShell::matches_filter(std::string_view name) const {
+    // Filtro de objetos da conexao (core.object.filter.*): mascaras de
+    // inclusao e exclusao, alem do campo de busca.
+    if (!db::filter_accepts(object_filter_for(active_connection_), name)) return false;
+
     if (navigator_filter_[0] == 0) return true;
 
     // Sem diferenciar maiusculas: quem digita "cliente" espera achar
@@ -2129,100 +2381,6 @@ bool MainShell::matches_filter(std::string_view name) const {
     return it != name.end();
 }
 
-void MainShell::draw_navigator_panel() {
-    if (ImGui::Begin(TRW("Navigator", "###NavigatorPanel"))) {
-        if (session().state() != SessionState::connected) {
-            ImGui::TextColored(col4(colors().text_dim),
-                               TR("connect to browse the schema"));
-            ImGui::End();
-            return;
-        }
-
-        // Filtro por nome. Num banco com 32 tabelas rolar resolve; com 300,
-        // nao -- e o ERP_TID do usuario tem varios schemas.
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##navfilter", TR("Filter objects..."),
-                                 navigator_filter_, sizeof navigator_filter_);
-        ImGui::Separator();
-
-        const std::vector<db::SchemaMeta> schemas = session().schemas();
-
-        for (const db::SchemaMeta& schema : schemas) {
-            ImGui::PushID(schema.name.c_str());
-
-            // Seta, icone, nome -- a ordem do DBeaver. Ver draw_folder_node.
-            const bool schema_open = ImGui::TreeNodeEx(
-                "##schema", ImGuiTreeNodeFlags_DefaultOpen |
-                                ImGuiTreeNodeFlags_SpanAvailWidth);
-
-            ImGui::SameLine(0.0f, 0.0f);
-            icon_inline(Icon::schema, colors().accent_light);
-            ImGui::SameLine(0.0f, 6.0f);
-            ImGui::TextUnformatted(schema.name.c_str());
-
-            // Criar objeto pertence ao SCHEMA: é ele que os contém. No nó da
-            // tabela ficaria ambíguo -- "nova tabela" a partir de uma tabela
-            // sugere duplicá-la.
-            if (ImGui::BeginPopupContextItem("##schemamenu")) {
-                const bool can_create =
-                    session().state() == SessionState::connected &&
-                    !session().busy();
-
-                if (ImGui::MenuItem(TR("New table..."), nullptr, false,
-                                    can_create)) {
-                    open_create_table(schema.name);
-                }
-                if (ImGui::MenuItem(TR("New view..."), nullptr, false,
-                                    can_create)) {
-                    open_create_view(schema.name);
-                }
-
-                ImGui::Separator();
-                if (ImGui::MenuItem(TR("Copy name"))) {
-                    ImGui::SetClipboardText(schema.name.c_str());
-                }
-                ImGui::EndPopup();
-            }
-
-            if (schema_open) {
-                // Ordem do DBeaver: tabelas, views, materialized views,
-                // sequences, rotinas.
-                draw_relations_folder(schema, db::ObjKind::table,
-                                      Icon::table, TR("Tables"));
-                draw_relations_folder(schema, db::ObjKind::view,
-                                      Icon::view, TR("Views"));
-                draw_relations_folder(schema, db::ObjKind::materialized_view,
-                                      Icon::materialized_view,
-                                      TR("Materialized views"));
-                // Pastas que o SGBD nao tem ficam FORA, em vez de aparecerem
-                // com (0): "Sequences (0)" num MySQL sugere que ele poderia
-                // ter uma, e manda o usuario procurar o que nao existe. E' o
-                // mesmo criterio que ja' esconde "Constraints" de uma view.
-                if (session().has_sequences())  draw_sequences_folder(schema);
-
-                draw_routines_folder(schema);
-
-                if (session().has_user_types()) draw_types_folder(schema);
-                if (session().has_events())     draw_events_folder(schema);
-                ImGui::TreePop();
-            }
-            ImGui::PopID();
-        }
-
-        // --- System Info ------------------------------------------------------
-        //
-        // No NÍVEL DA CONEXÃO, depois dos bancos -- como no `<tree>` do
-        // DBeaver, onde "System Info" é irmão de "Databases", não filho.
-        // Colocá-lo dentro de um banco sugeriria que os números são daquele
-        // banco, e são do SERVIDOR.
-        if (session().state() == SessionState::connected) {
-            if (session().has_users())       draw_users_folder();
-            if (session().has_server_info()) draw_server_info_folder();
-        }
-    }
-    ImGui::End();
-}
-
 // As contas do servidor, com os GRANTs de cada uma.
 //
 // Os grants são carregados por usuário, ao expandir: `SHOW GRANTS` é uma
@@ -2232,6 +2390,7 @@ void MainShell::draw_users_folder() {
     const Palette& p = colors();
     const std::vector<db::UserMeta> users = session().users();
 
+    folder_creates(db::ObjectType::role);
     if (!draw_folder_node(Icon::user, TR("Users"), users.size(),
                           session().users_loaded())) {
         return;
@@ -2254,26 +2413,45 @@ void MainShell::draw_users_folder() {
 
         ImGui::PushID(user.qualified().c_str());
 
-        icon_inline(Icon::user, user.locked ? p.error : p.text_dim);
-        ImGui::SameLine(0.0f, 4.0f);
-
         // Conta bloqueada ou com senha expirada sai marcada: ela EXISTE, mas
         // não conecta -- e é essa a informação que importa ao olhar a lista.
         const bool usable = !user.locked && !user.expired;
 
+        // Seta, icone, nome -- ver draw_folder_node. Aqui o icone vinha ANTES
+        // da seta: a linha do usuario ficava um passo a' esquerda das pastas
+        // irmas, com a seta entre o icone e o nome (visto na captura do SQL
+        // Anywhere, onde a pasta Users fica ao lado de Roles).
+        ImGui::BeginGroup();
         const bool open = ImGui::TreeNodeEx(
-            user.qualified().c_str(),
-            ImGuiTreeNodeFlags_SpanAvailWidth |
-            (usable ? 0 : ImGuiTreeNodeFlags_Selected));
+            "##user", ImGuiTreeNodeFlags_SpanAvailWidth |
+                          (usable ? 0 : ImGuiTreeNodeFlags_Selected));
+        const bool user_toggled = ImGui::IsItemToggledOpen();
+        same_line_after_arrow();
+        icon_inline(Icon::user, user.locked ? p.error : p.accent_light);
+        ImGui::SameLine(0.0f, tree_label_gap());
+        ImGui::TextColored(col4(usable ? p.text : p.text_dim), "%s",
+                           user.qualified().c_str());
 
         if (!usable) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.error), "%s",
                                user.locked ? TR("[locked]") : TR("[expired]"));
         }
+        ImGui::EndGroup();
+        if (open) ImGui::Indent();   // ver draw_relations_folder
 
         if (ImGui::IsItemHovered() && !user.plugin.empty()) {
-            ImGui::SetTooltip("%s", user.plugin.c_str());
+            hint_fmt("%s", user.plugin.c_str());
+        }
+
+        // A conta como objeto: View User, Create New User, Rename, Delete,
+        // Tools > Change password. O host vai em `parent` -- a conta e' o par.
+        {
+            db::ObjectRef ref;
+            ref.type   = db::ObjectType::role;
+            ref.name   = user.name;
+            ref.parent = user.host;
+            object_node(ref, user_toggled);
         }
 
         if (open) {
@@ -2288,7 +2466,7 @@ void MainShell::draw_users_folder() {
             for (const std::string& grant : user.grants) {
                 ImGui::BeginGroup();
                 icon_inline(Icon::grant, p.text_dim);
-                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::SameLine(0.0f, tree_label_gap());
 
                 // O texto do GRANT é longo. Truncar na largura do painel e
                 // mostrar o inteiro no tooltip é mais legível que quebrar em
@@ -2297,7 +2475,7 @@ void MainShell::draw_users_folder() {
                 ImGui::EndGroup();
 
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", grant.c_str());
+                    hint_fmt("%s", grant.c_str());
                 }
             }
             ImGui::TreePop();
@@ -2314,11 +2492,11 @@ void MainShell::draw_users_folder() {
 // usuário pede a atualização quando quiser.
 void MainShell::draw_server_info_folder() {
     const Palette& p = colors();
+    // No SQL Anywhere as quatro listas sao propriedades e opcoes, com os nomes
+    // que o Sybase Central lhes da'; engines, charsets e plugins sao do MySQL.
+    const bool sa = session().is_sqlanywhere();
 
-    icon_inline(Icon::info, p.accent_light);
-    ImGui::SameLine(0.0f, 4.0f);
-
-    if (!ImGui::TreeNodeEx(TR("System info"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (!draw_folder_node(Icon::system_info, TR("System Info"), 0, false)) {
         return;
     }
 
@@ -2349,33 +2527,43 @@ void MainShell::draw_server_info_folder() {
             ImGui::EndGroup();
 
             if (!variable.detail.empty() && ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", variable.detail.c_str());
+                hint_fmt("%s", variable.detail.c_str());
             }
         }
         ImGui::TreePop();
     };
 
-    draw_variables(TR("Session status"), Icon::info,
+    draw_variables(sa ? TR("Connection properties") : TR("Session status"), Icon::info,
                    session().session_status(), session().session_status_loaded(),
                    [this] { session().load_server_info_async(
                                 Session::ServerInfo::session_status); });
 
-    draw_variables(TR("Global status"), Icon::info,
+    draw_variables(sa ? TR("Server properties") : TR("Global status"), Icon::info,
                    session().global_status(), session().global_status_loaded(),
                    [this] { session().load_server_info_async(
                                 Session::ServerInfo::global_status); });
 
-    draw_variables(TR("Session variables"), Icon::settings,
+    draw_variables(sa ? TR("Connection options") : TR("Session variables"),
+                   Icon::settings,
                    session().session_variables(),
                    session().session_variables_loaded(),
                    [this] { session().load_server_info_async(
                                 Session::ServerInfo::session_variables); });
 
-    draw_variables(TR("Global variables"), Icon::settings,
+    draw_variables(sa ? TR("Database properties") : TR("Global variables"),
+                   Icon::settings,
                    session().global_variables(),
                    session().global_variables_loaded(),
                    [this] { session().load_server_info_async(
                                 Session::ServerInfo::global_variables); });
+
+    if (sa) {
+        // As opcoes gravadas no banco para PUBLIC: o padrao de toda conexao.
+        draw_list_folder(Icon::setting, TR("Database options"),
+                         db::CatalogList::settings, Icon::setting);
+        ImGui::TreePop();
+        return;
+    }
 
     draw_variables(TR("Engines"), Icon::database,
                    session().engines(), session().engines_loaded(),
@@ -2386,6 +2574,20 @@ void MainShell::draw_server_info_folder() {
                    session().charsets(), session().charsets_loaded(),
                    [this] { session().load_server_info_async(
                                 Session::ServerInfo::charsets); });
+
+    // "User privileges" e "Plugins": os dois ultimos nos do System Info do
+    // DBeaver para o MySQL.
+    draw_variables(TR("User privileges"), Icon::grant,
+                   session().server_info(Session::ServerInfo::privileges),
+                   session().server_info_loaded(Session::ServerInfo::privileges),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::privileges); });
+
+    draw_variables(TR("Plugins"), Icon::extension,
+                   session().server_info(Session::ServerInfo::plugins),
+                   session().server_info_loaded(Session::ServerInfo::plugins),
+                   [this] { session().load_server_info_async(
+                                Session::ServerInfo::plugins); });
 
     ImGui::TreePop();
 }
@@ -2399,6 +2601,15 @@ bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count
     // nivel da arvore, e clicar la' por automacao erra o alvo.
     static const bool expand_all = std::getenv("OTTER_EXPAND_TREE") != nullptr;
     if (expand_all) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+
+    // "nav folder open|close <rotulo>" do canal de comandos: a primeira pasta
+    // DESENHADA com esse rotulo (em ingles ou traduzido). E' como se abre
+    // "Users" ou "Roles" para a captura sem o clique na seta.
+    if (!tree_folder_request_.empty() &&
+        (tree_folder_request_ == label || TR(tree_folder_request_.c_str()) == std::string_view(label))) {
+        ImGui::SetNextItemOpen(tree_folder_request_open_, ImGuiCond_Always);
+        tree_folder_request_.clear();
+    }
 
     // SETA primeiro, ICONE depois -- a ordem do DBeaver, e de qualquer arvore
     // de sistema de arquivos.
@@ -2415,9 +2626,49 @@ bool MainShell::draw_folder_node(Icon icon, const char* label, std::size_t count
     const bool open = ImGui::TreeNodeEx(
         node_id.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
 
-    ImGui::SameLine(0.0f, 0.0f);
-    icon_inline(icon, colors().accent_light);
-    ImGui::SameLine(0.0f, 6.0f);
+    // O menu da PASTA: "Create New <tipo>", como no DBeaver. Quem chama diz o
+    // que a pasta cria (folder_creates) logo antes; o estado do no' e' lido
+    // aqui porque o icone e o rotulo, desenhados depois, passam a ser o
+    // "ultimo item".
+    //
+    // TODA pasta tem menu, mesmo a que nao cria nada (References, System
+    // Info...): la' ele traz so' "Refresh". Sem menu nenhum, o botao direito
+    // numa pasta parecia defeito -- e numa delas ("Databases") era mesmo.
+    {
+        const std::optional<FolderCreate> create = std::move(folder_create_);
+        folder_create_.reset();
+
+        const std::string popup = node_id + "##create";
+        // "nav foldermenu <rotulo>" do canal de comandos abre o MESMO popup,
+        // no mesmo no': e' como se confere o menu sem o clique direito.
+        const bool requested = !folder_menu_request_.empty() &&
+                               folder_menu_request_ == label;
+        if (requested) folder_menu_request_.clear();
+        if (requested || (ImGui::IsItemHovered() &&
+                          ImGui::IsMouseReleased(ImGuiMouseButton_Right))) {
+            ImGui::OpenPopup(popup.c_str());
+        }
+        if (ImGui::BeginPopup(popup.c_str())) {
+            if (create.has_value()) {
+                create_menu_item(create->type, create->schema, create->parent);
+                if (create->type == db::ObjectType::function) {
+                    create_menu_item(db::ObjectType::procedure, create->schema,
+                                     create->parent);
+                }
+                ImGui::Separator();
+            }
+            if (ImGui::MenuItem(TR("Refresh"), "F5", false, !session().busy())) {
+                session().reload_catalog_async();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // `icon` e' o do CONTEUDO; a pasta em si depende do conjunto de icones
+    // (ui/icon_images.hpp).
+    same_line_after_arrow();
+    icon_inline(folder_icon(icon), colors().accent_light);
+    ImGui::SameLine(0.0f, tree_label_gap());
     ImGui::TextUnformatted(label);
 
     if (loaded) {
@@ -2433,25 +2684,61 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
     // Uma unica consulta traz tabelas, views e materialized views (pg_class
     // com relkind r/v/m/p); as pastas apenas filtram o resultado. Consultar
     // tres vezes o mesmo pg_class seria desperdicio.
+    //
+    // A pasta Tables leva tambem a tabela PARTICIONADA (relkind 'p'): no
+    // DBeaver ela e' uma PostgreTable como as outras. Comparando so' o kind,
+    // ela nao caia em pasta nenhuma -- sumia da arvore, e com ela a pasta
+    // Partitions, que so' existe dentro da tabela-mae.
+    const auto in_folder = [kind](db::ObjKind relation_kind) {
+        return relation_kind == kind ||
+               (kind == db::ObjKind::table &&
+                relation_kind == db::ObjKind::partitioned_table);
+    };
+
     std::size_t count = 0;
     for (const db::TableMeta& relation : schema.tables) {
         // Conta so' o que passa no filtro: "Tabelas (32)" com 3 visiveis
         // seria contradicao na mesma linha.
-        if (relation.kind == kind && matches_filter(relation.name)) ++count;
+        if (in_folder(relation.kind) && matches_filter(relation.name)) ++count;
     }
 
-    // Pasta vazia fica escondida, como no DBeaver: um schema sem views nao
-    // precisa de um no "Views (0)" ocupando espaco.
-    if (count == 0 && schema.tables_loaded) return;
+    // A pasta aparece mesmo vazia, com (0) -- como no DBeaver, onde Tables,
+    // Views e Materialized Views estao sempre no mesmo lugar. Escondida, quem
+    // procura "Views" onde esta' acostumado nao acha, e nao sabe se o schema
+    // nao tem views ou se o programa nao as mostra (diretiva 12).
 
+    // "Open Declaration": se a relacao procurada esta' nesta pasta, ela abre.
+    bool reveal_in_folder = false;
+    if (revealing_here() && schema.name == tree_reveal_.schema) {
+        for (const db::TableMeta& relation : schema.tables) {
+            reveal_in_folder |= in_folder(relation.kind) &&
+                                relation.name == tree_reveal_.relation;
+        }
+    }
+    if (reveal_in_folder && reveal_forcing()) ImGui::SetNextItemOpen(true);
+
+    const db::ObjectType object_type =
+        kind == db::ObjKind::view                ? db::ObjectType::view
+        : kind == db::ObjKind::materialized_view ? db::ObjectType::materialized_view
+        : kind == db::ObjKind::foreign_table     ? db::ObjectType::foreign_table
+                                                 : db::ObjectType::table;
+    folder_creates(object_type, schema.name);
     if (!draw_folder_node(icon, label, count, schema.tables_loaded)) return;
 
     const Palette& p = colors();
     const std::uint32_t tint = kind == db::ObjKind::table ? p.accent : p.data;
 
+    // A maior relacao da pasta: e' contra ela que a barra de cada uma mede.
+    std::int64_t largest = 0;
+    for (const db::TableMeta& relation : schema.tables) {
+        if (in_folder(relation.kind)) {
+            largest = (std::max)(largest, relation.size_bytes);
+        }
+    }
+
     bool first = true;
     for (const db::TableMeta& relation : schema.tables) {
-        if (relation.kind != kind) continue;
+        if (!in_folder(relation.kind)) continue;
         if (!matches_filter(relation.name)) continue;
 
         ImGui::PushID(relation.name.c_str());
@@ -2468,8 +2755,15 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         // SpanAvailWidth faz o no' ocupar a linha inteira, para o duplo
         // clique e o menu de contexto pegarem tambem sobre o icone e o nome,
         // que sao desenhados DEPOIS dele.
-        const bool open = ImGui::TreeNodeEx("##rel",
-                                            ImGuiTreeNodeFlags_SpanAvailWidth);
+        // O objeto de "Open Declaration" fica realcado enquanto o pedido
+        // vale, e a arvore rola ate' ele.
+        const bool revealed =
+            reveal_in_folder && relation.name == tree_reveal_.relation;
+        if (revealed && reveal_forcing()) ImGui::SetScrollHereY(0.35f);
+
+        const bool open = ImGui::TreeNodeEx(
+            "##rel", ImGuiTreeNodeFlags_SpanAvailWidth |
+                         (revealed ? ImGuiTreeNodeFlags_Selected : 0));
 
         // Estado do NO' capturado aqui: o icone e o nome vem depois, e
         // IsItemHovered passaria a falar deles em vez do no'.
@@ -2493,42 +2787,41 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
                                       qualified.size() + 1);
 
             icon_inline(icon, tint);
-            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
             ImGui::TextUnformatted(qualified.c_str());
             ImGui::EndDragDropSource();
         }
 
-        ImGui::SameLine(0.0f, 0.0f);
+        same_line_after_arrow();
         icon_inline(icon, tint);
-        ImGui::SameLine(0.0f, 6.0f);
+        ImGui::SameLine(0.0f, tree_label_gap());
         ImGui::TextColored(col4(kind == db::ObjKind::table ? p.text : p.data),
                            "%s", relation.name.c_str());
 
-        // Duplo clique abre os dados -- e' o gesto que todo cliente de banco
-        // tem, e sem ele o usuario precisa do menu de contexto para a acao
-        // mais frequente.
+        // Duplo clique (e F4) abre o EDITOR do objeto, como no DBeaver --
+        // na aba em que o usuario deixou o ultimo: quem so' quer os dados
+        // cai em Data, quem estava vendo colunas cai em Properties.
         //
         // O TreeNode ja' consome o duplo clique para expandir; IsItemToggled
         // distingue os dois casos.
         if (node_hovered &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-            !node_toggled) {
-
-            // Sem as colunas o SELECT sai com '*' e um comentario pedindo
-            // para expandir -- o usuario pediu os dados, nao um recado. Se
-            // ainda nao chegaram, pede e usa '*' nesta vez: mostrar os dados
-            // agora vale mais que uma lista de colunas um quadro depois.
-            if (!relation.columns_loaded && !session().busy()) {
-                session().load_columns_async(schema.name, relation.name);
-            }
-            open_sql_tab(db::generate_select(schema.name, relation),
-                         /*run=*/true);
+            ((ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !node_toggled) ||
+             ImGui::IsKeyPressed(ImGuiKey_F4, false))) {
+            db::ObjectRef ref;
+            ref.type   = object_type;
+            ref.schema = schema.name;
+            ref.name   = relation.name;
+            open_object_editor(std::move(ref), relation_opens_data_);
         }
 
-        if (!relation.size_pretty.empty()) {
-            ImGui::SameLine();
-            ImGui::TextColored(col4(p.text_dim), "  %s",
-                               relation.size_pretty.c_str());
+        // A coluna de tamanho, encostada a' direita com a barra -- a mesma
+        // dos bancos. O texto solto depois do nome ("24 kB") ficava em
+        // posicao diferente a cada linha e era cortado pela borda do painel.
+        if (relation.size_bytes >= 0) {
+            draw_size_bar(relation.size_pretty,
+                          largest > 0 ? static_cast<float>(relation.size_bytes) /
+                                            static_cast<float>(largest)
+                                      : 0.0f);
         }
 
         // Fecha o grupo ANTES do menu: BeginPopupContextItem usa o ultimo
@@ -2538,11 +2831,18 @@ void MainShell::draw_relations_folder(const db::SchemaMeta& schema,
         // Sem o grupo, o menu se ligaria ao texto do tamanho, e clicar com o
         // direito sobre o nome da tabela nao abriria nada.
         ImGui::EndGroup();
+        // O TreeNode acima abriu DENTRO do grupo, e EndGroup restaura o
+        // recuo salvo em BeginGroup (imgui.cpp, DC.Indent = BackupIndent):
+        // o recuo que o TreePush aplicou se perde, e o TreePop la' embaixo
+        // recua um nivel a MAIS. Os filhos saiam no nivel do pai e tudo
+        // depois do no' aberto deslizava para a esquerda. Reaplicado aqui,
+        // o par TreePush/TreePop volta a fechar.
+        if (open) ImGui::Indent();
 
         draw_relation_context_menu(schema, relation);
 
         if (ImGui::IsItemHovered() && !relation.comment.empty()) {
-            ImGui::SetTooltip("%s", relation.comment.c_str());
+            Hint(relation.name).text(relation.comment).show();
         }
 
         if (open) {
@@ -2564,21 +2864,42 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                     const db::TableMeta& table) {
     const Palette& p = colors();
 
+    // A ordem das pastas e' a do `<tree>` do DBeaver para a tabela:
+    // Columns, Constraints, Foreign Keys, Indexes, Dependencies, References,
+    // Partitions, Child tables, Triggers, Rules, Policies. As listas que so'
+    // o PostgreSQL tem ficam atras de `pg`.
+    const bool pg = session().is_postgres();
+    const bool ms = session().is_mssql();
+    const bool sa = session().is_sqlanywhere();
+
     // --- Colunas -------------------------------------------------------------
+    // O objeto-filho de uma linha destas pastas, para o editor e o menu.
+    const auto child = [&schema, &table](db::ObjectType type, const std::string& name) {
+        db::ObjectRef ref;
+        ref.type   = type;
+        ref.schema = schema.name;
+        ref.name   = name;
+        // O indice e' objeto do schema; os demais pertencem a' tabela.
+        ref.parent = type == db::ObjectType::index ? std::string{} : table.name;
+        return ref;
+    };
+
+    folder_creates(db::ObjectType::column, schema.name, table.name);
     if (draw_folder_node(Icon::column, TR("Columns"), table.columns.size(),
                          table.columns_loaded)) {
         if (!table.columns_loaded && !session().busy()) {
             session().load_columns_async(schema.name, table.name);
         }
-        if (table.columns.empty()) {
+        if (!table.columns_loaded) {
             ImGui::TextColored(col4(p.text_dim), TR("  loading..."));
         }
 
         for (const db::ColumnMeta& column : table.columns) {
+            ImGui::PushID(column.name.c_str());
             ImGui::BeginGroup();
             icon_inline(column.primary_key ? Icon::key : Icon::column,
                         column.primary_key ? p.data_light : p.text_dim);
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
 
             ImGui::TextColored(col4(column.primary_key ? p.data_light : p.text),
                                "%s", column.name.c_str());
@@ -2590,13 +2911,16 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
-                std::string tip = column.type_name;
-                if (!column.default_value.empty()) {
-                    tip += "\nDEFAULT " + column.default_value;
-                }
-                if (!column.comment.empty()) tip += "\n\n" + column.comment;
-                ImGui::SetTooltip("%s", tip.c_str());
+                Hint(column.name)
+                    .accent(TR("Type"), column.type_name)
+                    .row(TR("Primary key"), column.primary_key ? TR("yes") : "")
+                    .row(TR("Nullable"), column.nullable ? TR("yes") : TR("no"))
+                    .row(TR("Default"), column.default_value)
+                    .text(column.comment)
+                    .show();
             }
+            object_node(child(db::ObjectType::column, column.name));
+            ImGui::PopID();
         }
         ImGui::TreePop();
     }
@@ -2606,6 +2930,9 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     // Uma view nao tem constraints nem chaves estrangeiras. O DBeaver nem
     // mostra as pastas nesse caso, e mostrar "(0)" sugeriria que a view
     // poderia ter uma.
+    if (table.has_constraints()) {
+        folder_creates(db::ObjectType::constraint, schema.name, table.name);
+    }
     if (table.has_constraints() &&
         draw_folder_node(Icon::constraint, TR("Constraints"),
                          table.constraints.size(), table.constraints_loaded)) {
@@ -2614,10 +2941,11 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
         for (const db::ConstraintMeta& constraint : table.constraints) {
             const bool is_pk = constraint.kind == db::ObjKind::primary_key;
+            ImGui::PushID(constraint.name.c_str());
             ImGui::BeginGroup();
             icon_inline(is_pk ? Icon::key : Icon::constraint,
                         is_pk ? p.data_light : p.text_dim);
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
 
             ImGui::TextColored(col4(is_pk ? p.data_light : p.text), "%s",
                                constraint.name.c_str());
@@ -2627,8 +2955,45 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", constraint.definition.c_str());
+                Hint(constraint.name).code(constraint.definition).show();
             }
+            object_node(child(db::ObjectType::constraint, constraint.name));
+            ImGui::PopID();
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Chaves estrangeiras -------------------------------------------------
+    if (table.is_real_table()) {
+        folder_creates(db::ObjectType::foreign_key, schema.name, table.name);
+    }
+    if (table.is_real_table() &&
+        draw_folder_node(Icon::foreign_key, TR("Foreign Keys"),
+                         table.foreign_keys.size(), table.keys_loaded)) {
+        if (!table.keys_loaded && !session().busy()) {
+            session().load_keys_async(schema.name, table.name);
+        }
+        for (const db::ForeignKeyMeta& key : table.foreign_keys) {
+            ImGui::PushID(key.name.c_str());
+            ImGui::BeginGroup();
+            icon_inline(Icon::foreign_key, p.accent_light);
+            ImGui::SameLine(0.0f, tree_label_gap());
+            ImGui::TextColored(col4(p.text), "%s", key.source_column.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.data), "→ %s.%s", key.target_table.c_str(),
+                               key.target_column.c_str());
+            ImGui::EndGroup();
+
+            if (ImGui::IsItemHovered()) {
+                Hint(key.source_column + " \xE2\x86\x92 " + key.target_table + "." +
+                     key.target_column)
+                    .row("ON UPDATE", key.on_update)
+                    .row("ON DELETE", key.on_delete)
+                    .code(key.definition)
+                    .show();
+            }
+            object_node(child(db::ObjectType::foreign_key, key.name));
+            ImGui::PopID();
         }
         ImGui::TreePop();
     }
@@ -2637,6 +3002,9 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     //
     // A view comum nao tem indices, mas a materializada tem -- e' justamente
     // o que permite indexa-la como uma tabela.
+    if (table.has_indexes()) {
+        folder_creates(db::ObjectType::index, schema.name, table.name);
+    }
     if (table.has_indexes() &&
         draw_folder_node(Icon::index, TR("Indexes"), table.indexes.size(),
                          table.indexes_loaded)) {
@@ -2650,9 +3018,10 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
                                         : index.primary ? p.data_light
                                                         : p.text;
 
+            ImGui::PushID(index.name.c_str());
             ImGui::BeginGroup();
             icon_inline(Icon::index, color);
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
             ImGui::TextColored(col4(color), "%s", index.name.c_str());
 
             ImGui::SameLine();
@@ -2664,43 +3033,35 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", index.definition.c_str());
+                Hint(index.name).code(index.definition).show();
             }
+            object_node(child(db::ObjectType::index, index.name));
+            ImGui::PopID();
         }
         ImGui::TreePop();
     }
 
-    // --- Chaves estrangeiras -------------------------------------------------
-    if (table.has_constraints() &&
-        draw_folder_node(Icon::foreign_key, TR("Foreign keys"),
-                         table.foreign_keys.size(), table.keys_loaded)) {
-        if (!table.keys_loaded && !session().busy()) {
-            session().load_keys_async(schema.name, table.name);
-        }
-        for (const db::ForeignKeyMeta& key : table.foreign_keys) {
-            ImGui::BeginGroup();
-            icon_inline(Icon::foreign_key, p.accent_light);
-            ImGui::SameLine(0.0f, 4.0f);
-            ImGui::TextColored(col4(p.text), "%s", key.source_column.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(col4(p.data), "→ %s.%s", key.target_table.c_str(),
-                               key.target_column.c_str());
-            ImGui::EndGroup();
-
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s\n\nON UPDATE %s\nON DELETE %s",
-                                  key.definition.c_str(),
-                                  key.on_update.c_str(), key.on_delete.c_str());
-            }
-        }
-        ImGui::TreePop();
+    // --- Dependencias -------------------------------------------------------
+    //
+    // O que depende desta relacao: views, constraints, triggers, defaults.
+    // E' a resposta a "posso remover isto?" antes de tentar.
+    // No SQL Anywhere o servidor so' registra dependencia de VIEW (o que ela
+    // usa): numa tabela a pasta sairia sempre vazia.
+    if (pg || ms || (sa && !table.is_real_table())) {
+        // A dependencia interna (o tipo-linha, o indice da PK) cai junto num
+        // DROP; a marca separa as que de fato impedem.
+        ListOptions dependencies;
+        dependencies.on_suffix = "  (internal)";
+        draw_list_folder(Icon::dependency, TR("Dependencies"),
+                         db::CatalogList::dependencies, Icon::dependency,
+                         schema.name, table.name, {}, dependencies);
     }
 
     // --- Referências ---------------------------------------------------------
     //
     // Quem aponta para esta tabela. Responder "o que depende disto?" é o que
     // mais falta num cliente SQL.
-    if (table.has_constraints() &&
+    if (table.is_real_table() &&
         draw_folder_node(Icon::references, TR("References"),
                          table.references.size(), table.keys_loaded)) {
         if (!table.keys_loaded && !session().busy()) {
@@ -2708,42 +3069,13 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         }
         for (const db::ForeignKeyMeta& reference : table.references) {
             icon_inline(Icon::references, p.warn);
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
             ImGui::TextColored(col4(p.warn), "%s.%s",
                                reference.source_table.c_str(),
                                reference.source_column.c_str());
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "→ %s",
                                reference.target_column.c_str());
-        }
-        ImGui::TreePop();
-    }
-
-    // --- Triggers ------------------------------------------------------------
-    //
-    // A materialized view nao aceita trigger: ela e' atualizada por REFRESH,
-    // nao por DML. A view comum aceita INSTEAD OF.
-    if (table.has_triggers() &&
-        draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
-                         table.triggers_loaded)) {
-        if (!table.triggers_loaded && !session().busy()) {
-            session().load_triggers_async(schema.name, table.name);
-        }
-        for (const db::TriggerMeta& trigger : table.triggers) {
-            ImGui::BeginGroup();
-            icon_inline(Icon::trigger, trigger.enabled ? p.text_dim : p.error);
-            ImGui::SameLine(0.0f, 4.0f);
-            ImGui::TextColored(col4(trigger.enabled ? p.text : p.text_dim),
-                               "%s", trigger.name.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(col4(p.text_dim), "%s %s%s",
-                               trigger.timing.c_str(), trigger.events.c_str(),
-                               trigger.enabled ? "" : "  [off]");
-            ImGui::EndGroup();
-
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", trigger.definition.c_str());
-            }
         }
         ImGui::TreePop();
     }
@@ -2757,7 +3089,9 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
     // vez: não dá para saber se a tabela é particionada sem perguntar, e
     // perguntar para TODA tabela ao montar a árvore custaria uma consulta por
     // tabela.
-    if (!table.is_view() &&
+    // No SQL Server o catalogo ainda nao le' as particoes: a pasta fica de
+    // fora, em vez de dizer "not partitioned" de uma tabela que pode ser.
+    if (!ms && !sa && table.is_real_table() &&
         draw_folder_node(Icon::partition, TR("Partitions"),
                          table.partitions.size(), table.partitions_loaded)) {
         if (!table.partitions_loaded && !session().busy()) {
@@ -2768,27 +3102,36 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
             ImGui::TextColored(col4(p.text_dim), TR("not partitioned"));
         }
 
+        std::int64_t largest_partition = 0;
+        for (const db::PartitionMeta& partition : table.partitions) {
+            largest_partition =
+                (std::max)(largest_partition, partition.size_bytes);
+        }
+
         for (const db::PartitionMeta& partition : table.partitions) {
             ImGui::BeginGroup();
             icon_inline(Icon::partition, p.text_dim);
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
             ImGui::TextColored(col4(p.text), "%s", partition.name.c_str());
 
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "%s", partition.method.c_str());
 
-            if (!partition.size_pretty.empty()) {
-                ImGui::SameLine();
-                ImGui::TextColored(col4(p.text_dim), "%s",
-                                   partition.size_pretty.c_str());
+            if (partition.size_bytes >= 0) {
+                draw_size_bar(partition.size_pretty,
+                              largest_partition > 0
+                                  ? static_cast<float>(partition.size_bytes) /
+                                        static_cast<float>(largest_partition)
+                                  : 0.0f);
             }
             ImGui::EndGroup();
 
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s %s\n%s",
-                                  partition.method.c_str(),
-                                  partition.expression.c_str(),
-                                  partition.description.c_str());
+                Hint(partition.name)
+                    .row(TR("Method"), partition.method)
+                    .row(TR("Key"), partition.expression)
+                    .text(partition.description)
+                    .show();
             }
 
             // "Ver dados" só onde a partição É uma tabela consultável: no
@@ -2812,6 +3155,74 @@ void MainShell::draw_table_children(const db::SchemaMeta& schema,
         ImGui::TreePop();
     }
 
+    // --- Tabelas filhas (heranca) -------------------------------------------
+    //
+    // So' quando ha' alguma -- `visibleIf="object.hasSubClasses()"`. Numa
+    // particionada as filhas sao as particoes, que ja' tem pasta propria.
+    if (pg && table.kind == db::ObjKind::table && table.has_subclasses) {
+        draw_list_folder(Icon::inheritance, TR("Child tables"),
+                         db::CatalogList::child_tables, Icon::table, schema.name,
+                         table.name);
+    }
+
+    // --- Triggers ------------------------------------------------------------
+    //
+    // A materialized view nao aceita trigger: ela e' atualizada por REFRESH,
+    // nao por DML. A view comum aceita INSTEAD OF.
+    if (table.has_triggers() && (pg || ms || sa)) {
+        folder_creates(db::ObjectType::trigger, schema.name, table.name);
+    }
+    if (table.has_triggers() &&
+        draw_folder_node(Icon::trigger, TR("Triggers"), table.triggers.size(),
+                         table.triggers_loaded)) {
+        if (!table.triggers_loaded && !session().busy()) {
+            session().load_triggers_async(schema.name, table.name);
+        }
+        for (const db::TriggerMeta& trigger : table.triggers) {
+            ImGui::PushID(trigger.name.c_str());
+            ImGui::BeginGroup();
+            icon_inline(Icon::trigger, trigger.enabled ? p.text_dim : p.error);
+            ImGui::SameLine(0.0f, tree_label_gap());
+            ImGui::TextColored(col4(trigger.enabled ? p.text : p.text_dim),
+                               "%s", trigger.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text_dim), "%s %s%s",
+                               trigger.timing.c_str(), trigger.events.c_str(),
+                               trigger.enabled ? "" : "  [off]");
+            ImGui::EndGroup();
+
+            if (ImGui::IsItemHovered()) {
+                Hint(trigger.name).code(trigger.definition).show();
+            }
+            object_node(child(db::ObjectType::trigger, trigger.name));
+            ImGui::PopID();
+        }
+        ImGui::TreePop();
+    }
+
+    // --- Regras e politicas -------------------------------------------------
+    //
+    // Regra: tabela e view (a materializada nao aceita). Politica de RLS: so'
+    // tabela de verdade.
+    if (pg && !table.is_foreign() &&
+        table.kind != db::ObjKind::materialized_view) {
+        ListOptions rule_options;
+        rule_options.off_suffix    = "  [off]";
+        rule_options.object_type   = db::ObjectType::rule;
+        rule_options.object_schema = schema.name;
+        rule_options.object_parent = table.name;
+        draw_list_folder(Icon::rule, TR("Rules"), db::CatalogList::rules,
+                         Icon::rule, schema.name, table.name, {}, rule_options);
+    }
+    if (pg && table.is_real_table()) {
+        ListOptions policy_options;
+        policy_options.object_type   = db::ObjectType::policy;
+        policy_options.object_schema = schema.name;
+        policy_options.object_parent = table.name;
+        draw_list_folder(Icon::policy, TR("Policies"), db::CatalogList::policies,
+                         Icon::policy, schema.name, table.name, {}, policy_options);
+    }
+
     // --- Corpo da view -------------------------------------------------------
     if (table.is_view()) draw_view_definition(schema, table);
 }
@@ -2829,6 +3240,17 @@ void MainShell::open_sql_tab(std::string sql, bool run) {
 
 void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
                                            const db::TableMeta& relation) {
+    {
+        // O no' sobre o qual os comandos de contexto `navigator` agem.
+        db::ObjectRef tracked;
+        tracked.type   = relation.kind == db::ObjKind::view ? db::ObjectType::view
+                       : relation.kind == db::ObjKind::materialized_view
+                             ? db::ObjectType::materialized_view
+                             : db::ObjectType::table;
+        tracked.schema = schema.name;
+        tracked.name   = relation.name;
+        nav_track(tracked);
+    }
     if (!ImGui::BeginPopupContextItem("##relmenu")) return;
 
     const std::string full = db::qualified_name(schema.name, relation.name);
@@ -2847,8 +3269,26 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
         session().load_columns_async(schema.name, relation.name);
     }
 
-    // Ver dados: a acao mais frequente, no topo e destacada.
-    if (ImGui::MenuItem(TR("View data"))) {
+    db::ObjectRef object;
+    object.type   = relation.kind == db::ObjKind::view ? db::ObjectType::view
+                    : relation.kind == db::ObjKind::materialized_view
+                          ? db::ObjectType::materialized_view
+                    : relation.kind == db::ObjKind::foreign_table
+                          ? db::ObjectType::foreign_table
+                          : db::ObjectType::table;
+    object.schema = schema.name;
+    object.name   = relation.name;
+
+    // O editor do objeto, como no DBeaver: "View Table" (F4) e "View Data".
+    if (ImGui::MenuItem(relation.is_view() ? TR("View View") : TR("View Table"), "F4")) {
+        open_object_editor(object);
+    }
+    if (ImGui::MenuItem(TR("View Data"))) {
+        open_object_editor(object, /*data=*/true);
+    }
+    // O atalho antigo: os dados numa aba de SCRIPT, com o SELECT a' vista
+    // para editar ("Read data in SQL console" no DBeaver).
+    if (ImGui::MenuItem(TR("Read data in SQL console"))) {
         open_sql_tab(db::generate_select(schema.name, relation), /*run=*/true);
     }
     if (ImGui::MenuItem(TR("Count rows"))) {
@@ -2964,7 +3404,7 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
 
                 if (from_constraint && ImGui::IsItemHovered(
                         ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("%s",
+                    hint_fmt("%s",
                                       TR("belongs to a constraint; drop the "
                                          "constraint instead"));
                 }
@@ -3019,6 +3459,20 @@ void MainShell::draw_relation_context_menu(const db::SchemaMeta& schema,
                     db::generate_drop(schema.name, relation.name, relation.kind),
                     schema.name, relation.name);
     }
+
+    // "Import Data" / "Export Data" do DBeaver. Exportar abre os dados no
+    // editor do objeto e a janela de exportacao, ja' na consulta inteira.
+    if (!relation.is_view() &&
+        ImGui::MenuItem(TR("Import Data"), nullptr, false, can_alter)) {
+        open_import(schema.name, relation.name);
+    }
+    if (ImGui::MenuItem(TR("Export Data"), nullptr, false, can_alter)) {
+        open_object_editor(object, /*data=*/true);
+        export_object_pending_ = true;
+    }
+
+    // Analyze, Vacuum, Truncate, Refresh, Reindex -- o "Tools" do DBeaver.
+    if (!session().is_mysql()) draw_object_tools_menu(object);
 
     ImGui::Separator();
 
@@ -3097,6 +3551,7 @@ void MainShell::draw_sql_body(const char* id, const std::string& sql) {
 }
 
 void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
+    folder_creates(db::ObjectType::sequence, schema.name);
     if (!draw_folder_node(Icon::sequence, TR("Sequences"), schema.sequences.size(),
                           schema.sequences_loaded)) {
         return;
@@ -3108,9 +3563,10 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
 
     const Palette& p = colors();
     for (const db::SequenceMeta& sequence : schema.sequences) {
+        ImGui::PushID(sequence.name.c_str());
         ImGui::BeginGroup();
         icon_inline(Icon::sequence, p.text_dim);
-        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::SameLine(0.0f, tree_label_gap());
         ImGui::TextColored(col4(p.text), "%s", sequence.name.c_str());
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "= %lld",
@@ -3118,19 +3574,34 @@ void MainShell::draw_sequences_folder(const db::SchemaMeta& schema) {
         ImGui::EndGroup();
 
         if (ImGui::IsItemHovered()) {
-            std::string tip = "start " + std::to_string(sequence.start_value) +
-                              ", increment " + std::to_string(sequence.increment);
-            if (!sequence.owned_by.empty()) tip += "\nowned by " + sequence.owned_by;
-            if (!sequence.comment.empty())  tip += "\n\n" + sequence.comment;
-            ImGui::SetTooltip("%s", tip.c_str());
+            Hint(sequence.name)
+                .accent(TR("Last value"), std::to_string(sequence.last_value))
+                .row(TR("Start"), std::to_string(sequence.start_value))
+                .row(TR("Increment"), std::to_string(sequence.increment))
+                .row(TR("Owned by"), sequence.owned_by)
+                .text(sequence.comment)
+                .show();
         }
+        if (session().has_database_level() || session().is_sqlanywhere()) {
+            db::ObjectRef ref;
+            ref.type   = db::ObjectType::sequence;
+            ref.schema = schema.name;
+            ref.name   = sequence.name;
+            object_node(ref);
+        }
+        ImGui::PopID();
     }
     ImGui::TreePop();
 }
 
 void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
-    if (!draw_folder_node(Icon::function, TR("Functions"), schema.routines.size(),
-                          schema.routines_loaded)) {
+    // "Functions" no PostgreSQL, "Procedures" no MySQL -- o rotulo de cada
+    // `<tree>` no DBeaver (o do SQL Server tambem diz "Procedures").
+    const bool pg = session().is_postgres();
+    folder_creates(db::ObjectType::function, schema.name);
+    if (!draw_folder_node(pg ? Icon::function : Icon::procedure,
+                          pg ? TR("Functions") : TR("Procedures"),
+                          schema.routines.size(), schema.routines_loaded)) {
         return;
     }
 
@@ -3147,14 +3618,18 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
         // abrir junto com a primeira.
         ImGui::PushID((routine.name + "(" + routine.arguments + ")").c_str());
 
+        // Seta, icone, nome -- ver draw_folder_node. Aqui o icone vinha
+        // ANTES da seta, e as rotinas ficavam com a seta deslocada em relacao
+        // a todos os outros nos do mesmo nivel.
         ImGui::BeginGroup();
+        const bool open =
+            ImGui::TreeNodeEx("##routine", ImGuiTreeNodeFlags_SpanAvailWidth);
+        const bool routine_toggled = ImGui::IsItemToggledOpen();
+        same_line_after_arrow();
         icon_inline(is_procedure ? Icon::procedure : Icon::function,
-                    is_procedure ? p.data : p.text_dim);
-        ImGui::SameLine(0.0f, 4.0f);
-
-        ImGui::PushStyleColor(ImGuiCol_Text, col(p.text));
-        const bool open = ImGui::TreeNode(routine.name.c_str());
-        ImGui::PopStyleColor();
+                    is_procedure ? p.data : p.accent_light);
+        ImGui::SameLine(0.0f, tree_label_gap());
+        ImGui::TextColored(col4(p.text), "%s", routine.name.c_str());
 
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "(%s)", routine.arguments.c_str());
@@ -3165,16 +3640,51 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
             ImGui::TextColored(col4(p.data), "→ %s", routine.return_type.c_str());
         }
         ImGui::EndGroup();
+        if (open) ImGui::Indent();   // ver draw_relations_folder
 
         if (ImGui::IsItemHovered()) {
-            std::string tip = routine.name + "(" + routine.arguments + ")";
-            if (!is_procedure) tip += "\n  returns " + routine.return_type;
-            tip += "\n  language " + routine.language;
-            if (!routine.comment.empty()) tip += "\n\n" + routine.comment;
-            ImGui::SetTooltip("%s", tip.c_str());
+            Hint(routine.name)
+                .row(TR("Arguments"), routine.arguments)
+                .accent(TR("Returns"), is_procedure ? std::string{} : routine.return_type)
+                .row(TR("Language"), routine.language)
+                .text(routine.comment)
+                .show();
+        }
+        {
+            db::ObjectRef ref;
+            ref.type = routine.aggregate ? db::ObjectType::aggregate
+                       : is_procedure    ? db::ObjectType::procedure
+                                         : db::ObjectType::function;
+            ref.schema = schema.name;
+            ref.name   = routine.name;
+            // No PostgreSQL, so' os tipos: e' o que ALTER/DROP aceitam.
+            ref.signature = pg ? routine.signature : std::string{};
+            object_node(ref, routine_toggled);
         }
 
         if (open) {
+            if (pg) {
+                // Parametro de saida sai marcado: e' o que distingue uma
+                // funcao que devolve varios valores.
+                ListOptions parameters;
+                parameters.on_suffix = "  OUT";
+                draw_list_folder(Icon::parameter, TR("Function parameters"),
+                                 db::CatalogList::routine_parameters,
+                                 Icon::parameter, schema.name, routine.name,
+                                 routine.arguments, parameters);
+                draw_list_folder(Icon::dependency, TR("Dependencies"),
+                                 db::CatalogList::routine_dependencies,
+                                 Icon::dependency, schema.name, routine.name,
+                                 routine.arguments);
+            } else if (session().is_mssql() || session().is_sqlanywhere()) {
+                ListOptions parameters;
+                parameters.on_suffix = session().is_mssql() ? "  OUTPUT" : "  OUT";
+                draw_list_folder(Icon::parameter, TR("Procedure parameters"),
+                                 db::CatalogList::routine_parameters,
+                                 Icon::parameter, schema.name, routine.name, {},
+                                 parameters);
+            }
+
             if (!routine.definition_loaded && !session().busy()) {
                 session().load_routine_definition_async(
                     schema.name, routine.name, routine.arguments);
@@ -3193,6 +3703,7 @@ void MainShell::draw_routines_folder(const db::SchemaMeta& schema) {
 }
 
 void MainShell::draw_events_folder(const db::SchemaMeta& schema) {
+    folder_creates(db::ObjectType::event, schema.name);
     if (!draw_folder_node(Icon::event, TR("Events"), schema.events.size(),
                           schema.events_loaded)) {
         return;
@@ -3220,7 +3731,7 @@ void MainShell::draw_events_folder(const db::SchemaMeta& schema) {
         const bool enabled = event.status == "ENABLED";
 
         icon_inline(Icon::event, enabled ? p.text_dim : p.error);
-        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::SameLine(0.0f, tree_label_gap());
         ImGui::TextColored(col4(enabled ? p.text : p.text_dim), "%s",
                            event.name.c_str());
 
@@ -3230,13 +3741,24 @@ void MainShell::draw_events_folder(const db::SchemaMeta& schema) {
         ImGui::EndGroup();
 
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s\n%s\n\n%s",
-                              event.definer.c_str(),
-                              event.last_executed.empty()
-                                  ? TR("never executed")
-                                  : event.last_executed.c_str(),
-                              event.definition.c_str());
+            Hint(event.name)
+                .row(TR("Definer"), event.definer)
+                .row(TR("Schedule"), event.schedule)
+                .row(TR("Last executed"), event.last_executed.empty()
+                                              ? TR("never executed")
+                                              : event.last_executed.c_str())
+                .code(event.definition)
+                .show();
         }
+
+        // View Event, Create New Event, Rename, Delete (docs/MYSQL-MAP.md).
+        db::ObjectRef ref;
+        ref.type   = db::ObjectType::event;
+        ref.schema = schema.name;
+        ref.name   = event.name;
+        ImGui::PushID(event.name.c_str());
+        object_node(ref);
+        ImGui::PopID();
     }
     ImGui::TreePop();
 }
@@ -3266,19 +3788,24 @@ void MainShell::draw_types_folder(const db::SchemaMeta& schema) {
         // do domain so' aparecia sobre aquele pedaco do texto.
         ImGui::BeginGroup();
 
-        icon_inline(Icon::data_type, p.data_light);
-        ImGui::SameLine(0.0f, 4.0f);
-
         // Enum e composto tem filhos para mostrar; domain e range cabem
         // inteiros no rotulo e no tooltip, entao nao viram no' expansivel.
-        bool open = false;
+        //
+        // Seta, icone, nome. O tipo SEM filhos nao tem seta, mas ganha o
+        // espaco dela: o icone cai na mesma coluna dos que tem.
+        bool open         = false;
+        bool type_toggled = false;
         if (type.has_children()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, col(p.text));
-            open = ImGui::TreeNode(type.name.c_str());
-            ImGui::PopStyleColor();
+            open = ImGui::TreeNodeEx("##type", ImGuiTreeNodeFlags_SpanAvailWidth);
+            type_toggled = ImGui::IsItemToggledOpen();
+            same_line_after_arrow();
         } else {
-            ImGui::TextColored(col4(p.text), "%s", type.name.c_str());
+            ImGui::Dummy(ImVec2(ImGui::GetTreeNodeToLabelSpacing(), 0.0f));
+            same_line_after_arrow();
         }
+        icon_inline(Icon::data_type, p.data_light);
+        ImGui::SameLine(0.0f, tree_label_gap());
+        ImGui::TextColored(col4(p.text), "%s", type.name.c_str());
 
         ImGui::SameLine();
         ImGui::TextColored(col4(p.text_dim), "%s",
@@ -3296,24 +3823,28 @@ void MainShell::draw_types_folder(const db::SchemaMeta& schema) {
         }
 
         ImGui::EndGroup();
+        if (open) ImGui::Indent();   // ver draw_relations_folder
 
         if (ImGui::IsItemHovered()) {
-            std::string tip = type.name + " (" +
-                              std::string(db::to_string(type.kind)) + ")";
-            if (!type.base_type.empty()) {
-                tip += "\n  " + type.base_type;
-                if (type.not_null) tip += " NOT NULL";
-                if (!type.default_value.empty()) {
-                    tip += " DEFAULT " + type.default_value;
-                }
-            }
-            if (!type.check_constraint.empty()) {
-                tip += "\n  " + type.check_constraint;
-            }
-            if (!type.subtype.empty()) tip += "\n  subtype " + type.subtype;
-            if (!type.owner.empty())   tip += "\n  owner " + type.owner;
-            if (!type.comment.empty()) tip += "\n\n" + type.comment;
-            ImGui::SetTooltip("%s", tip.c_str());
+            Hint(type.name)
+                .accent(TR("Kind"), db::to_string(type.kind))
+                .row(TR("Base type"), type.base_type.empty()
+                                          ? std::string{}
+                                          : type.base_type +
+                                                (type.not_null ? " NOT NULL" : ""))
+                .row(TR("Default"), type.default_value)
+                .row(TR("Subtype"), type.subtype)
+                .row(TR("Owner"), type.owner)
+                .code(type.check_constraint)
+                .text(type.comment)
+                .show();
+        }
+        {
+            db::ObjectRef ref;
+            ref.type   = db::ObjectType::data_type;
+            ref.schema = schema.name;
+            ref.name   = type.name;
+            object_node(ref, type_toggled);
         }
 
         if (open) {
@@ -3328,7 +3859,7 @@ void MainShell::draw_types_folder(const db::SchemaMeta& schema) {
 
             for (const db::TypeAttributeMeta& attribute : type.attributes) {
                 icon_inline(Icon::column, p.text_dim);
-                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::SameLine(0.0f, tree_label_gap());
                 ImGui::TextColored(col4(p.text), "%s", attribute.name.c_str());
                 ImGui::SameLine();
                 ImGui::TextColored(col4(p.text_dim), "%s%s",
@@ -3366,7 +3897,7 @@ void MainShell::draw_toolbar() {
 
         // Separador vertical fino entre grupos de ações.
         auto group_separator = [&p] {
-            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::SameLine(0.0f, tree_label_gap());
             const ImVec2 pos = ImGui::GetCursorScreenPos();
             const float h = toolbar_button_size();
             ImGui::GetWindowDrawList()->AddLine(
@@ -3492,8 +4023,12 @@ void MainShell::draw_toolbar() {
         // --- Contexto, alinhado à direita ------------------------------------
         if (connected) {
             char context[160];
-            std::snprintf(context, sizeof(context), "%s  ·  %s",
-                          active_profile_.effective_name().c_str(),
+            // O mesmo titulo da aba da conexao ativa, com o banco.
+            const std::string active_title =
+                active_connection_ < connections_.size()
+                    ? connection_title(connections_[active_connection_])
+                    : active_profile_.effective_name();
+            std::snprintf(context, sizeof(context), "%s  ·  %s", active_title.c_str(),
                           db::connection_type_info(active_profile_.type).name);
 
             const float width = ImGui::CalcTextSize(context).x;
@@ -3530,6 +4065,8 @@ void MainShell::draw_document_tabs(std::size_t connection_id) {
                                       ImGuiTabItemFlags_NoTooltip)) {
         SqlDocument& created = new_document();
         created.set_connection_id(connection_id);
+        focus_document_id_ = created.id();
+        focus_editor_      = true;
     }
 
     std::optional<std::size_t> to_close;
@@ -3549,6 +4086,13 @@ void MainShell::draw_document_tabs(std::size_t connection_id) {
 
         ImGuiTabItemFlags item_flags = ImGuiTabItemFlags_None;
         if (document.pinned()) item_flags |= ImGuiTabItemFlags_Leading;
+
+        // Pedido de trazer ESTA aba para a frente (o objeto ja' estava
+        // aberto, ou acabou de ser).
+        if (select_document_id_ == document.id()) {
+            item_flags |= ImGuiTabItemFlags_SetSelected;
+            select_document_id_ = 0;
+        }
         if (document.modified()) item_flags |= ImGuiTabItemFlags_UnsavedDocument;
 
         bool open = true;
@@ -3606,18 +4150,29 @@ void MainShell::draw_document_tabs(std::size_t connection_id) {
 }
 
 void MainShell::draw_document_body(SqlDocument& document) {
+    // A aba de um OBJETO nao e' um script: propriedades, dados e DDL.
+    if (document.is_object()) {
+        draw_object_editor(document);
+        return;
+    }
+
     // A sessao DESTE documento, nao a ativa: a aba executa contra a base a
     // que pertence, mesmo que outra conexao esteja selecionada no Raft.
     Session& target = session_for(document);
     const bool can_run = target.state() == SessionState::connected &&
                          !target.busy();
 
-    ImGui::BeginDisabled(!can_run);
-    if (ImGui::Button(TR("Execute  (Ctrl+Enter)"))) execute_current_sql();
-    ImGui::EndDisabled();
+    (void)can_run;   // os botoes de executar estao na barra lateral
 
+    // Os atalhos de contexto `editor`, so' com ESTA janela em foco -- ver
+    // dispatch_shortcuts.
+    const bool focused =
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    if (focused) {
+        editor_has_focus_ = true;
+        dispatch_shortcuts(CommandContext::editor);
+    }
 
-    ImGui::SameLine();
     const TextEditor::DocPos cursor =
         document.editor().GetCurrentCursorPosition();
 
@@ -3632,6 +4187,24 @@ void MainShell::draw_document_body(SqlDocument& document) {
         draw_busy_indicator();
     }
 
+    // Script de uma conexao que nao esta' aberta -- e' como voltam os scripts
+    // da execucao anterior (ui/script_session.cpp), que nao conectam
+    // sozinhos. Dito na propria aba, com o botao ao lado: os comandos de
+    // executar ficam desabilitados, e sem isto nada explicaria por que.
+    if (const SessionState state = target.state();
+        (state == SessionState::disconnected || state == SessionState::failed) &&
+        can_connect_from_tab(document.connection_id())) {
+        ImGui::SameLine();
+        ImGui::TextColored(col4(colors().warn), "  %s", TR("not connected"));
+        ImGui::SameLine();
+        if (ImGui::SmallButton(TR("Connect"))) {
+            tree_requests_.reconnect = document.connection_id();
+        }
+    } else if (state == SessionState::connecting) {
+        ImGui::SameLine();
+        ImGui::TextColored(col4(colors().text_dim), "  %s", TR("connecting..."));
+    }
+
     ImGui::Separator();
 
     // SQL e' codigo: aqui, e so' aqui, a fonte e' monoespacada. O resto da
@@ -3639,6 +4212,20 @@ void MainShell::draw_document_body(SqlDocument& document) {
     // Antes de Render(): a config e' lida quando o editor decide abrir o
     // popup, e aplica-la depois valeria so' no quadro seguinte.
     apply_completion_options(document);
+
+    // A barra lateral a' esquerda do texto, como no DBeaver: executar em
+    // cima, paineis embaixo.
+    const float body_height = ImGui::GetContentRegionAvail().y;
+    draw_editor_side_toolbar(body_height);
+    ImGui::SameLine(0.0f, 2.0f);
+
+    // "Switch active panel" e os dialogos devolvem o foco ao texto.
+    if (focus_editor_ &&
+        (focus_document_id_ == 0 || focus_document_id_ == document.id())) {
+        document.editor().SetFocus();
+        focus_editor_      = false;
+        focus_document_id_ = 0;
+    }
 
     ImFont* mono = mono_font();
     if (mono != nullptr) ImGui::PushFont(mono);
@@ -3701,26 +4288,73 @@ void MainShell::draw_document_body(SqlDocument& document) {
 // ImGui as empilha como abas no mesmo no' do dock -- e da' para arrastar
 // duas conexoes lado a lado para comparar.
 void MainShell::draw_connection_editor(Connection& connection) {
+    // Enquanto as abas DESTA conexao sao desenhadas, o SQL gerado e' no
+    // dialeto dela (o editor de objeto monta ALTER, GRANT e DROP a cada
+    // quadro). Reposto ao sair, para o resto da tela.
+    struct DialectScope {
+        db::QuoteStyle previous = db::sql_dialect();
+        ~DialectScope() { db::set_sql_dialect(previous); }
+    } dialect_scope;
+    db::set_sql_dialect_for(connection.profile.driver_id);
     // Titulo = nome da conexao; ###id mantem a identidade da janela quando o
     // usuario renomeia a conexao (o ImGui identifica janela pelo nome, e
     // renomear a desancoraria do layout -- mesma razao do TRW).
-    const std::string title = connection.profile.effective_name() +
-                              "###SqlPanel" + std::to_string(connection.id);
+    const std::string panel_id = "###SqlPanel" + std::to_string(connection.id);
 
-    // Ancora a janela na primeira vez que ela aparece. SetNextWindowDockID
-    // com ImGuiCond_FirstUseEver nao sobrescreve o que o usuario arrastou:
-    // depois de mover a janela, a posicao dele e' que vale.
-    if (editor_dock_id_ != 0) {
-        ImGui::SetNextWindowDockID(editor_dock_id_, ImGuiCond_FirstUseEver);
+    // Espaco a' esquerda do titulo para o icone de banco (pedido do usuario,
+    // 2026-10-01): o ImGui nao poe widget dentro da aba de uma janela
+    // ancorada, entao o rotulo reserva a largura com espacos e o icone e'
+    // desenhado por cima, em draw_tab_database_icon. So' com a janela
+    // ancorada no quadro anterior: flutuando, o titulo e' a barra da janela,
+    // onde o icone nao e' desenhado e os espacos seriam so' um recuo.
+    std::string padding;
+    if (const ImGuiWindow* previous = ImGui::FindWindowByName(panel_id.c_str());
+        // DockNode, e nao DockIsActive: com uma janela so' no no', o ImGui
+        // limpa DockIsActive entre o fim de um quadro e o Begin do seguinte.
+        previous != nullptr && previous->DockNode != nullptr) {
+        const float wanted = ImGui::GetFontSize() + ImGui::GetStyle().ItemInnerSpacing.x;
+        const float space  = ImGui::CalcTextSize(" ").x;
+        padding.assign(static_cast<std::size_t>(std::ceil(wanted / space)), ' ');
+    }
+    const std::string title = padding + connection_title(connection) + panel_id;
+
+    // Ancora a janela na primeira vez que ela aparece NESTA execucao; depois
+    // disso, o que o usuario arrastou e' que vale.
+    //
+    // Era ImGuiCond_FirstUseEver, que confia no layout.ini: ele guarda o id
+    // do no' de docking, e os ids mudam quando a arvore de paineis muda. Ao
+    // sair o painel Raft (ADR 0018), o id gravado deixou de existir e a
+    // janela do editor nasceu FLUTUANDO sobre a grade. O layout dos paineis
+    // ja' e' remontado a cada execucao; a janela do editor segue a mesma
+    // regra.
+    if (editor_dock_id_ != 0 && !connection.docked) {
+        ImGui::SetNextWindowDockID(editor_dock_id_, ImGuiCond_Always);
+        connection.docked = true;
     }
 
     // Cor do tipo (Desenvolvimento/Teste/Producao) na aba da janela: e' o
     // aviso de que se esta' prestes a executar em producao.
+    // O pedido de foco vale para a janela do script ATIVO.
+    if (editor_focus_connection_ == connection.id) ImGui::SetNextWindowFocus();
+
     const db::ConnectionTypeInfo& type =
         db::connection_type_info(connection.profile.type);
     ImGui::PushStyleColor(ImGuiCol_Text, col(type.color));
-    const bool open = ImGui::Begin(title.c_str());
+
+    // O "x" na aba da janela fecha os scripts da conexao (pedido do usuario,
+    // 2026-10-01): sem ele, uma conexao aberta ocupava a barra ate' o fim da
+    // execucao. O ponto de "nao salvo" e' o mesmo das abas de script.
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
+    if (connection_unsaved_documents(connection.id) > 0) {
+        window_flags |= ImGuiWindowFlags_UnsavedDocument;
+    }
+    // O id ANTES das abas: se algo ali dentro criar uma sessao, o push_back
+    // em connections_ invalida `connection`.
+    const std::size_t connection_id = connection.id;
+    bool keep_open = true;
+    const bool open = ImGui::Begin(title.c_str(), &keep_open, window_flags);
     ImGui::PopStyleColor();
+    if (!padding.empty()) draw_tab_database_icon(connection_id);
 
     // A janela em foco manda no resto da tela: Navigator, barra de status e
     // a conexao que um script novo herda passam a ser os desta.
@@ -3738,15 +4372,151 @@ void MainShell::draw_connection_editor(Connection& connection) {
         }
     }
 
-    if (open) draw_document_tabs(connection.id);
+    if (open) draw_document_tabs(connection_id);
     ImGui::End();
+
+    // Aplicado no quadro seguinte (apply_close_tab_request): aqui ainda se
+    // esta' dentro do laco sobre connections_.
+    if (!keep_open) close_tab_request_ = connection_id;
+}
+
+// O icone de banco na aba da janela da conexao: e' o "Select active schema"
+// do DBeaver (Ctrl+0), que no editor mostra o banco corrente com o icone
+// tree/database.svg -- aqui no lugar que o usuario pediu, a aba principal.
+//
+// Desenhado por cima da aba, na lista de desenho da janela que hospeda a
+// barra de abas do dock: a aba e' do ImGui e nao recebe widgets. O clique e'
+// lido a' mao; ele tambem seleciona a aba, o que e' o desejado.
+void MainShell::draw_tab_database_icon(std::size_t connection_id) {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    // Sem DockTabIsVisible: no ImGui ele quer dizer "aba selecionada", e as
+    // abas de tras ficavam com o recuo do titulo e sem o icone.
+    if (window == nullptr || !window->DockIsActive ||
+        window->DockNode == nullptr || window->DockNode->HostWindow == nullptr) {
+        return;
+    }
+    const Connection* connection = connection_by_id(connection_id);
+    if (connection == nullptr) return;
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float  size = ImGui::GetFontSize();
+    const ImRect tab  = window->DC.DockTabItemRect;
+    const ImVec2 min(tab.Min.x + style.FramePadding.x, tab.Min.y + style.FramePadding.y);
+    const ImRect box(min, ImVec2(min.x + size, min.y + size));
+    if (box.Max.x > tab.Max.x) return;   // aba estreita demais: so' o titulo
+
+    const bool connected = connection->session->state() == SessionState::connected;
+    ImGuiWindow* host    = window->DockNode->HostWindow;
+    // Pela raiz da arvore de dock, nao por `host`: sobre a barra de abas o
+    // ImGui da' como "janela sob o mouse" a propria janela ancorada (o
+    // retangulo dela cobre a aba), e com `== host` o clique nunca chegava.
+    // A raiz ainda exclui um popup ou janela solta por cima da aba.
+    const ImGuiWindow* under = GImGui->HoveredWindow;
+    const bool hovered = under != nullptr &&
+                         under->RootWindowDockTree == window->RootWindowDockTree &&
+                         ImGui::IsMouseHoveringRect(box.Min, box.Max, false);
+
+    ImDrawList* dl = host->DrawList;
+    dl->PushClipRect(tab.Min, tab.Max, false);
+    const Palette& p = colors();
+    if (hovered && connected) {
+        dl->AddRectFilled(ImVec2(box.Min.x - 2, box.Min.y - 2), ImVec2(box.Max.x + 2, box.Max.y + 2),
+                          col(with_alpha(p.accent, 0.25f)), 3.0f);
+    }
+    draw_icon_to(dl, Icon::database, box.GetCenter(), size * 0.9f,
+                 col(with_alpha(p.text, connected ? 1.0f : 0.4f)), 1.4f);
+    dl->PopClipRect();
+
+    if (!hovered) return;
+    // Desconectada nao ha' lista de bancos; a dica diz por que (diretiva 6).
+    hint(connected ? TR("Select active database")
+                   : TR("Connect to choose the database"));
+    if (connected && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        open_database_picker(connection_id);
+    }
+}
+
+void MainShell::open_database_picker(std::size_t connection_id) {
+    app_.select_database     = true;
+    app_.database_connection = connection_id;
+    app_.search[0]           = '\0';
+    app_.search_cursor       = -1;   // a lista poe no banco corrente
+    app_.focus_search        = true;
+}
+
+void MainShell::switch_tab_database(std::size_t connection_id, const std::string& database) {
+    constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+    std::size_t index = kNone;
+    for (std::size_t i = 0; i < connections_.size(); ++i) {
+        if (connections_[i].id == connection_id) index = i;
+    }
+    if (index == kNone) return;
+
+    // MySQL: banco e schema sao a mesma coisa, e a troca e' um USE na mesma
+    // sessao -- o "Select active schema" ja' faz isso.
+    if (connections_[index].session->is_mysql()) {
+        active_connection_ = index;
+        active_profile_    = connections_[index].profile;
+        set_default_schema(database);
+        return;
+    }
+
+    // Os outros: uma sessao por banco sob a raiz (ADR 0018). O script vai
+    // para ela, e a aba passa a ser a do banco escolhido.
+    std::size_t root = index;
+    if (const std::size_t parent = connections_[index].parent_id; parent != 0) {
+        for (std::size_t i = 0; i < connections_.size(); ++i) {
+            if (connections_[i].id == parent) root = i;
+        }
+    }
+    std::size_t owner = root;
+    if (connections_[root].session->database_name() != database) {
+        owner = find_database_connection(connections_[root].id, database);
+        if (owner == kNone) {
+            open_database_connection(root, database);
+            owner = connections_.size() - 1;
+        }
+    }
+    if (owner == index) return;
+    const std::size_t owner_id = connections_[owner].id;
+
+    // O script da aba: o ativo, se for desta janela; senao o primeiro dela.
+    // Editor de objeto nao muda de banco (o objeto e' deste), entao sem
+    // script a janela do banco ganha um novo -- como "nav database".
+    SqlDocument* document = active_document();
+    if (document == nullptr || document->connection_id() != connection_id ||
+        document->is_object()) {
+        document = nullptr;
+        for (const std::unique_ptr<SqlDocument>& candidate : documents_) {
+            if (candidate->connection_id() == connection_id && !candidate->is_object()) {
+                document = candidate.get();
+                break;
+            }
+        }
+    }
+    active_connection_ = owner;
+    active_profile_    = connections_[owner].profile;
+    tree_claim_        = owner_id;
+    if (document == nullptr) {
+        open_sql_tab(std::string{}, /*run=*/false);
+        return;
+    }
+    document->set_connection_id(owner_id);
+    select_document_id_ = document->id();
+    focus_editor_       = true;
+    focus_document_id_  = document->id();
 }
 
 void MainShell::draw_editor_panel() {
-    // Sem conexao nenhuma, session() cria a Session vazia -- e com ela a
-    // janela onde da' para digitar antes de conectar. Chamada pelo efeito
+    // Recalculado a cada quadro por draw_document_body.
+    editor_has_focus_ = false;
+
+    // Sem conexao nenhuma, session() cria a Session vazia -- e' a ela que um
+    // script aberto antes de conectar se amarra. Chamada pelo efeito
     // colateral; o valor nao interessa aqui.
     (void)session();
+
+    apply_close_tab_request();
 
     // Abas cuja conexao foi fechada passam para a ativa, senao ficariam sem
     // janela onde aparecer -- some da tela o script que o usuario talvez nao
@@ -3758,7 +4528,59 @@ void MainShell::draw_editor_panel() {
         }
     }
 
-    for (Connection& connection : connections_) {
+    // "Maximize results panel": as janelas de editor nao sao desenhadas, e o
+    // resultado ocupa o lugar delas. Os documentos continuam como estavam.
+    if (results_maximized_) return;
+
+    // A janela que deve vir para a frente neste quadro: a do script que pediu
+    // o foco, ou a da aba que alguem mandou selecionar.
+    //
+    // Decidido ANTES do laco. Cada janela, ao desenhar a aba visivel dela,
+    // faz desse script o ativo -- e perguntar "qual e' o ativo?" dentro do
+    // laco respondia com o script da janela anterior. Era por isso que, com
+    // duas conexoes reabertas ao iniciar, a aba que estava na frente ao sair
+    // voltava atras da outra.
+    // A aba que estava na frente ao sair (restore_scripts). O pedido e'
+    // repetido por alguns quadros DEPOIS de o layout existir: no primeiro
+    // quadro as janelas ainda nao estao ancoradas, a aba e' desenhada (o que
+    // consome o pedido) e so' entao elas sao empilhadas -- com a primeira
+    // conexao na frente, qualquer que fosse o script ativo. Mesma razao do
+    // `reselect_result_` do painel de resultado.
+    if (restore_front_frames_ > 0 && editor_dock_id_ != 0) {
+        select_document_id_ = restore_front_document_;
+        --restore_front_frames_;
+    }
+
+    editor_focus_connection_ = 0;
+    if (focus_editor_ || select_document_id_ != 0) {
+        const std::size_t wanted =
+            select_document_id_ != 0 ? select_document_id_ : focus_document_id_;
+        const SqlDocument* target = nullptr;
+        for (const std::unique_ptr<SqlDocument>& document : documents_) {
+            if (wanted != 0 && document->id() == wanted) target = document.get();
+        }
+        if (target == nullptr && focus_editor_) target = active_document();
+        if (target != nullptr) editor_focus_connection_ = target->connection_id();
+    }
+
+    // Por indice, e com o tamanho de ANTES: se algo desenhado dentro da
+    // janela abrir uma sessao (push_back em connections_), um iterador
+    // ficaria invalido. A sessao nova ganha a janela no quadro seguinte.
+    const std::size_t count = connections_.size();
+    for (std::size_t i = 0; i < count && i < connections_.size(); ++i) {
+        Connection& connection = connections_[i];
+
+        // Uma conexao so' tem janela enquanto tem documento. Valia so' para
+        // a sessao de um banco expandido na arvore (ADR 0018): expandir e'
+        // olhar, e uma janela vazia por banco aberto encheria a area de
+        // trabalho. Agora vale para todas -- e' o que deixa o programa abrir
+        // sem aba nenhuma e o "x" da aba ter o que fechar.
+        const bool has_document = std::any_of(
+            documents_.begin(), documents_.end(),
+            [&connection](const std::unique_ptr<SqlDocument>& document) {
+                return document->connection_id() == connection.id;
+            });
+        if (!has_document) continue;
         draw_connection_editor(connection);
     }
 }
@@ -3799,7 +4621,10 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     // --- Valor: o do buffer tem precedencia sobre o do banco ----------------
     const db::CellEdit* edit = document.edits().find(row, column);
 
-    const bool is_null = edit != nullptr ? edit->is_null : rs.is_null(row, column);
+    // "Set to default" ainda nao tem valor: quem decide e' o servidor.
+    const bool is_default = edit != nullptr && edit->is_default;
+    const bool is_null = edit != nullptr ? (edit->is_null || edit->is_default)
+                                         : rs.is_null(row, column);
     const std::string_view value =
         edit != nullptr ? std::string_view(edit->value) : rs.text(row, column);
 
@@ -3839,7 +4664,13 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                           selected_row_ == row && selected_column_ == column;
     if (selected) {
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-                               with_alpha(p.accent, 0.35f));
+                               with_alpha(p.accent, 0.46f));
+    } else if (grid_cell_in_selection(document, row, column)) {
+        // O resto do bloco, mais fraco: da' para ver ate' onde a selecao vai
+        // e ainda saber qual e' a celula corrente. Com 0,17 nao se via no
+        // tema escuro -- a captura mostrava so' a celula corrente.
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                               with_alpha(p.accent, 0.26f));
     }
 
     // Guarda o inicio da celula: o alvo clicavel volta para ca' e cobre a
@@ -3888,6 +4719,8 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
         // Sem editor: nao faz sentido alterar o que sera' excluido.
         ImGui::TextColored(col4(p.text_dim), "%s",
                            is_null ? null_label : std::string(value).c_str());
+    } else if (is_default) {
+        ImGui::TextColored(col4(p.text_dim), "%s", "[default]");
     } else if (is_null) {
         ImGui::TextColored(col4(p.text_dim), "%s", null_label);
     } else {
@@ -3917,22 +4750,19 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
     }
 
     // --- Interacao -----------------------------------------------------------
-    if (!document.edit_target().editable()) return;
-
-    // Alvo clicavel cobrindo a celula inteira.
     //
-    // Dummy NAO serve aqui: ele reserva espaco mas nao e' item interativo,
-    // entao IsItemHovered() sempre respondia falso e o duplo clique nunca
-    // chegava. InvisibleButton e' item de verdade.
+    // O alvo clicavel existe TAMBEM no resultado somente leitura. Antes ele
+    // so' era criado quando a grade podia editar: num JOIN nao dava para
+    // selecionar uma celula com o mouse, nem copiar, nem abrir o menu -- e
+    // sao justamente os resultados que mais se copia.
     //
-    // Desenhado POR CIMA do texto (cursor recuado), nao ao lado: ao lado, a
-    // celula com valor curto teria alvo so' na sobra.
-    // O PushID vem ANTES do botao, nao depois.
+    // InvisibleButton, e nao Dummy: Dummy reserva espaco mas nao e' item
+    // interativo, e IsItemHovered() responderia sempre falso. Desenhado POR
+    // CIMA do texto (cursor recuado): ao lado, a celula de valor curto teria
+    // alvo so' na sobra.
     //
-    // Depois, as 9 celulas visiveis compartilhavam o id "##cellhit" -- o
-    // ImGui acusa "conflicting ID" e o ESTADO de um item vaza para o outro.
-    // Com duplo clique e menu de contexto nao dava para notar; bastou pedir
-    // IsItemClicked para o erro aparecer na tela, em vermelho.
+    // O PushID vem ANTES do botao. Depois, todas as celulas visiveis
+    // compartilhavam o id "##cellhit" e o estado de uma vazava para a outra.
     ImGui::PushID(static_cast<int>(row * rs.column_count() + column));
 
     ImGui::SetCursorPos(cell_origin);
@@ -3941,232 +4771,72 @@ void MainShell::draw_grid_cell(SqlDocument& document, const db::ResultSet& rs,
                            ImGuiButtonFlags_MouseButtonLeft |
                            ImGuiButtonFlags_MouseButtonRight);
 
-    // Clique simples seleciona; o duplo continua abrindo o editor. Os dois
-    // convivem porque o ImGui entrega o clique simples TAMBEM no duplo -- e
-    // selecionar antes de editar e' o que o usuario espera de qualquer forma.
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) ||
-        ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-        selected_document_ = document.id();
-        selected_row_      = row;
-        selected_column_   = column;
-        has_selection_     = true;
+    const bool left_click  = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    const bool right_click = ImGui::IsItemClicked(ImGuiMouseButton_Right);
 
-        // Focar a janela do resultado EXPLICITAMENTE.
-        //
-        // Clicar num InvisibleButton nao da' foco a' janela que o contem, e
-        // sem foco `IsWindowFocused` responde falso -- o que desligava todas
-        // as teclas da grade. O sintoma era a seta simplesmente nao fazer
-        // nada; um trace mostrou a funcao rodando a cada quadro com foco=0.
+    // O canto de baixo da celula corrente: e' onde abrem os menus pedidos
+    // por comando.
+    if (selected) {
+        selected_cell_x_ = ImGui::GetItemRectMin().x;
+        selected_cell_y_ = ImGui::GetItemRectMax().y;
+    }
+
+    if (left_click || right_click) {
+        // Botao direito DENTRO do bloco selecionado preserva o bloco: o menu
+        // vai agir sobre ele, e encolhe-lo para uma celula ao abrir o menu
+        // faria "copiar" copiar outra coisa.
+        if (!(right_click && grid_cell_in_selection(document, row, column))) {
+            select_grid_cell(document, row, column,
+                             left_click && ImGui::GetIO().KeyShift);
+        }
+        if (left_click) grid_drag_document_ = document.id();
+
+        // Focar a janela do resultado EXPLICITAMENTE: clicar num
+        // InvisibleButton nao da' foco a' janela que o contem, e sem foco
+        // todas as teclas da grade ficam desligadas.
         ImGui::FocusWindow(ImGui::GetCurrentWindow()->RootWindow);
     }
 
+    // Arrastar estende a selecao. AllowWhenBlockedByActiveItem: durante o
+    // arrasto o item ativo e' a celula onde o botao desceu, e sem a flag
+    // nenhuma outra contaria como "sob o mouse".
+    if (grid_drag_document_ == document.id() &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+        (selected_row_ != row || selected_column_ != column)) {
+        select_grid_cell(document, row, column, /*extend=*/true);
+    }
+
     // Rolar ate' a selecao quando ela mudou por TECLADO. So' neste caso: com
-    // o mouse a celula ja' esta' visivel por definicao, e rolar ali daria um
-    // solavanco a cada clique numa celula meio cortada na borda.
+    // o mouse a celula ja' esta' visivel por definicao. "Manter a' vista", e
+    // nao "centralizar": centralizar a cada seta faz a grade inteira pular.
     if (selected && scroll_to_selection_) {
-        ImGui::SetScrollHereY(0.5f);
+        ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeX |
+                            ImGuiScrollFlags_KeepVisibleEdgeY);
         scroll_to_selection_ = false;
     }
 
     if (ImGui::IsItemHovered()) {
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !row_deleted) {
-            editing_active_   = true;
-            editing_document_ = document.id();
-            editing_row_      = row;
-            editing_column_   = column;
-            std::snprintf(edit_buffer_, sizeof edit_buffer_, "%s",
-                          is_null ? "" : std::string(value).c_str());
+            start_inline_edit(document, rs, row, column);
         }
 
-        // O valor original no tooltip: poder comparar sem desfazer.
+        // O valor original na dica: poder comparar sem desfazer.
         if (edit != nullptr) {
             const std::string original =
                 rs.is_null(row, column) ? "[null]"
                                         : std::string(rs.text(row, column));
-            ImGui::SetTooltip(TR("was: %s"), original.c_str());
+            hint_fmt(TR("was: %s"), original.c_str());
         }
     }
 
+    // O menu da celula: todos os itens vem da tabela de comandos
+    // (ui/grid_commands.cpp), na ordem do DBeaver.
     if (ImGui::BeginPopupContextItem("##cellmenu")) {
-        if (ImGui::MenuItem(TR("Set NULL"))) {
-            // Botao proprio porque digitar nada significa string vazia, nao
-            // NULL -- sao valores diferentes no banco.
-            document.edits().set_null(row, column);
-        }
-        if (ImGui::MenuItem(TR("Revert cell"), nullptr, false, edit != nullptr)) {
-            document.edits().revert(row, column);
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem(TR("View value..."))) {
-            open_value_panel(document, rs, row, column);
-        }
-        if (ImGui::MenuItem(TR("Copy value"))) {
-            ImGui::SetClipboardText(is_null ? "" : std::string(value).c_str());
-        }
-
-        ImGui::Separator();
-
-        const bool deleted = document.edits().is_deleted(row);
-        if (ImGui::MenuItem(deleted ? TR("Undo delete") : TR("Delete row"))) {
-            if (deleted) document.edits().unmark_deleted(row);
-            else         document.edits().mark_deleted(row);
-        }
-        if (ImGui::MenuItem(TR("New row"))) {
-            document.edits().add_row();
-        }
-
-        // Duplicar: linha nova com os valores DESTA, exceto a chave primária.
-        //
-        // Copiar a PK junto produziria um INSERT que viola a unicidade -- e o
-        // erro viria do servidor, depois de o usuário já ter preenchido o
-        // resto. Deixar a chave em branco é o que torna a duplicação útil numa
-        // tabela com id auto-gerado, que é o caso comum.
-        const bool duplicated = ImGui::MenuItem(TR("Duplicate row"));
-
-        // A duplicação copia só o que está NA TELA. Uma coluna NOT NULL sem
-        // default que ficou fora do SELECT faz o INSERT ser recusado -- com
-        // uma mensagem do servidor que nomeia a coluna, mas só depois de
-        // clicar em salvar. Dizer antes economiza a viagem.
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s",
-                              TR("copies the visible columns, except the key; "
-                                 "a NOT NULL column left out of the query will "
-                                 "be refused"));
-        }
-
-        if (duplicated) duplicate_row(document, rs, row);
-
-        // Copiar da linha de cima / de baixo (Ctrl+D e Ctrl+Alt+D no DBeaver).
-        //
-        // Preenche ESTA célula com o valor da vizinha -- não insere linha
-        // nenhuma. É o atalho de quem digita uma coluna repetitiva para baixo,
-        // e por isso opera na célula sob o cursor, não na linha inteira.
-        ImGui::Separator();
-
-        // Desabilitado na primeira e na última linha da PÁGINA, não do
-        // resultado: a linha acima da primeira desta página existe no banco,
-        // mas não está carregada -- e copiar de uma linha que não se vê seria
-        // um valor surgindo do nada.
-        ImGui::BeginDisabled(row == 0);
-        if (ImGui::MenuItem(TR("Copy from row above"))) {
-            document.edits().copy_cell_from(rs, row - 1, row, column);
-        }
-        ImGui::EndDisabled();
-
-        ImGui::BeginDisabled(row + 1 >= rs.row_count());
-        if (ImGui::MenuItem(TR("Copy from row below"))) {
-            document.edits().copy_cell_from(rs, row + 1, row, column);
-        }
-        ImGui::EndDisabled();
-
+        draw_grid_cell_menu(document, rs);
         ImGui::EndPopup();
     }
     ImGui::PopID();
-}
-
-// Prepara o painel de valor para uma célula.
-//
-// O conteúdo é FORMATADO aqui, uma vez, e não a cada quadro: indentar um JSON
-// de 4 KB ou montar o hexadecimal de 64 KB sessenta vezes por segundo seria
-// desperdício puro.
-void MainShell::open_value_panel(SqlDocument& document, const db::ResultSet& rs,
-                                 std::size_t row, std::size_t column) {
-    value_panel_ = ValuePanel{};
-    value_panel_.open   = true;
-    value_panel_.column = rs.column(column).info().name;
-
-    // O valor do BUFFER tem precedência: o painel mostra o que está na tela,
-    // não o que está no banco.
-    const db::CellEdit* pending = document.edits().find(row, column);
-
-    const bool is_null = pending != nullptr ? pending->is_null
-                                            : rs.is_null(row, column);
-    if (is_null) {
-        value_panel_.view = db::ValueView::plain;
-        value_panel_.text = "[null]";
-        value_panel_.size = 0;
-        return;
-    }
-
-    const std::string_view value =
-        pending != nullptr ? std::string_view(pending->value)
-                           : rs.text(row, column);
-
-    value_panel_.size = value.size();
-    value_panel_.view = db::choose_view(rs.column(column).info().kind, value);
-
-    switch (value_panel_.view) {
-        case db::ValueView::json:
-            value_panel_.text = db::format_json(value);
-            break;
-
-        case db::ValueView::binary:
-            // O limite vem do perfil (pagina "Editor binário"). Era 64 KB
-            // fixo -- pouco para inspecionar um arquivo, muito para uma
-            // coluna de hashes.
-            value_panel_.text = db::format_hex(
-                {reinterpret_cast<const std::byte*>(value.data()), value.size()},
-                static_cast<std::size_t>(
-                    editor_options_for(document).hex_limit_kb) * 1024);
-            break;
-
-        case db::ValueView::boolean:
-            value_panel_.text = db::is_true(value) ? "true" : "false";
-            break;
-
-        default:
-            value_panel_.text = std::string(value);
-            break;
-    }
-}
-
-void MainShell::draw_value_panel() {
-    if (!value_panel_.open) return;
-
-    const Palette& p = colors();
-    ImGui::SetNextWindowSize(ImVec2(640, 460), ImGuiCond_FirstUseEver);
-
-    if (ImGui::Begin(TRW("Value", "###ValuePanel"), &value_panel_.open,
-                     ImGuiWindowFlags_NoDocking)) {
-
-        ImGui::TextColored(col4(p.accent_light), "%s",
-                           value_panel_.column.c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(col4(p.text_dim), "%s  ·  %zu bytes",
-                           TR(std::string(db::to_string(value_panel_.view)).c_str()),
-                           value_panel_.size);
-
-        ImGui::Separator();
-
-        const float footer = ImGui::GetFrameHeightWithSpacing() * 1.4f;
-
-        // Booleano ganha um controle próprio em vez de texto: é a diferença
-        // entre ver "1" e ver uma caixa marcada.
-        if (value_panel_.view == db::ValueView::boolean) {
-            bool checked = value_panel_.text == "true";
-
-            // Somente leitura: o painel MOSTRA. Editar continua sendo pelo
-            // duplo clique na célula, que é onde o buffer de edição registra.
-            ImGui::BeginDisabled();
-            ImGui::Checkbox(value_panel_.text.c_str(), &checked);
-            ImGui::EndDisabled();
-        } else {
-            // Fonte monoespaçada já é a do projeto inteiro, e é o que alinha
-            // as colunas do hexadecimal.
-            ImGui::BeginChild("##valuebody", ImVec2(0, -footer),
-                              ImGuiChildFlags_Borders,
-                              ImGuiWindowFlags_HorizontalScrollbar);
-            ImGui::TextUnformatted(value_panel_.text.c_str());
-            ImGui::EndChild();
-        }
-
-        if (ImGui::Button(TR("Copy"), ImVec2(120, 0))) {
-            ImGui::SetClipboardText(value_panel_.text.c_str());
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(TR("Close"), ImVec2(120, 0))) value_panel_.open = false;
-    }
-    ImGui::End();
 }
 
 void MainShell::recompute_groups(SqlDocument& document) {
@@ -4487,8 +5157,10 @@ void MainShell::open_add_column(const std::string& schema,
 
     // Tipo padrão por SGBD: sugerir `serial` num MySQL daria erro de sintaxe.
     const bool mysql = db::sql_dialect() == db::QuoteStyle::backticks;
+    const bool mssql = db::sql_dialect() == db::QuoteStyle::brackets;
+    const bool anywhere = db::sql_dialect() == db::QuoteStyle::anywhere;
     std::snprintf(column_form_.type, sizeof column_form_.type, "%s",
-                  mysql ? "varchar(100)" : "text");
+                  mysql || anywhere ? "varchar(100)" : mssql ? "nvarchar(100)" : "text");
 
     // A lista de colunas alimenta o AFTER do MySQL.
     column_form_.existing.clear();
@@ -4507,11 +5179,16 @@ void MainShell::open_create_table(const std::string& schema) {
     // editável na grade (ADR 0014), e pedir ao usuário que descubra isso
     // depois de criá-la seria atrito evitável.
     const bool mysql = db::sql_dialect() == db::QuoteStyle::backticks;
+    const bool mssql = db::sql_dialect() == db::QuoteStyle::brackets;
+    const bool anywhere = db::sql_dialect() == db::QuoteStyle::anywhere;
 
     CreateTableForm::Column id;
     std::snprintf(id.name, sizeof id.name, "id");
     std::snprintf(id.type, sizeof id.type, "%s",
-                  mysql ? "INT AUTO_INCREMENT" : "serial");
+                  mysql      ? "INT AUTO_INCREMENT"
+                  : mssql    ? "int IDENTITY(1,1)"
+                  : anywhere ? "integer DEFAULT AUTOINCREMENT"
+                             : "serial");
     id.nullable = false;
     id.key      = true;
 
@@ -4519,7 +5196,7 @@ void MainShell::open_create_table(const std::string& schema) {
 
     CreateTableForm::Column first;
     std::snprintf(first.type, sizeof first.type, "%s",
-                  mysql ? "varchar(100)" : "text");
+                  mysql || anywhere ? "varchar(100)" : mssql ? "nvarchar(100)" : "text");
     create_table_.columns.push_back(first);
 }
 
@@ -4829,7 +5506,7 @@ void MainShell::draw_ddl_forms() {
 
             ImGui::Checkbox(TR("Replace if it exists"), &create_view_.or_replace);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s",
+                hint_fmt("%s",
                                   TR("CREATE OR REPLACE preserves the grants on "
                                      "the view; dropping and recreating loses "
                                      "them"));
@@ -4887,10 +5564,10 @@ void MainShell::draw_ddl_forms() {
 
             // CONCURRENTLY só existe no PostgreSQL, e não roda dentro de
             // transação. Esconder no MySQL em vez de desabilitar.
-            if (db::sql_dialect() != db::QuoteStyle::backticks) {
+            if (db::sql_dialect() == db::QuoteStyle::double_quotes) {
                 ImGui::Checkbox(TR("Concurrently"), &index_form_.concurrently);
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s",
+                    hint_fmt("%s",
                                       TR("does not block writes, but cannot run "
                                          "inside a transaction"));
                 }
@@ -5030,18 +5707,23 @@ void MainShell::run_ddl(const std::vector<std::string>& statements) {
         session().capabilities() && session().capabilities()->ddl_in_transaction;
 
     if (transactional && script.size() > 1) {
-        script.insert(script.begin(), "BEGIN");
-        script.emplace_back("COMMIT");
+        // No T-SQL e' BEGIN TRANSACTION: "BEGIN" sozinho abre um bloco.
+        script.insert(script.begin(), std::string(db::transaction_begin_sql()));
+        script.emplace_back(db::transaction_commit_sql());
     }
 
     ddl_pending_reload_ = true;
     session().execute_script_async(std::move(script));
 }
 
-void MainShell::save_pending_edits(SqlDocument& document) {
+void MainShell::save_pending_edits(SqlDocument& document, bool commit_after) {
     if (!document.edits().has_changes()) return;
     if (!document.result().has_value()) return;
-    if (session().state() != SessionState::connected || session().busy()) return;
+
+    // A sessao do DOCUMENTO, nao a ativa: com duas conexoes abertas, gravar
+    // pela ativa mandaria os UPDATE para o banco errado.
+    Session& target = session_for(document);
+    if (target.state() != SessionState::connected || target.busy()) return;
 
     auto updates = db::generate_changes(*document.result(),
                                         document.edit_target(),
@@ -5051,14 +5733,26 @@ void MainShell::save_pending_edits(SqlDocument& document) {
         return;
     }
 
-    // Em transacao, mesmo em auto-commit: gravar cinco linhas e falhar na
-    // terceira deixaria duas gravadas e tres nao -- estado que o usuario nao
-    // pediu e nao consegue reproduzir (ADR 0014).
     std::vector<std::string> statements;
     statements.reserve(updates->size() + 2);
-    statements.emplace_back("BEGIN");
-    for (std::string& update : *updates) statements.push_back(std::move(update));
-    statements.emplace_back("COMMIT");
+
+    if (target.auto_commit()) {
+        // Em transacao, mesmo em auto-commit: gravar cinco linhas e falhar
+        // na terceira deixaria duas gravadas e tres nao -- estado que o
+        // usuario nao pediu e nao consegue reproduzir (ADR 0014).
+        statements.emplace_back(db::transaction_begin_sql());
+        for (std::string& update : *updates) statements.push_back(std::move(update));
+        statements.emplace_back(db::transaction_commit_sql());
+        commit_after_save_ = false;
+    } else {
+        // Modo manual: as alteracoes entram na transacao que o usuario ja'
+        // tem aberta, como no DBeaver. Um BEGIN aqui seria aninhado (aviso
+        // do servidor), e um COMMIT encerraria o trabalho dele sem ele pedir
+        // -- so' "Apply and commit" confirma, e pelo caminho do driver, que
+        // e' quem sabe o estado da transacao.
+        for (std::string& update : *updates) statements.push_back(std::move(update));
+        commit_after_save_ = commit_after;
+    }
 
     executing_document_id_ = document.id();
     document.set_executing(true);
@@ -5066,7 +5760,7 @@ void MainShell::save_pending_edits(SqlDocument& document) {
 
     // O buffer so' e' limpo quando a gravacao termina sem erro -- ver a
     // colheita do resultado em draw().
-    session().execute_script_async(std::move(statements));
+    target.execute_script_async(std::move(statements));
 }
 
 // Menu de cor de uma coluna.
@@ -5110,14 +5804,14 @@ void MainShell::draw_bar_menu(SqlDocument& document, const db::ResultSet& rs,
         add(db::BarBaseline::from_zero);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", TR("for quantities: revenue, count, total"));
+        hint_fmt("%s", TR("for quantities: revenue, count, total"));
     }
 
     if (ImGui::MenuItem(TR("Bar over the column range"))) {
         add(db::BarBaseline::from_minimum);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
+        hint_fmt(
             "%s", TR("for narrow ranges far from zero, like 36.1..36.9, where "
                      "anchoring at zero makes every bar look the same"));
     }
@@ -5126,7 +5820,7 @@ void MainShell::draw_bar_menu(SqlDocument& document, const db::ResultSet& rs,
         add(db::BarBaseline::centered_on_zero);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", TR("for variation and balance, where the sign "
+        hint_fmt("%s", TR("for variation and balance, where the sign "
                                    "is the point"));
     }
 
@@ -5232,6 +5926,14 @@ void MainShell::draw_color_menu(SqlDocument& document, const db::ResultSet& rs,
 void MainShell::draw_column_header_menu(SqlDocument& document,
                                         const db::ResultSet& rs,
                                         std::size_t column) {
+    // Pedido vindo do teclado (F11 / Shift+F11). Chega aqui e nao em
+    // handle_grid_keys porque um popup do ImGui se ancora no ULTIMO item
+    // desenhado: la' o ultimo item e' a celula; aqui, o cabecalho certo.
+    if (grid_menu_request_ == column + 1) {
+        grid_menu_request_ = 0;
+        ImGui::OpenPopup("##colmenu");
+    }
+
     if (!ImGui::BeginPopupContextItem("##colmenu")) return;
 
     const Palette& p = colors();
@@ -5480,7 +6182,11 @@ void MainShell::draw_export_window() {
         export_defaults_applied_ = true;
 
         const db::EditorOptions& options = editor_options_for(*document);
-        if (options.export_format >= 0 && options.export_format <= 3) {
+        // Abre na consulta inteira quando ha' mais do que a pagina: exportar
+        // 200 linhas de dois milhoes raramente e' o que se quer.
+        export_whole_query_ = document->paged();
+
+        if (options.export_format >= 0 && options.export_format <= 6) {
             export_options_.format =
                 static_cast<db::ExportFormat>(options.export_format);
         }
@@ -5489,25 +6195,39 @@ void MainShell::draw_export_window() {
     }
 
     ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
-    if (ImGui::Begin(TRW("Export result", "###ExportResult"), &show_export_,
-                     ImGuiWindowFlags_NoDocking)) {
+    // Fundo opaco (diretiva 13): o SQL do editor atravessava a previa.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, col(with_alpha(p.bg_darkest, 1.0f)));
+    const bool export_visible =
+        ImGui::Begin(TRW("Export result", "###ExportResult"), &show_export_,
+                     ImGuiWindowFlags_NoDocking);
+    ImGui::PopStyleColor();
+    if (export_visible) {
 
         // O que sera' exportado: a PAGINA, nao o resultado inteiro. Dizer
         // isso evita a surpresa de abrir o CSV e achar 200 linhas de dois
         // milhoes (diretiva 6).
+        //
+        // Com o resultado paginado ha' duas coisas para exportar, e a janela
+        // pergunta qual: as linhas carregadas, ou a consulta inteira -- lida
+        // do servidor em pedacos e gravada direto no arquivo, como o
+        // assistente de transferencia do DBeaver.
         if (document->paged()) {
-            icon_inline(Icon::warning, p.warn);
-            ImGui::SameLine(0.0f, 4.0f);
-            ImGui::TextColored(col4(p.warn),
-                               TR("exports the current page only (%zu rows)"),
-                               rs.row_count());
+            if (ImGui::RadioButton(TR("All rows of the query"), export_whole_query_)) {
+                export_whole_query_ = true;
+            }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(TR(
-                    "The grid holds one page at a time.\n"
-                    "To export everything, run the query with your own LIMIT "
-                    "or no LIMIT at all."));
+                hint_fmt(TR(
+                    "Runs the query again and writes every row to the file, "
+                    "reading the server in chunks.\n"
+                    "The filter and the sort order of the grid are kept."));
+            }
+            ImGui::SameLine();
+            const std::string loaded = TRF("Loaded rows only (%zu)", rs.row_count());
+            if (ImGui::RadioButton(loaded.c_str(), !export_whole_query_)) {
+                export_whole_query_ = false;
             }
         } else {
+            export_whole_query_ = false;
             ImGui::TextColored(col4(p.text_dim), TR("%zu row(s), %zu column(s)"),
                                rs.row_count(), rs.column_count());
         }
@@ -5516,8 +6236,10 @@ void MainShell::draw_export_window() {
 
         // --- Formato ---------------------------------------------------------
         static constexpr db::ExportFormat kFormats[] = {
-            db::ExportFormat::csv, db::ExportFormat::json,
+            db::ExportFormat::csv,      db::ExportFormat::json,
             db::ExportFormat::markdown, db::ExportFormat::sql_insert,
+            db::ExportFormat::html,     db::ExportFormat::xml,
+            db::ExportFormat::txt,
         };
 
         for (const db::ExportFormat format : kFormats) {
@@ -5564,7 +6286,7 @@ void MainShell::draw_export_window() {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.text_dim), "(?)");
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(TR(
+                hint_fmt(TR(
                     "A value starting with =, +, - or @ becomes a formula when "
                     "a spreadsheet opens the file, and formulas run.\n\n"
                     "Prefixing it with an apostrophe neutralizes that without "
@@ -5642,13 +6364,66 @@ void MainShell::draw_export_window() {
             export_status_ = std::string(TRF("%zu row(s) copied",
                                              rs.row_count()));
         }
+        Session& target = session_for(*document);
+        const Session::TransferState transfer = target.transfer_state();
+
+        // A exportacao em curso terminou: o resultado vai para a linha de
+        // estado, e a sessao volta a aceitar outra.
+        if (transfer.finished) {
+            if (!transfer.error.empty()) {
+                export_status_ = transfer.error;
+            } else if (transfer.cancelled) {
+                export_status_ = std::string(
+                    TRF("cancelled: %zu row(s) written to %s (partial file)",
+                        transfer.rows, transfer.path.c_str()));
+            } else {
+                export_status_ = std::string(TRF("%zu row(s) written to %s",
+                                                 transfer.rows,
+                                                 transfer.path.c_str()));
+            }
+            target.clear_transfer();
+        }
+
         ImGui::SameLine();
-        if (icon_text_button("##savefile", Icon::save, TR("Save to file"),
-                             TR("Write the result to the file above"),
-                             !export_path_.empty())) {
-            if (auto status = db::export_to_file(rs, export_options_,
-                                                 export_path_);
-                status) {
+        if (transfer.running) {
+            if (icon_text_button("##cancelexport", Icon::stop, TR("Cancel"),
+                                 TR("Stop after the chunk being written"))) {
+                target.cancel_transfer();
+            }
+            ImGui::SameLine();
+            ImGui::TextColored(col4(p.text), TR("%zu row(s) written..."),
+                               transfer.rows);
+        }
+
+        const bool can_save =
+            !transfer.running && !export_path_.empty() &&
+            (!export_whole_query_ ||
+             (target.state() == SessionState::connected && !target.busy()));
+        bool save = false;
+        if (!transfer.running) {
+            save = icon_text_button(
+                "##savefile", Icon::save, TR("Save to file"),
+                export_whole_query_
+                    ? TR("Run the query again and write every row to the file")
+                    : TR("Write the result to the file above"),
+                can_save);
+        }
+        // "export save" do canal de comandos aperta o mesmo botao.
+        if (export_submit_ && can_save) save = true;
+        export_submit_ = false;
+
+        if (save) {
+            if (export_whole_query_) {
+                // A consulta como esta' na grade -- filtro e ordenacao --, sem
+                // o LIMIT da pagina.
+                const sql::PagedQuery whole = sql::make_unpaged_query(
+                    document->paged_sql(), document_dialect(*document),
+                    document->sort(), document->filter());
+                export_status_.clear();
+                target.export_query_async(whole.sql, export_options_, export_path_);
+            } else if (auto status = db::export_to_file(rs, export_options_,
+                                                        export_path_);
+                       status) {
                 export_status_ = std::string(TRF("%zu row(s) written to %s",
                                                  rs.row_count(),
                                                  export_path_.c_str()));
@@ -5657,7 +6432,7 @@ void MainShell::draw_export_window() {
             }
         }
 
-        if (!export_status_.empty()) {
+        if (!export_status_.empty() && !transfer.running) {
             ImGui::SameLine();
             ImGui::TextColored(col4(p.ok), "%s", export_status_.c_str());
         }
@@ -5718,7 +6493,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
                 ImGui::EndDisabled();
 
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s",
+                    hint_fmt("%s",
                                       TR("Count the whole result (one more "
                                          "full scan)"));
                 }
@@ -5731,7 +6506,7 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
                            rs.bytes_used());
 
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
+            hint_fmt(
                 TR("The query was rewritten with LIMIT %zu.\n"
                    "See the executed SQL in the Queries tab."),
                 document.page_size() + 1);
@@ -5773,13 +6548,6 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
     }
 }
 
-// Teclas da grade. Mapa completo do DBeaver em docs/GRID-KEYS.md (50 teclas);
-// aqui estao as de navegacao e as que ja' tinham acao no menu de contexto.
-//
-// So' age quando a JANELA do resultado tem foco. Sem esse teste, `Alt+Delete`
-// marcaria uma linha para exclusao enquanto o usuario digita no editor SQL --
-// e' a mesma razao pela qual o DBeaver prende estes atalhos ao contexto
-// `resultset.focused`.
 // Linha nova com os valores de `row`, exceto a chave primaria.
 //
 // Extraida do menu de contexto para a tecla Ctrl+Alt+Insert usar a MESMA
@@ -5787,8 +6555,8 @@ void MainShell::draw_grid_toolbar(SqlDocument& document,
 // produz um INSERT recusado pelo servidor depois de o usuario ja' ter
 // preenchido o resto.
 void MainShell::duplicate_row(SqlDocument& document, const db::ResultSet& rs,
-                              std::size_t row) {
-    const std::size_t index = document.edits().add_row();
+                              std::size_t row, std::size_t anchor) {
+    const std::size_t index = document.edits().add_row(anchor);
     const auto& keys = document.edit_target().key_columns;
 
     for (std::size_t c = 0; c < rs.column_count(); ++c) {
@@ -5802,6 +6570,9 @@ void MainShell::duplicate_row(SqlDocument& document, const db::ResultSet& rs,
         const db::CellEdit* pending = document.edits().find(row, c);
 
         if (pending != nullptr) {
+            // "Set to default" pendente: a linha nova tambem fica sem valor,
+            // e o INSERT a deixa de fora -- que e' pedir o DEFAULT.
+            if (pending->is_default) continue;
             if (pending->is_null) document.edits().set_new_null(index, c);
             else document.edits().set_new_value(index, c, pending->value);
         } else if (rs.is_null(row, c)) {
@@ -5810,251 +6581,6 @@ void MainShell::duplicate_row(SqlDocument& document, const db::ResultSet& rs,
             document.edits().set_new_value(index, c,
                                            std::string(rs.text(row, c)));
         }
-    }
-}
-
-void MainShell::handle_grid_keys(SqlDocument& document, const db::ResultSet& rs) {
-    // Anota para o PROXIMO quadro quem fica com as setas. Ver o comentario
-    // em draw(): a decisao precisa estar tomada antes do NewFrame.
-    const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    grid_owns_arrows_ = focused && !editing_active_;
-
-    if (!focused) return;
-
-    // As setas sao consumidas pela NAVEGACAO por teclado do ImGui
-    // (ConfigFlags_NavEnableKeyboard, ligado em app_window_glfw.cpp) antes de
-    // qualquer IsKeyPressed nosso. Um trace que registrava TODA tecla
-    // recebida mostrou "A" chegando e as setas nunca -- foi o que separou
-    // "a tecla nao chega" de "a logica a ignora".
-    //
-    // Nem SetKeyOwner nem Shortcut(RouteFocused) resolveram: os dois disputam
-    // a rota, e a navegacao ja' consumiu a tecla antes da disputa.
-    //
-    // Desligar a navegacao enquanto a grade tem foco e' o que sobra. E' o
-    // mesmo efeito do contexto `resultset.focused` do DBeaver: dentro da
-    // grade, as setas sao da grade.
-    constexpr ImGuiInputFlags kRoute = ImGuiInputFlags_RouteFocused;
-
-    // Repeticao LIGADA nas setas: segurar a seta para descer varias linhas e'
-    // o comportamento de qualquer grade, e sem isso cada linha exigiria um
-    // toque. O atraso e a cadencia sao os do sistema, herdados do ImGui.
-    const auto pressed = [&](ImGuiKey key) {
-        return ImGui::IsKeyPressed(key, /*repeat=*/true);
-    };
-    if (editing_active_) return;   // o editor da celula consome as teclas
-    if (rs.row_count() == 0 || rs.column_count() == 0) return;
-
-    // Primeira tecla sem selecao comeca no canto, em vez de nao fazer nada.
-    if (!has_selection_ || selected_document_ != document.id()) {
-        if (pressed(ImGuiKey_DownArrow) ||
-            pressed(ImGuiKey_UpArrow) ||
-            pressed(ImGuiKey_LeftArrow) ||
-            pressed(ImGuiKey_RightArrow)) {
-            selected_document_ = document.id();
-            selected_row_      = 0;
-            selected_column_   = 0;
-            has_selection_     = true;
-            scroll_to_selection_ = true;
-        }
-        return;
-    }
-
-    const std::size_t last_row = rs.row_count() - 1;
-    const std::size_t last_col = rs.column_count() - 1;
-
-    std::size_t row = selected_row_;
-    std::size_t col = selected_column_;
-
-    // Saturar nas bordas, nao dar a volta: uma seta para baixo na ultima
-    // linha que pula para a primeira faz perder o lugar sem aviso.
-    if (pressed(ImGuiKey_DownArrow))  row = std::min(row + 1, last_row);
-    if (pressed(ImGuiKey_UpArrow))    row = row > 0 ? row - 1 : 0;
-    if (pressed(ImGuiKey_RightArrow)) col = std::min(col + 1, last_col);
-    if (pressed(ImGuiKey_LeftArrow))  col = col > 0 ? col - 1 : 0;
-
-    // Home/End andam na LINHA; com Ctrl, no resultado inteiro -- e' a
-    // convencao de toda planilha, e quebra-la aqui custaria mais que seguir.
-    const bool ctrl = ImGui::GetIO().KeyCtrl;
-    if (pressed(ImGuiKey_Home)) { col = 0; if (ctrl) row = 0; }
-    if (pressed(ImGuiKey_End))  { col = last_col; if (ctrl) row = last_row; }
-
-    // Uma "pagina" e' o que cabe na tela, nao a pagina do resultado: sao
-    // conceitos diferentes, e PageDown que buscasse a proxima pagina do
-    // servidor surpreenderia quem so' queria rolar.
-    const std::size_t screen_rows = std::max<std::size_t>(
-        1, static_cast<std::size_t>(ImGui::GetContentRegionAvail().y /
-                                    std::max(ImGui::GetTextLineHeightWithSpacing(), 1.0f)));
-    if (pressed(ImGuiKey_PageDown)) {
-        row = std::min(row + screen_rows, last_row);
-    }
-    if (pressed(ImGuiKey_PageUp)) {
-        row = row > screen_rows ? row - screen_rows : 0;
-    }
-
-    if (row != selected_row_ || col != selected_column_) {
-        selected_row_        = row;
-        selected_column_     = col;
-        scroll_to_selection_ = true;
-        return;   // uma tecla por quadro: navegar e agir juntos surpreenderia
-    }
-
-    // Tab alterna grade <-> registro. Vem ANTES do teste de editavel: trocar
-    // de visao nao e' edicao, e um resultado somente leitura -- que e'
-    // justamente o de uma consulta com JOIN -- e' onde a visao de registro
-    // mais ajuda.
-    if (ImGui::Shortcut(ImGuiKey_Tab, kRoute)) {
-        document.set_record_mode(!document.record_mode());
-    }
-
-    // --- Navegacao por linha (resultset.row.first/previous/next/last) -------
-    //
-    // Ctrl+Alt+setas anda de LINHA mantendo a coluna: e' como se percorre um
-    // cadastro comparando o mesmo campo. As setas simples ja' andam livres.
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
-                            ImGuiKey_LeftArrow, kRoute)) {
-        selected_row_ = 0;
-        scroll_to_selection_ = true;
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_LeftArrow,
-                        kRoute)) {
-        selected_row_ = selected_row_ > 0 ? selected_row_ - 1 : 0;
-        scroll_to_selection_ = true;
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_RightArrow,
-                        kRoute)) {
-        selected_row_ = std::min(selected_row_ + 1, last_row);
-        scroll_to_selection_ = true;
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
-                            ImGuiKey_RightArrow, kRoute)) {
-        selected_row_ = last_row;
-        scroll_to_selection_ = true;
-    }
-
-    // --- Selecao de linha e coluna (resultset.grid.selectRow/selectColumn) --
-    //
-    // Marcam a linha ou a coluna inteira para copiar. A grade nao tem selecao
-    // em bloco, entao o efeito e' copiar direto para a area de transferencia
-    // -- que e' o que se faz com a selecao em 9 de 10 vezes.
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_R, kRoute)) {
-        std::string line;
-        for (std::size_t c = 0; c < rs.column_count(); ++c) {
-            if (c > 0) line += '\t';
-            if (!rs.is_null(row, c)) line += std::string(rs.text(row, c));
-        }
-        ImGui::SetClipboardText(line.c_str());
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_C, kRoute)) {
-        std::string column_text;
-        for (std::size_t r = 0; r < rs.row_count(); ++r) {
-            if (r > 0) column_text += '\n';
-            if (!rs.is_null(r, col)) column_text += std::string(rs.text(r, col));
-        }
-        ImGui::SetClipboardText(column_text.c_str());
-    }
-
-    // Nomes das colunas, separados por tab -- cola direto numa planilha
-    // como linha de cabecalho (resultset.grid.copyColumnNames).
-    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiMod_Shift | ImGuiKey_C, kRoute)) {
-        std::string names;
-        for (std::size_t c = 0; c < rs.column_count(); ++c) {
-            if (c > 0) names += '\t';
-            names += rs.column(c).info().name;
-        }
-        ImGui::SetClipboardText(names.c_str());
-    }
-
-    // Painel de valor (resultset.grid.togglePreview). O DBeaver usa Ctrl+7 e
-    // F7; F7 sozinho basta e nao colide com nada nosso.
-    if (ImGui::Shortcut(ImGuiKey_F7, kRoute)) {
-        open_value_panel(document, rs, row, col);
-    }
-
-    if (!document.edit_target().editable()) return;
-
-    // Acoes. As teclas sao as do DBeaver (docs/GRID-KEYS.md).
-    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_Delete, kRoute)) {
-        if (document.edits().is_deleted(row)) document.edits().unmark_deleted(row);
-        else                                  document.edits().mark_deleted(row);
-    }
-    if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_Insert, kRoute)) {
-        document.edits().add_row();
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, kRoute) && row > 0) {
-        document.edits().copy_cell_from(rs, row - 1, row, col);
-    }
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_D, kRoute) &&
-        row < last_row) {
-        document.edits().copy_cell_from(rs, row + 1, row, col);
-    }
-
-    // Duplicar a linha (resultset.row.copy). Mesma regra do menu -- a chave
-    // fica vazia, senao o INSERT viola a unicidade.
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_Insert, kRoute)) {
-        duplicate_row(document, rs, row);
-    }
-
-    // NULL na celula. Digitar nada produz string VAZIA, que e' diferente de
-    // NULL no banco -- por isso a acao existe separada da edicao.
-    //
-    // Ctrl+Shift+N seria o natural, mas ja' e' "nova conexao" global, e
-    // atalhos globais sao lidos com IsKeyChordPressed, que NAO respeita
-    // rota: a grade em foco nao impediria o dialogo de abrir junto.
-    // Ctrl+0 esta' livre e nao colide.
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, kRoute)) {
-        document.edits().set_null(row, col);
-    }
-
-    // Gravar e descartar as alteracoes pendentes.
-    //
-    // O DBeaver usa Ctrl+S e Ctrl+R; aqui os dois ja' sao globais (salvar o
-    // script e recarregar). Ctrl+Alt+Shift+Enter e' o `cell.save` dele, e
-    // esta' livre -- vale para o buffer inteiro, que e' o que se quer
-    // gravar.
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiMod_Shift |
-                            ImGuiKey_Enter, kRoute) &&
-        document.edits().has_changes()) {
-        save_pending_edits(document);
-    }
-
-    // Esc reverte a celula -- o `cell.reset` do DBeaver.
-    //
-    // Nao ha' conflito com o Esc que cancela o EDITOR: esta funcao retorna
-    // cedo quando `editing_active_`, entao as duas leituras da tecla nunca
-    // acontecem no mesmo estado.
-    // RouteAlways, e nao RouteFocused: o editor de texto registra a rota do
-    // Esc (TextEditor.cpp:1369) e e' desenhado ANTES da grade, entao ganha a
-    // disputa mesmo sem foco. RouteAlways le' a tecla direto.
-    //
-    // Seguro aqui porque esta funcao ja' so' roda com a grade em foco e fora
-    // da edicao -- as duas condicoes que o RouteFocused garantiria.
-    if (ImGui::Shortcut(ImGuiKey_Escape, ImGuiInputFlags_RouteAlways)) {
-        if (document.edits().is_deleted(row)) {
-            // Numa linha marcada para exclusao, reverter a CELULA nao diria
-            // nada: a linha inteira e' que esta' pendente. Desfazer a marca e'
-            // o que o usuario quer dizer com Esc ali.
-            document.edits().unmark_deleted(row);
-        } else {
-            document.edits().revert(row, col);
-        }
-    }
-
-    // Enter edita a celula sob a selecao -- o `row.edit.inline` do DBeaver.
-    if (ImGui::Shortcut(ImGuiKey_Enter, ImGuiInputFlags_RouteFocused) &&
-        !document.edits().is_deleted(row)) {
-        editing_active_   = true;
-        editing_document_ = document.id();
-        editing_row_      = row;
-        editing_column_   = col;
-
-        const db::CellEdit* pending = document.edits().find(row, col);
-        const bool is_null = pending != nullptr ? pending->is_null
-                                                : rs.is_null(row, col);
-        const std::string_view text =
-            pending != nullptr ? std::string_view(pending->value)
-                               : rs.text(row, col);
-        std::snprintf(edit_buffer_, sizeof edit_buffer_, "%s",
-                      is_null ? "" : std::string(text).c_str());
     }
 }
 
@@ -6096,9 +6622,7 @@ void MainShell::draw_record_view(SqlDocument& document, const db::ResultSet& rs)
     // vai nos botoes e nas setas horizontais, como no DBeaver.
     ImGui::BeginDisabled(row == 0);
     if (icon_button("##prevrec", Icon::chevron_left, TR("Previous record"))) {
-        selected_document_ = document.id();
-        selected_row_      = row - 1;
-        has_selection_     = true;
+        select_grid_cell(document, row - 1, selected_column_, false);
     }
     ImGui::EndDisabled();
 
@@ -6108,9 +6632,7 @@ void MainShell::draw_record_view(SqlDocument& document, const db::ResultSet& rs)
     ImGui::SameLine();
     ImGui::BeginDisabled(row + 1 >= rs.row_count());
     if (icon_button("##nextrec", Icon::chevron_right, TR("Next record"))) {
-        selected_document_ = document.id();
-        selected_row_      = row + 1;
-        has_selection_     = true;
+        select_grid_cell(document, row + 1, selected_column_, false);
     }
     ImGui::EndDisabled();
 
@@ -6167,285 +6689,397 @@ void MainShell::draw_grid_panel() {
         // O resultado pertence ao documento: trocar de aba troca a grade.
         SqlDocument* document = active_document();
 
-        if (document == nullptr || !document->result().has_value()) {
+        if (document != nullptr && document->is_object()) {
+            // O editor de objeto mostra os dados na aba Data dele, como no
+            // DBeaver. Desenhar a mesma grade aqui tambem daria duas grades do
+            // mesmo documento disputando o teclado.
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR("the data of this object is in its Data tab"));
+        } else if (document == nullptr) {
             ImGui::TextColored(col4(colors().text_dim),
                                TR("run a query to see the result"));
-            // Um erro da última execução aparece mesmo sem resultado.
-            if (document != nullptr && !document->status().empty()) {
-                ImGui::TextColored(col4(colors().error), "%s",
-                                   document->status().c_str());
-            }
-            ImGui::End();
-            return;
-        }
-
-        const db::ResultSet& rs = *document->result();
-        const Palette& p = colors();
-
-        // Teclado ANTES de desenhar: a celula selecionada precisa ja' estar
-        // no lugar novo quando as celulas forem desenhadas, senao o destaque
-        // e a rolagem ficam um quadro atrasados -- visivel como um piscar.
-        handle_grid_keys(*document, rs);
-
-        draw_grid_toolbar(*document, rs);
-
-        // Alteracoes pendentes: contagem e os dois botoes. Fica acima da
-        // grade, nao escondido num menu -- e' estado que o usuario precisa
-        // ver sem procurar.
-        if (document->edits().has_changes()) {
-            const std::size_t rows = document->edits().touched_rows();
-
-            icon_inline(Icon::warning, p.warn);
-            ImGui::SameLine(0.0f, 4.0f);
-            ImGui::TextColored(col4(p.warn),
-                               TR("%zu change(s) in %zu row(s), not saved"),
-                               document->edits().change_count(), rows);
-
-            ImGui::SameLine();
-            if (icon_text_button("##saveedits", Icon::commit, TR("Save changes"),
-                                 TR("Run the UPDATEs in a transaction"),
-                                 !session().busy())) {
-                save_pending_edits(*document);
-            }
-            ImGui::SameLine();
-            if (icon_text_button("##discardedits", Icon::rollback,
-                                 TR("Discard"),
-                                 TR("Throw the pending changes away"))) {
-                document->edits().clear();
-            }
-        } else if (!document->edit_target().editable() &&
-                   rs.row_count() > 0) {
-            // Diz POR QUE nao da' para editar, em vez de deixar o usuario
-            // tentar e nao conseguir (diretiva 6).
-            ImGui::TextColored(col4(p.text_dim), TR("read-only: %s"),
-                               TR(std::string(db::to_string(
-                                      document->edit_target().refusal)).c_str()));
-        }
-
-        // Pivot SUBSTITUI a grade: as duas juntas duplicariam a tela sem
-        // ajudar a ler nenhuma.
-        if (document->pivot_active()) {
-            draw_pivot_table(*document, rs);
-            ImGui::End();
-            return;
-        }
-
-        draw_group_bar(*document, rs);
-        draw_group_panel(*document, rs);
-
-        ImGui::Separator();
-
-        if (rs.column_count() == 0) {
-            ImGui::TextColored(col4(colors().ok), TR("command executed"));
-            if (rs.affected_rows() >= 0) {
-                ImGui::SameLine();
-                ImGui::TextColored(col4(colors().text_dim),
-                                   TR(" (%lld row(s) affected)"),
-                                   static_cast<long long>(rs.affected_rows()));
-            }
-            ImGui::End();
-            return;
-        }
-
-        constexpr ImGuiTableFlags flags =
-            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-            ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
-            ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
-            ImGuiTableFlags_SizingFixedFit |
-            // Sortable so' marca o cabecalho como clicavel e guarda o pedido.
-            // A ordenacao em si e' nossa, no servidor -- SortTristate permite
-            // um terceiro clique que volta a' ordem original.
-            ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
-
-        // O ImGui nao desenha mais de 64 colunas numa tabela. Truncar em
-        // silencio faria o usuario concluir que a consulta devolveu menos
-        // colunas do que devolveu (diretiva 6).
-        constexpr std::size_t kMaxColumns = 64;
-        const auto columns =
-            static_cast<int>(std::min(rs.column_count(), kMaxColumns));
-
-        if (rs.column_count() > kMaxColumns) {
-            icon_inline(Icon::warning, p.warn);
-            ImGui::SameLine(0.0f, 4.0f);
-            ImGui::TextColored(col4(p.warn),
-                               TR("showing the first %zu of %zu columns"),
-                               kMaxColumns, rs.column_count());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    TR("The grid cannot draw more than %zu columns.\n"
-                       "Narrow the SELECT list to see the remaining ones."),
-                    kMaxColumns);
-            }
-        }
-
-        // Modo registro: UMA linha por vez, os atributos em pilha. E' o
-        // `toggleMode` do DBeaver, e existe para tabela larga -- com 40
-        // colunas, a grade obriga a rolar na horizontal para ler um cadastro.
-        if (document->record_mode()) {
-            draw_record_view(*document, rs);
-            ImGui::End();
-            return;
-        }
-
-        if (ImGui::BeginTable("##results", columns, flags)) {
-            ImGui::TableSetupScrollFreeze(1, 1);   // cabecalho e 1a coluna fixos
-
-            for (int c = 0; c < columns; ++c) {
-                // Sem DefaultSort: a ordem inicial e' a do servidor. Ordenar
-                // sem o usuario pedir esconderia a ordem natural do resultado,
-                // que num SELECT com ORDER BY proprio e' justamente o ponto.
-                ImGui::TableSetupColumn(
-                    rs.column(static_cast<std::size_t>(c)).info().name.c_str());
-            }
-            // Cabecalhos um a um, em vez de TableHeadersRow(): cada um ganha
-            // menu de contexto proprio, com o filtro daquela coluna.
-            ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
-            for (int c = 0; c < columns; ++c) {
-                ImGui::TableSetColumnIndex(c);
-                const std::string& name =
-                    rs.column(static_cast<std::size_t>(c)).info().name;
-
-                // Coluna filtrada leva um prefixo no rotulo, nao um icone ao
-                // lado: TableHeader ocupa a largura toda da celula, e
-                // qualquer SameLine depois dele desenha POR CIMA do texto.
-                const bool filtered =
-                    !document->filter().empty() &&
-                    document->filter().column == name;
-
-                ImGui::PushID(c);
-                if (filtered) {
-                    // '*' e nao um simbolo Unicode: a fonte carregada cobre
-                    // Latin-1, e um glifo ausente viraria '?' na tela.
-                    const std::string marked = "* " + name;
-                    ImGui::PushStyleColor(ImGuiCol_Text, col(p.warn));
-                    ImGui::TableHeader(marked.c_str());
-                    ImGui::PopStyleColor();
-                } else {
-                    ImGui::TableHeader(ImGui::TableGetColumnName(c));
-                }
-
-                draw_column_header_menu(*document, rs,
-                                        static_cast<std::size_t>(c));
-                ImGui::PopID();
-            }
-
-            // A ordenacao acontece no SERVIDOR, refazendo a consulta: ordenar
-            // no cliente reordenaria apenas as 200 linhas da pagina, o que
-            // daria uma ordem que nao existe no resultado completo.
-            //
-            // O ImGui so' avisa que o pedido mudou; nos executamos.
-            if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
-                specs != nullptr && specs->SpecsDirty) {
-                specs->SpecsDirty = false;
-
-                // Ordenar exige refazer a consulta, o que so' faz sentido
-                // quando ela e' paginada -- um resultado completo ja' esta'
-                // todo na tela, e reexecutar seria custo sem ganho.
-                if (document->paged() && !session().busy()) {
-                    sql::SortOrder order;
-
-                    // SpecsCount == 0 com SortTristate: o terceiro clique
-                    // removeu a ordenacao. SortOrder vazio volta a' ordem
-                    // original do servidor.
-                    if (specs->SpecsCount > 0) {
-                        const ImGuiTableColumnSortSpecs& spec = specs->Specs[0];
-                        const auto index =
-                            static_cast<std::size_t>(spec.ColumnIndex);
-                        if (index < rs.column_count()) {
-                            order.column     = rs.column(index).info().name;
-                            order.descending =
-                                spec.SortDirection == ImGuiSortDirection_Descending;
-                        }
-                    }
-
-                    if (order.column != document->sort().column ||
-                        order.descending != document->sort().descending) {
-                        document->set_sort(std::move(order));
-                        // Volta para a primeira pagina: continuar na pagina 5
-                        // de uma ordem diferente nao corresponde a nada.
-                        execute_page(*document, 0);
-                    }
-                }
-            }
-
-            // Virtualizacao: so' as linhas visiveis sao desenhadas. E' o que
-            // torna 1M linhas viavel (ADR 0005).
-            ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(rs.row_count()));
-
-            while (clipper.Step()) {
-                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
-                    const auto r = static_cast<std::size_t>(row);
-                    ImGui::TableNextRow();
-
-                    for (int c = 0; c < columns; ++c) {
-                        const auto ci = static_cast<std::size_t>(c);
-                        ImGui::TableSetColumnIndex(c);
-                        draw_grid_cell(*document, rs, r, ci);
-                    }
-                }
-            }
-
-            // Linhas novas, depois das do resultado. Fundo verde: sao adicao,
-            // nao alteracao -- a distincao importa antes de gravar.
-            for (std::size_t i = 0; i < document->edits().insertions().size();
-                 ++i) {
-                const db::RowInsertion& insertion =
-                    document->edits().insertions()[i];
-
-                ImGui::TableNextRow();
-                ImGui::PushID(static_cast<int>(1000000 + i));
-
-                for (int c = 0; c < columns; ++c) {
-                    const auto ci = static_cast<std::size_t>(c);
-                    ImGui::TableSetColumnIndex(c);
-                    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-                                           with_alpha(p.ok, 0.18f));
-
-                    const auto value_it = insertion.values.find(ci);
-                    const auto null_it  = insertion.nulls.find(ci);
-                    const bool cell_null =
-                        null_it != insertion.nulls.end() && null_it->second;
-
-                    const std::string text =
-                        cell_null ? "[null]"
-                        : value_it != insertion.values.end() ? value_it->second
-                                                             : std::string{};
-
-                    ImGui::PushID(c);
-                    // Campo direto, sem duplo clique: a linha nova existe para
-                    // ser preenchida, e exigir um clique extra por celula
-                    // seria atrito sem motivo.
-                    char buffer[512];
-                    std::snprintf(buffer, sizeof buffer, "%s",
-                                  cell_null ? "" : text.c_str());
-
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    if (ImGui::InputTextWithHint(
-                            "##newcell",
-                            cell_null ? "[null]" : TR("(default)"),
-                            buffer, sizeof buffer)) {
-                        document->edits().set_new_value(i, ci, buffer);
-                    }
-
-                    if (ImGui::BeginPopupContextItem("##newcellmenu")) {
-                        if (ImGui::MenuItem(TR("Set NULL"))) {
-                            document->edits().set_new_null(i, ci);
-                        }
-                        if (ImGui::MenuItem(TR("Remove row"))) {
-                            document->edits().remove_new_row(i);
-                        }
-                        ImGui::EndPopup();
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::PopID();
-            }
-
-            ImGui::EndTable();
+        } else {
+            // O documento pode ter varios resultados: as abas.
+            draw_result_tabs(*document);
+            draw_grid_view(*document);
         }
     }
     ImGui::End();
+}
+
+// A grade de UM documento, dentro da janela corrente: o painel "Result" para
+// um script, a aba Data para um editor de objeto.
+void MainShell::draw_grid_view(SqlDocument& document) {
+    if (!document.result().has_value()) {
+        ImGui::TextColored(col4(colors().text_dim),
+                           TR("run a query to see the result"));
+        // Um erro da última execução aparece mesmo sem resultado.
+        if (!document.status().empty()) {
+            ImGui::TextColored(col4(colors().error), "%s",
+                               document.status().c_str());
+        }
+        return;
+    }
+
+    const db::ResultSet& rs = *document.result();
+    const Palette& p = colors();
+
+    // Teclado ANTES de desenhar: a celula selecionada precisa ja' estar
+    // no lugar novo quando as celulas forem desenhadas, senao o destaque
+    // e a rolagem ficam um quadro atrasados -- visivel como um piscar.
+    handle_grid_keys(document, rs);
+
+    draw_grid_toolbar(document, rs);
+    if (rs.column_count() > 0) draw_session_actions(document, rs);
+    draw_grid_filter_bar(document, rs);
+
+    // Os menus que os comandos abrem (referencias, copiar como, filtrar
+    // por valor). Antes de qualquer retorno antecipado: valem tambem no
+    // modo registro e na apresentacao em texto.
+    if (rs.column_count() > 0 && rs.row_count() > 0) {
+        draw_grid_popups(document, rs);
+    }
+
+    // Alteracoes pendentes: contagem e os dois botoes. Fica acima da
+    // grade, nao escondido num menu -- e' estado que o usuario precisa
+    // ver sem procurar.
+    if (document.edits().has_changes()) {
+        const std::size_t rows = document.edits().touched_rows();
+
+        icon_inline(Icon::warning, p.warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.warn),
+                           TR("%zu change(s) in %zu row(s), not saved"),
+                           document.edits().change_count(), rows);
+
+        ImGui::SameLine();
+        if (icon_text_button("##saveedits", Icon::commit, TR("Save changes"),
+                             TR("Run the UPDATEs in a transaction"),
+                             !session().busy())) {
+            request_save_edits(document, /*commit_after=*/false);
+        }
+        ImGui::SameLine();
+        if (icon_text_button("##discardedits", Icon::rollback,
+                             TR("Discard"),
+                             TR("Throw the pending changes away"))) {
+            document.edits().clear();
+        }
+    } else if (!document.edit_target().editable() &&
+               rs.row_count() > 0) {
+        // Diz POR QUE nao da' para editar, em vez de deixar o usuario
+        // tentar e nao conseguir (diretiva 6).
+        ImGui::TextColored(col4(p.text_dim), TR("read-only: %s"),
+                           TR(std::string(db::to_string(
+                                  document.edit_target().refusal)).c_str()));
+    }
+
+    // Pivot SUBSTITUI a grade: as duas juntas duplicariam a tela sem
+    // ajudar a ler nenhuma.
+    if (document.pivot_active()) {
+        draw_pivot_table(document, rs);
+        return;
+    }
+
+    draw_group_bar(document, rs);
+    draw_group_panel(document, rs);
+
+    ImGui::Separator();
+
+    if (rs.column_count() == 0) {
+        ImGui::TextColored(col4(colors().ok), TR("command executed"));
+        if (rs.affected_rows() >= 0) {
+            ImGui::SameLine();
+            ImGui::TextColored(col4(colors().text_dim),
+                               TR(" (%lld row(s) affected)"),
+                               static_cast<long long>(rs.affected_rows()));
+        }
+        return;
+    }
+
+    constexpr ImGuiTableFlags flags =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
+        // Hideable: "Hide columns" / "Show columns" da grade.
+        ImGuiTableFlags_Hideable |
+        // Ordem e largura valem para ESTE resultado, nesta execucao -- ver
+        // o PushID abaixo.
+        ImGuiTableFlags_NoSavedSettings |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
+        ImGuiTableFlags_SizingFixedFit |
+        // Sortable so' marca o cabecalho como clicavel e guarda o pedido.
+        // A ordenacao em si e' nossa, no servidor -- SortTristate permite
+        // um terceiro clique que volta a' ordem original.
+        ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
+
+    // O ImGui nao desenha mais de 64 colunas numa tabela. Truncar em
+    // silencio faria o usuario concluir que a consulta devolveu menos
+    // colunas do que devolveu (diretiva 6).
+    constexpr std::size_t kMaxColumns = 64;
+    const auto columns =
+        static_cast<int>(std::min(rs.column_count(), kMaxColumns));
+
+    if (rs.column_count() > kMaxColumns) {
+        icon_inline(Icon::warning, p.warn);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(col4(p.warn),
+                           TR("showing the first %zu of %zu columns"),
+                           kMaxColumns, rs.column_count());
+        if (ImGui::IsItemHovered()) {
+            hint_fmt(
+                TR("The grid cannot draw more than %zu columns.\n"
+                   "Narrow the SELECT list to see the remaining ones."),
+                kMaxColumns);
+        }
+    }
+
+    // Modo registro: UMA linha por vez, os atributos em pilha. E' o
+    // `toggleMode` do DBeaver, e existe para tabela larga -- com 40
+    // colunas, a grade obriga a rolar na horizontal para ler um cadastro.
+    if (document.record_mode()) {
+        draw_record_view(document, rs);
+        return;
+    }
+
+    GridView& view = document.grid_view();
+
+    // A barra de baixo (gravar, linhas, navegacao, paineis) fica sempre
+    // a' vista: a tabela cede a altura dela.
+    const float bar_height =
+        ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y + 2.0f;
+
+    // Apresentacao em texto (`resultset.switchPresentation`).
+    if (view.presentation == GridPresentation::text) {
+        ImGui::BeginChild("##textarea", ImVec2(0.0f, -bar_height));
+        draw_grid_text(document, rs);
+        ImGui::EndChild();
+        draw_grid_bottom_bar(document, rs);
+        return;
+    }
+
+    // Soltou o botao: o arrasto de selecao acabou.
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) grid_drag_document_ = 0;
+
+    // Uma tabela do ImGui POR FORMA de resultado (aba + nomes das colunas).
+    //
+    // Com um id so' ("##results") para todos, o ImGui reaproveitava a
+    // ordem das colunas de um resultado no seguinte, casando-as pelo
+    // NOME: `pedido` tem cliente_id na segunda posicao, e ao abrir
+    // `cliente` a coluna cliente_id ia para a segunda posicao tambem --
+    // a grade mostrava "nome, cliente_id, ..." para um SELECT que devolve
+    // "cliente_id, nome, ...". Visto na tela, seguindo uma chave
+    // estrangeira.
+    ImGuiID shape = ImHashData(&columns, sizeof columns);
+    for (int c = 0; c < columns; ++c) {
+        const std::string& name =
+            rs.column(static_cast<std::size_t>(c)).info().name;
+        shape = ImHashStr(name.c_str(), name.size(), shape);
+    }
+    ImGui::PushID(static_cast<int>(document.id()));
+    ImGui::PushID(static_cast<int>(document.active_result_tab_id()));
+    ImGui::PushID(static_cast<int>(shape));
+
+    // Zoom (`resultset.zoomIn` / `zoomOut`): so' a grade muda de tamanho.
+    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * view.zoom);
+
+    if (ImGui::BeginTable("##results", columns, flags,
+                          ImVec2(0.0f, -bar_height))) {
+        ImGui::TableSetupScrollFreeze(1, 1);   // cabecalho e 1a coluna fixos
+
+        for (int c = 0; c < columns; ++c) {
+            // Sem DefaultSort: a ordem inicial e' a do servidor. Ordenar
+            // sem o usuario pedir esconderia a ordem natural do resultado,
+            // que num SELECT com ORDER BY proprio e' justamente o ponto.
+            ImGui::TableSetupColumn(
+                rs.column(static_cast<std::size_t>(c)).info().name.c_str());
+        }
+
+        // Esconder, mover e ajustar largura -- o que os comandos pediram
+        // -- e a ordem das colunas na tela, que a navegacao usa.
+        apply_grid_table_requests(document, rs, columns);
+
+        // Cabecalhos um a um, em vez de TableHeadersRow(): cada um ganha
+        // menu de contexto proprio, com o filtro daquela coluna.
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        for (int c = 0; c < columns; ++c) {
+            if (view.is_hidden(static_cast<std::size_t>(c))) continue;
+            ImGui::TableSetColumnIndex(c);
+            const std::string& name =
+                rs.column(static_cast<std::size_t>(c)).info().name;
+
+            // Coluna filtrada leva um prefixo no rotulo, nao um icone ao
+            // lado: TableHeader ocupa a largura toda da celula, e
+            // qualquer SameLine depois dele desenha POR CIMA do texto.
+            const bool filtered = !document.filter().expression_for(name).empty();
+
+            ImGui::PushID(c);
+            if (filtered) {
+                // '*' e nao um simbolo Unicode: a fonte carregada cobre
+                // Latin-1, e um glifo ausente viraria '?' na tela.
+                const std::string marked = "* " + name;
+                ImGui::PushStyleColor(ImGuiCol_Text, col(p.warn));
+                ImGui::TableHeader(marked.c_str());
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::TableHeader(ImGui::TableGetColumnName(c));
+            }
+
+            draw_column_header_menu(document, rs,
+                                    static_cast<std::size_t>(c));
+            ImGui::PopID();
+        }
+
+        // A ordenacao acontece no SERVIDOR, refazendo a consulta: ordenar
+        // no cliente reordenaria apenas as 200 linhas da pagina, o que
+        // daria uma ordem que nao existe no resultado completo.
+        //
+        // O ImGui so' avisa que o pedido mudou; nos executamos.
+        if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
+            specs != nullptr && specs->SpecsDirty) {
+            specs->SpecsDirty = false;
+
+            // Ordenar exige refazer a consulta, o que so' faz sentido
+            // quando ela e' paginada -- um resultado completo ja' esta'
+            // todo na tela, e reexecutar seria custo sem ganho.
+            if (document.paged() && !session().busy()) {
+                sql::SortOrder order;
+
+                // SpecsCount == 0 com SortTristate: o terceiro clique
+                // removeu a ordenacao. SortOrder vazio volta a' ordem
+                // original do servidor.
+                if (specs->SpecsCount > 0) {
+                    const ImGuiTableColumnSortSpecs& spec = specs->Specs[0];
+                    const auto index =
+                        static_cast<std::size_t>(spec.ColumnIndex);
+                    if (index < rs.column_count()) {
+                        order.column     = rs.column(index).info().name;
+                        order.descending =
+                            spec.SortDirection == ImGuiSortDirection_Descending;
+                    }
+                }
+
+                if (order.column != document.sort().column ||
+                    order.descending != document.sort().descending) {
+                    document.set_sort(std::move(order));
+                    // Volta para a primeira pagina: continuar na pagina 5
+                    // de uma ordem diferente nao corresponde a nada.
+                    execute_page(document, 0);
+                }
+            }
+        }
+
+        // Uma linha NOVA, ainda nao inserida. Fundo verde: e' adicao, nao
+        // alteracao -- a distincao importa antes de gravar.
+        const auto draw_insertion = [&](std::size_t i) {
+            const db::RowInsertion& insertion =
+                document.edits().insertions()[i];
+
+            ImGui::TableNextRow();
+            ImGui::PushID(static_cast<int>(1000000 + i));
+
+            for (int c = 0; c < columns; ++c) {
+                const auto ci = static_cast<std::size_t>(c);
+                if (view.is_hidden(ci)) continue;
+                ImGui::TableSetColumnIndex(c);
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                                       with_alpha(p.ok, 0.18f));
+
+                const auto value_it = insertion.values.find(ci);
+                const auto null_it  = insertion.nulls.find(ci);
+                const bool cell_null =
+                    null_it != insertion.nulls.end() && null_it->second;
+
+                const std::string text =
+                    cell_null ? "[null]"
+                    : value_it != insertion.values.end() ? value_it->second
+                                                         : std::string{};
+
+                ImGui::PushID(c);
+                // Campo direto, sem duplo clique: a linha nova existe para
+                // ser preenchida, e exigir um clique extra por celula
+                // seria atrito sem motivo.
+                char buffer[512];
+                std::snprintf(buffer, sizeof buffer, "%s",
+                              cell_null ? "" : text.c_str());
+
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::InputTextWithHint(
+                        "##newcell",
+                        cell_null ? "[null]" : TR("(default)"),
+                        buffer, sizeof buffer)) {
+                    document.edits().set_new_value(i, ci, buffer);
+                }
+
+                if (ImGui::BeginPopupContextItem("##newcellmenu")) {
+                    if (ImGui::MenuItem(TR("Set NULL"))) {
+                        document.edits().set_new_null(i, ci);
+                    }
+                    if (ImGui::MenuItem(TR("Remove row"))) {
+                        document.edits().remove_new_row(i);
+                    }
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+            }
+            ImGui::PopID();
+        };
+
+        // As linhas novas aparecem ONDE foram pedidas ("Add row" abaixo
+        // da corrente, "insert before" acima). Copia dos indices: o
+        // menu de uma linha nova pode remove-la no meio do laco.
+        const std::size_t insertion_count = document.edits().insertions().size();
+        const auto anchored_at = [&](std::size_t result_row) {
+            for (std::size_t i = 0; i < insertion_count &&
+                                    i < document.edits().insertions().size();
+                 ++i) {
+                if (document.edits().insertions()[i].anchor == result_row) {
+                    draw_insertion(i);
+                }
+            }
+        };
+
+        // Virtualizacao: so' as linhas visiveis sao desenhadas. E' o que
+        // torna 1M linhas viavel (ADR 0005).
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(rs.row_count()));
+
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto r = static_cast<std::size_t>(row);
+                if (insertion_count > 0) anchored_at(r);
+
+                ImGui::TableNextRow();
+
+                // "Set row color": a linha inteira, por baixo das marcas
+                // de celula (alterada, selecionada), que sao mais urgentes.
+                if (!view.row_colors.empty()) {
+                    if (const std::uint32_t tint = grid_row_color(document, rs, r)) {
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, tint);
+                    }
+                }
+
+                for (int c = 0; c < columns; ++c) {
+                    const auto ci = static_cast<std::size_t>(c);
+                    if (view.is_hidden(ci)) continue;
+                    ImGui::TableSetColumnIndex(c);
+                    draw_grid_cell(document, rs, r, ci);
+                }
+            }
+        }
+
+        // As que ficam depois de todas (e as ancoradas alem do fim).
+        for (std::size_t i = 0; i < document.edits().insertions().size(); ++i) {
+            const std::size_t anchor = document.edits().insertions()[i].anchor;
+            if (anchor >= rs.row_count()) draw_insertion(i);
+        }
+
+        ImGui::EndTable();
+    }
+    ImGui::PopFont();
+    ImGui::PopID();
+    ImGui::PopID();
+    ImGui::PopID();
+
+    draw_grid_bottom_bar(document, rs);
 }
 
 void MainShell::draw_query_log_panel() {
@@ -6467,7 +7101,7 @@ void MainShell::draw_query_log_panel() {
         ImGui::SameLine();
         ImGui::Checkbox(TR("catalog queries"), &query_log_show_internal_);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s",
+            hint_fmt("%s",
                               TR("The queries C-Otter runs on its own to read "
                                  "the catalog. DBeaver hides these."));
         }
@@ -6541,10 +7175,10 @@ void MainShell::draw_query_log_panel() {
                     // query falhou exigia procurar a mensagem na barra, que
                     // ja' tinha sido substituida pela query seguinte.
                     if (entry.failed && !entry.error.empty()) {
-                        ImGui::SetTooltip("%s\n\n%s", entry.sql.c_str(),
+                        hint_fmt("%s\n\n%s", entry.sql.c_str(),
                                           entry.error.c_str());
                     } else {
-                        ImGui::SetTooltip("%s", entry.sql.c_str());
+                        hint_fmt("%s", entry.sql.c_str());
                     }
                 }
 
@@ -6630,7 +7264,7 @@ void MainShell::draw_status_bar() {
                 !channel.empty()) {
                 icon_inline(Icon::lock, colors().ok);
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s: %s", TR("Encrypted connection"),
+                    hint_fmt("%s: %s", TR("Encrypted connection"),
                                       channel.c_str());
                 }
                 ImGui::SameLine();
@@ -6669,13 +7303,13 @@ void MainShell::draw_status_bar() {
 
             if (ImGui::IsItemHovered()) {
                 if (session().auto_commit()) {
-                    ImGui::SetTooltip("%s", TR("Auto-commit: each statement "
+                    hint_fmt("%s", TR("Auto-commit: each statement "
                                                "commits on its own."));
                 } else if (txn == db::TxnState::failed) {
-                    ImGui::SetTooltip("%s", TR("Transaction aborted; only "
+                    hint_fmt("%s", TR("Transaction aborted; only "
                                                "rollback is accepted."));
                 } else {
-                    ImGui::SetTooltip(TR("%zu modifying statement(s) pending"),
+                    hint_fmt(TR("%zu modifying statement(s) pending"),
                                       pending);
                 }
             }
@@ -6689,7 +7323,7 @@ void MainShell::draw_status_bar() {
                 ImGui::TextColored(col4(colors().text_dim), "| %s",
                                    schema.c_str());
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", TR("Current schema"));
+                    hint_fmt("%s", TR("Current schema"));
                 }
                 ImGui::SameLine();
             }
@@ -6794,6 +7428,34 @@ Session& MainShell::session_for(const SqlDocument& document) {
     return connection != nullptr ? *connection->session : session();
 }
 
+std::string MainShell::connection_title(const Connection& connection) const {
+    // A sessao de OUTRO banco do servidor (ADR 0018) leva o nome da conexao
+    // raiz: o perfil dela se chama "raiz / banco", e o banco ja' vai entre
+    // parenteses.
+    std::string name = connection.profile.effective_name();
+    if (connection.parent_id != 0) {
+        if (const Connection* root = connection_by_id(connection.parent_id)) {
+            name = root->profile.effective_name();
+        }
+    }
+
+    // O banco em que a sessao ESTA' (o servidor pode ter escolhido o padrao do
+    // login); antes de conectar, o do perfil.
+    std::string database = connection.session->database_name();
+    // No MySQL o banco troca na MESMA sessao (USE, pelo icone da aba): vale o
+    // corrente, nao o com que ela abriu.
+    if (connection.session->is_mysql()) {
+        if (std::string current = connection.session->current_schema(); !current.empty()) {
+            database = std::move(current);
+        }
+    }
+    if (database.empty()) database = connection.profile.database;
+
+    // Perfil sem nome ja' se chama "banco@host": repetir o banco seria ruido.
+    if (database.empty() || name.starts_with(database + "@")) return name;
+    return name + " (" + database + ")";
+}
+
 Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
     // Reusa a Session vazia criada por session(): abrir a primeira conexao
     // nao deve deixar uma aba morta para tras.
@@ -6801,7 +7463,20 @@ Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
         connections_.size() == 1 &&
         connections_.front().session->state() == SessionState::disconnected;
 
-    if (reuse_empty) {
+    // A conexao ja' tem entrada, fechada: e' a de um script reaberto ao
+    // iniciar (ui/script_session.cpp), ou uma que foi desconectada. Conecta
+    // NELA -- uma segunda entrada deixaria os scripts presos a' primeira, que
+    // nunca conectaria.
+    const std::size_t existing = find_root_connection(profile);
+    const bool reuse_existing =
+        existing < connections_.size() &&
+        connections_[existing].session->state() != SessionState::connected &&
+        connections_[existing].session->state() != SessionState::connecting;
+
+    if (reuse_existing) {
+        connections_[existing].profile = profile;
+        active_connection_ = existing;
+    } else if (reuse_empty) {
         connections_.front().profile = profile;
         active_connection_ = 0;
     } else {
@@ -6831,9 +7506,11 @@ Session& MainShell::open_connection(const db::ConnectionProfile& profile) {
     // perfil errado.
     active_profile_ = profile;
 
-    Session& target = *connections_[active_connection_].session;
-    target.connect_async(profile.to_conn_config());
-    return target;
+    Connection& opened = connections_[active_connection_];
+    opened.parent_id   = 0;
+    opened.expand_once = true;
+    connect_session(opened);
+    return *opened.session;
 }
 
 void MainShell::close_connection(std::size_t index) {
@@ -6865,6 +7542,11 @@ void MainShell::load_saved_profiles() {
         return;
     }
     saved_profiles_ = std::move(*profiles);
+
+    // Nomes repetidos gravados antes da regra de nome unico -- ou vindos de
+    // edicao manual do JSON -- sao corrigidos ja' na leitura, e gravados:
+    // o Raft nunca chega a mostrar dois rotulos iguais.
+    if (db::make_names_unique(saved_profiles_) > 0) persist_profiles();
 }
 
 void MainShell::persist_profiles() {
@@ -6877,7 +7559,10 @@ void MainShell::persist_profiles() {
     }
 }
 
-void MainShell::remember_profile(const db::ConnectionProfile& profile) {
+db::ConnectionProfile MainShell::remember_profile(
+    const db::ConnectionProfile& wanted) {
+    db::ConnectionProfile profile = wanted;
+
     // Mesmo DRIVER + host + porta + banco + usuario e' a MESMA conexao, mesmo
     // que o nome tenha mudado: senao, editar o rotulo criaria uma entrada
     // duplicada.
@@ -6898,6 +7583,17 @@ void MainShell::remember_profile(const db::ConnectionProfile& profile) {
 
     const db::ProviderNames names = db::provider_for_driver(profile.driver_id);
 
+    // Nome exibido que nenhum OUTRO perfil usa. O proprio perfil (o de mesmo
+    // alvo) fica fora da lista: regravar "x" nao pode virar "x_1".
+    std::vector<std::string> taken;
+    for (const db::StoredProfile& stored : saved_profiles_) {
+        if (!same_target(stored)) taken.push_back(stored.profile.effective_name());
+    }
+    if (const std::string name = db::unique_name(profile.effective_name(), taken);
+        name != profile.effective_name()) {
+        profile.name = name;
+    }
+
     for (db::StoredProfile& stored : saved_profiles_) {
         if (!same_target(stored)) continue;
 
@@ -6911,7 +7607,7 @@ void MainShell::remember_profile(const db::ConnectionProfile& profile) {
         stored.driver   = std::string(names.driver);
 
         persist_profiles();
-        return;
+        return profile;
     }
 
     db::StoredProfile fresh;
@@ -6933,6 +7629,7 @@ void MainShell::remember_profile(const db::ConnectionProfile& profile) {
     // observado ao testar as variaveis de ambiente sobre um perfil salvo.
     saved_profiles_.push_back(std::move(fresh));
     persist_profiles();
+    return profile;
 }
 
 void MainShell::draw_import_window() {
@@ -6941,44 +7638,86 @@ void MainShell::draw_import_window() {
     // Larga o bastante para o motivo caber inteiro: "o driver MySQL ainda
     // nao foi implementado" cortado no meio nao informa nada.
     ImGui::SetNextWindowSize(ImVec2(1000, 560), ImGuiCond_Appearing);
-    if (ImGui::Begin(TRW("Import from DBeaver", "###ImportDBeaver"),
-                     &show_import_, ImGuiWindowFlags_NoDocking)) {
+    // O que importar uma candidata faz. A mesma conexao (driver + host + porta
+    // + banco + usuario) nunca entra duas vezes: se ja' esta' aqui SEM senha e
+    // a outra ferramenta tem a senha, e' a senha que vem -- o caso das
+    // conexoes do pgAdmin importadas antes de o C-Otter saber decifra-las.
+    //
+    // O mesmo vale para o GRUPO: uma conexao que ja' esta' aqui na raiz vai
+    // para o grupo da ferramenta de onde veio. `import_password` e
+    // `import_group` se combinam (1, 4 ou 5).
+    enum ImportAction : int {
+        import_add = 0, import_password = 1, import_nothing = 2, import_group = 4,
+    };
+    const auto updates_existing = [](int action) {
+        return action != import_add && action != import_nothing;
+    };
+
+    const auto target_of = [](const db::StoredProfile& stored) {
+        const db::ConnectionProfile& profile = stored.profile;
+        return stored.provider + "|" + profile.host + "|" + std::to_string(profile.port) +
+               "|" + profile.database + "|" + profile.user;
+    };
+    const auto saved_with_target = [this, &target_of](const db::StoredProfile& candidate)
+        -> db::StoredProfile* {
+        const std::string wanted = target_of(candidate);
+        for (db::StoredProfile& stored : saved_profiles_) {
+            if (target_of(stored) == wanted) return &stored;
+        }
+        return nullptr;
+    };
+
+    // Opaca (diretiva 13): a janela flutua sobre a arvore, e com a
+    // translucidez dos paineis os nomes de tras atravessavam a lista.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, col(with_alpha(p.bg_darkest, 1.0f)));
+    const bool import_visible = ImGui::Begin(TRW("Import connections", "###ImportDBeaver"),
+                                             &show_import_, ImGuiWindowFlags_NoDocking);
+    ImGui::PopStyleColor();
+    if (import_visible) {
 
         // Varre uma vez ao abrir; reabrir a janela nao deve reler o disco a
         // cada quadro.
         if (!import_scanned_) {
             import_scanned_ = true;
-            import_candidates_.clear();
             import_selected_.clear();
+            import_actions_.clear();
 
-            for (const db::StoreLocation& location :
-                 db::dbeaver_store_locations()) {
-                auto found = db::load_profiles(location);
-                if (!found) continue;
+            // As tres ferramentas da primeira execucao (ADR 0023): DBeaver,
+            // pgAdmin e SSMS, sem repetir o mesmo alvo.
+            import_candidates_ = std::move(db::external_profiles().profiles);
 
-                for (db::StoredProfile& stored : *found) {
-                    import_candidates_.push_back(std::move(stored));
-                }
-            }
-            // Vem marcado o que da' para usar; o resto fica desmarcado mas
-            // visivel, com o motivo.
             for (const db::StoredProfile& stored : import_candidates_) {
-                import_selected_.push_back(stored.supported);
+                int action = import_add;
+                if (const db::StoredProfile* existing = saved_with_target(stored)) {
+                    if (existing->profile.password.empty() &&
+                        !stored.profile.password.empty()) {
+                        action |= import_password;
+                    }
+                    // So' quem esta' na RAIZ: uma conexao que o usuario ja' pos
+                    // numa pasta fica onde ele a pos.
+                    if (existing->profile.folder.empty() && !stored.profile.folder.empty()) {
+                        action |= import_group;
+                    }
+                    if (action == import_add) action = import_nothing;
+                }
+                import_actions_.push_back(action);
+                // Vem marcado o que da' para usar e ainda falta aqui; o resto
+                // fica desmarcado mas visivel, com o motivo.
+                import_selected_.push_back(stored.supported && action != import_nothing);
             }
         }
 
         if (import_candidates_.empty()) {
             ImGui::TextColored(col4(p.text_dim),
-                               TR("No DBeaver workspace found on this machine."));
-            ImGui::TextColored(col4(p.text_dim),
-                               TR("Looked under %APPDATA%\\DBeaverData."));
+                               TR("No saved connections of DBeaver, pgAdmin or SQL "
+                                  "Server Management Studio were found on this machine."));
             ImGui::End();
             return;
         }
 
         ImGui::TextColored(col4(p.text_dim),
-                           TR("%zu connection(s) found. Nothing is written back "
-                              "to DBeaver."),
+                           TR("%zu connection(s) found in DBeaver, pgAdmin and SSMS. "
+                              "Nothing is written back to them."),
                            import_candidates_.size());
         ImGui::Separator();
 
@@ -7009,7 +7748,8 @@ void MainShell::draw_import_window() {
                 ImGui::TableNextRow();
 
                 ImGui::TableNextColumn();
-                ImGui::BeginDisabled(!stored.supported);
+                ImGui::BeginDisabled(!stored.supported ||
+                                     import_actions_[i] == import_nothing);
                 bool selected = import_selected_[i];
                 if (ImGui::Checkbox("##pick", &selected)) {
                     import_selected_[i] = selected;
@@ -7034,7 +7774,20 @@ void MainShell::draw_import_window() {
                                    stored.profile.database.c_str());
 
                 ImGui::TableNextColumn();
-                if (stored.supported) {
+                if (stored.supported && import_actions_[i] == import_nothing) {
+                    ImGui::TextColored(col4(p.text_dim), TR("already here"));
+                } else if (stored.supported && import_actions_[i] == import_password) {
+                    ImGui::TextColored(col4(p.ok),
+                                       TR("already here without a password: adds the password"));
+                } else if (stored.supported && import_actions_[i] == import_group) {
+                    ImGui::TextColored(col4(p.ok), TR("already here: moves to the group %s"),
+                                       stored.profile.folder.c_str());
+                } else if (stored.supported && updates_existing(import_actions_[i])) {
+                    ImGui::TextColored(
+                        col4(p.ok),
+                        TR("already here: adds the password and moves to the group %s"),
+                        stored.profile.folder.c_str());
+                } else if (stored.supported) {
                     // Dizer se a senha veio junto evita a surpresa de
                     // importar e descobrir que ainda falta digitar.
                     if (!stored.profile.password.empty()) {
@@ -7056,6 +7809,14 @@ void MainShell::draw_import_window() {
             ImGui::EndTable();
         }
 
+        if (import_passwords_only_) {
+            import_passwords_only_ = false;
+            for (std::size_t i = 0; i < import_selected_.size(); ++i) {
+                import_selected_[i] = import_candidates_[i].supported &&
+                                      updates_existing(import_actions_[i]);
+            }
+        }
+
         std::size_t picked = 0;
         for (const bool selected : import_selected_) {
             if (selected) ++picked;
@@ -7066,12 +7827,36 @@ void MainShell::draw_import_window() {
             ImGui::TextColored(col4(p.ok), "%s", import_status_.c_str());
         }
 
-        if (icon_text_button("##doimport", Icon::save, TR("Import selected"),
+        const bool clicked =
+            icon_text_button("##doimport", Icon::save, TR("Import selected"),
                              TR("Copy the selected connections into C-Otter"),
-                             picked > 0)) {
+                             picked > 0);
+        const bool submitted = import_connections_submit_ && picked > 0;
+        import_connections_submit_ = false;
+        if (clicked || submitted) {
             std::size_t imported = 0;
+            std::size_t passwords = 0;
+            std::size_t moved = 0;
             for (std::size_t i = 0; i < import_candidates_.size(); ++i) {
                 if (!import_selected_[i]) continue;
+
+                if (db::StoredProfile* existing = saved_with_target(import_candidates_[i])) {
+                    // Ja' esta' aqui: so' entra o que faltava -- a senha, e o
+                    // grupo de quem estava na raiz. O nome e o resto do perfil
+                    // sao de quem ja' o editou.
+                    if (existing->profile.password.empty() &&
+                        !import_candidates_[i].profile.password.empty()) {
+                        existing->profile.password      = import_candidates_[i].profile.password;
+                        existing->profile.save_password = true;
+                        ++passwords;
+                    }
+                    if (existing->profile.folder.empty() &&
+                        !import_candidates_[i].profile.folder.empty()) {
+                        existing->profile.folder = import_candidates_[i].profile.folder;
+                        ++moved;
+                    }
+                    continue;
+                }
 
                 // Id novo: o do DBeaver pertence ao arquivo dele, e reusa-lo
                 // criaria confusao se as duas ferramentas divergirem.
@@ -7080,14 +7865,20 @@ void MainShell::draw_import_window() {
                 saved_profiles_.push_back(std::move(copy));
                 ++imported;
             }
+            // Um "localhost" que ja' existe aqui repetiria nomes. O importado
+            // e' que ganha o sufixo.
+            db::make_names_unique(saved_profiles_);
             persist_profiles();
-            import_status_ = std::string(TRF("%zu connection(s) imported",
-                                             imported));
+            import_status_ = std::string(
+                TRF("%zu connection(s) imported, %zu password(s) added, %zu moved to a group",
+                    imported, passwords, moved));
+            // A lista muda de estado: o que entrou agora "ja' esta' aqui".
+            import_scanned_ = false;
         }
 
         ImGui::SameLine();
         if (icon_text_button("##rescan", Icon::refresh, TR("Rescan"),
-                             TR("Look for DBeaver workspaces again"))) {
+                             TR("Read the connections of the other tools again"))) {
             import_scanned_ = false;
             import_status_.clear();
         }
@@ -7135,6 +7926,72 @@ void MainShell::draw_icon_gallery() {
         {Icon::partition, "partition"},   {Icon::event, "event"},
         {Icon::user, "user"},             {Icon::grant, "grant"},
         {Icon::pg_server, "pg_server"},   {Icon::my_server, "my_server"},
+        {Icon::ms_server, "ms_server"},   {Icon::sa_server, "sa_server"},
+        {Icon::foreign_table, "foreign_table"},
+        {Icon::aggregate, "aggregate"},
+        {Icon::dependency, "dependency"},
+        {Icon::rule, "rule"},
+        {Icon::policy, "policy"},
+        {Icon::inheritance, "inheritance"},
+        {Icon::parameter, "parameter"},
+        {Icon::event_trigger, "event_trigger"},
+        {Icon::storage, "storage"},
+        {Icon::foreign_wrapper, "foreign_wrapper"},
+        {Icon::foreign_server, "foreign_server"},
+        {Icon::user_mapping, "user_mapping"},
+        {Icon::setting, "setting"},
+        {Icon::role_group, "role_group"},
+        {Icon::access_method, "access_method"},
+        {Icon::operator_class, "operator_class"},
+        {Icon::operator_family, "operator_family"},
+        {Icon::encoding, "encoding"},
+        {Icon::collation, "collation"},
+        {Icon::language, "language"},
+        {Icon::extension_available, "extension_available"},
+        {Icon::administer, "administer"},
+        {Icon::system_info, "system_info"},
+        {Icon::sessions, "sessions"},
+        {Icon::locks, "locks"},
+        {Icon::synonym, "synonym"},
+        {Icon::job, "job"},
+        {Icon::job_step, "job_step"},
+        {Icon::job_schedule, "job_schedule"},
+        {Icon::play_new, "play_new"},
+        {Icon::play_script, "play_script"},
+        {Icon::plan, "plan"},
+        {Icon::ai, "ai"},
+        {Icon::terminal, "terminal"},
+        {Icon::server_output, "server_output"},
+        {Icon::exec_log, "exec_log"},
+        {Icon::variables, "variables"},
+        {Icon::outline, "outline"},
+        {Icon::folder_database, "folder_database"},
+        {Icon::folder_schema, "folder_schema"},
+        {Icon::folder_table, "folder_table"},
+        {Icon::folder_view, "folder_view"},
+        {Icon::folder_link, "folder_link"},
+        {Icon::folder_user, "folder_user"},
+        {Icon::folder_constraint, "folder_constraint"},
+        {Icon::folder_columns, "folder_columns"},
+        {Icon::folder_admin, "folder_admin"},
+        {Icon::folder_info, "folder_info"},
+        {Icon::object_page, "object_page"},
+        {Icon::accept, "accept"},
+        {Icon::reject, "reject"},
+        {Icon::row_add, "row_add"},
+        {Icon::row_copy, "row_copy"},
+        {Icon::row_edit, "row_edit"},
+        {Icon::row_delete, "row_delete"},
+        {Icon::panels, "panels"},
+        {Icon::panel_calc, "panel_calc"},
+        {Icon::panel_grouping, "panel_grouping"},
+        {Icon::panel_metadata, "panel_metadata"},
+        {Icon::panel_references, "panel_references"},
+        {Icon::filter_apply, "filter_apply"},
+        {Icon::filter_reset, "filter_reset"},
+        {Icon::filter_config, "filter_config"},
+        {Icon::filter_value, "filter_value"},
+        {Icon::grid_mode, "grid_mode"},
         {Icon::generic_server, "generic_server"},
     };
 
@@ -7189,4 +8046,61 @@ void MainShell::draw_icon_gallery() {
 
 } // namespace otter::ui
 
+namespace otter::ui {
 
+void MainShell::reapply_palettes() {
+    for (auto& document : documents_) apply_editor_palette(document->editor());
+}
+
+} // namespace otter::ui
+
+namespace otter::ui {
+
+// Pedido do usuario (2026-10-01): "Ao abrir e a pasta nao existir ou estiver
+// vazia deve copiar as conexoes salvas, se existirem, do DBeaver, do pgAdmin
+// e do MS SQL Server Management Studio."
+//
+// So' na PRIMEIRA execucao (pasta ausente ou vazia): quem apagou as conexoes
+// de proposito nao as quer de volta a cada abertura. Depois disso,
+// "File > Import connections" continua la'.
+//
+// O que ja' estiver gravado fica, e as das outras ferramentas se SOMAM --
+// sem repetir o mesmo alvo.
+void MainShell::import_external_on_first_run(bool fresh) {
+    if (!fresh) return;
+    const db::StoreLocation location = db::otter_store_location();
+
+    std::vector<db::StoredProfile> profiles;
+    if (auto existing = db::load_profiles(location)) profiles = std::move(*existing);
+
+    const auto target = [](const db::StoredProfile& stored) {
+        const db::ConnectionProfile& p = stored.profile;
+        return stored.provider + "|" + p.host + "|" + std::to_string(p.port) + "|" +
+               p.database + "|" + p.user;
+    };
+    std::set<std::string> known;
+    for (const db::StoredProfile& stored : profiles) known.insert(target(stored));
+
+    db::ExternalProfiles found = db::external_profiles();
+    std::size_t added = 0;
+    for (db::StoredProfile& stored : found.profiles) {
+        if (!known.insert(target(stored)).second) continue;
+        profiles.push_back(std::move(stored));
+        ++added;
+    }
+    if (added == 0) return;
+
+    db::make_names_unique(profiles);
+
+    std::error_code ec;
+    std::filesystem::create_directories(location.directory, ec);
+    if (auto status = db::save_profiles(location, profiles); !status) {
+        import_status_ = status.error().to_string();
+        return;
+    }
+    show_toast(TRF("%zu connection(s) imported from DBeaver (%zu), pgAdmin (%zu) "
+                   "and SSMS (%zu)",
+                   added, found.from_dbeaver, found.from_pgadmin, found.from_ssms));
+}
+
+} // namespace otter::ui

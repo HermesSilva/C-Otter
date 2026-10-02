@@ -2491,6 +2491,27 @@ void TextEditor::handleCharacter(ImWchar character) {
 		completePairCloser = 0;
 	}
 
+	// C-Otter (alteracao local, ver third_party/texteditor/C-OTTER-CHANGES.md):
+	// digitar um fechamento sobre um fechamento IGUAL passa por cima dele.
+	// O original so' fazia isso logo apos o abridor ("()" sem nada dentro);
+	// com conteudo entre os dois, 'texto' virava 'texto'' e ${n} virava
+	// ${n}} -- todo literal SQL digitado saia com uma aspa sobrando.
+	if (!config.overwrite && config.completePairedGlyphs && CodePoint::isPairCloser(character) && !cursors.anyHasSelection()) {
+		bool allOnSameCloser = true;
+
+		for (auto& cursor : cursors) {
+			if (document.getCodePoint(cursor.getSelectionEnd()) != character) {
+				allOnSameCloser = false;
+				break;
+			}
+		}
+
+		if (allOnSameCloser) {
+			moveRight(false, false);
+			return;
+		}
+	}
+
 	if (cursors.anyHasSelection() && isPaired) {
 		// encapsulate the current selections with the requested pairs
 		for (auto cursor = cursors.begin(); cursor < cursors.end(); cursor++) {

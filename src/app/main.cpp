@@ -1,6 +1,7 @@
 // C-Otter -- ponto de entrada.
 #include "base/error.hpp"
 #include "base/i18n.hpp"
+#include "ui/app_settings.hpp"
 #include "ui/app_window.hpp"
 #include "ui/main_shell.hpp"
 
@@ -18,6 +19,12 @@ int run() {
 
     otter::ui::WindowConfig config;
     config.title = "C-Otter - every JOIN is an OTTER JOIN";
+    // A janela abre onde foi deixada. So' LE o arquivo: quem o cria, na
+    // primeira execucao, e' o MainShell -- e criar aqui faria a pasta de
+    // dados deixar de parecer nova antes de as conexoes das outras
+    // ferramentas serem importadas (ADR 0023).
+    config.placement =
+        otter::ui::load_app_settings(otter::ui::app_settings_path()).window;
 
     auto window = otter::ui::AppWindow::create(config);
     if (!window) {
@@ -37,9 +44,13 @@ int run() {
             shell.request_quit();
         }
 
+        shell.note_window_placement((*window)->placement());
         shell.draw();
         if (shell.wants_quit()) (*window)->request_close();
     });
+    shell.flush_window_placement();
+    // O que foi digitado no ultimo instante, e as abas que estavam abertas.
+    shell.flush_scripts();
 
     return 0;
 }

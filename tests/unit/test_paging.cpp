@@ -380,3 +380,99 @@ OTTER_TEST(count_drops_a_trailing_comment) {
     OTTER_CHECK(q.rewritten);
     OTTER_CHECK(!contains(q.sql, "-- ativos"));
 }
+
+// --- Buscar tudo (resultset.fetch.all) --------------------------------------
+
+OTTER_TEST(unpaged_keeps_filter_and_sort_but_drops_the_limit) {
+    // O ponto de existir uma funcao separada: um page_size enorme daria um
+    // SQL parecido, mas com um LIMIT fingido -- a tela diria "sem limite" e o
+    // servidor receberia um numero.
+    SortOrder sort{"nome", true};
+    ColumnFilter filter{"idade", "> 30"};
+
+    const PagedQuery q = make_unpaged_query("SELECT * FROM cliente",
+                                            postgres_dialect(), sort, filter);
+
+    OTTER_CHECK(q.rewritten);
+    OTTER_CHECK(!contains(q.sql, "LIMIT"));
+    OTTER_CHECK(!contains(q.sql, "OFFSET"));
+    OTTER_CHECK(contains(q.sql, "ORDER BY \"nome\" DESC"));
+    OTTER_CHECK(contains(q.sql, "> 30"));
+}
+
+OTTER_TEST(unpaged_refuses_what_paging_refuses) {
+    // As recusas vem do mesmo miolo. Se divergissem, uma consulta que a
+    // paginacao recusa por seguranca seria reescrita aqui.
+    OTTER_CHECK(!make_unpaged_query("UPDATE t SET a = 1",
+                                    postgres_dialect()).rewritten);
+    OTTER_CHECK(!make_unpaged_query("SELECT 1; SELECT 2",
+                                    postgres_dialect()).rewritten);
+    OTTER_CHECK(!make_unpaged_query("SELECT * FROM t LIMIT 10",
+                                    postgres_dialect()).rewritten);
+    OTTER_CHECK(!make_unpaged_query("", postgres_dialect()).rewritten);
+}
+
+OTTER_TEST(paged_still_refuses_page_size_zero) {
+    // Zero continua sendo pedido sem sentido AQUI -- uma pagina de zero
+    // linhas. Passar a trata-lo como "sem limite" faria um page_size mal
+    // calculado varrer a tabela inteira em silencio.
+    const PagedQuery q = make_paged_query("SELECT * FROM cliente",
+                                          postgres_dialect(), 0, 0);
+    OTTER_CHECK(!q.rewritten);
+}
+
+OTTER_TEST(paging_filter_combines_columns_and_a_free_condition) {
+    // "Filter by value" numa coluna depois de outra: os dois criterios valem.
+    ColumnFilter filter{"credito", "> 0"};
+    filter.set_column("uf", "= 'SP'");
+    filter.condition = "nome LIKE 'A%' OR nome LIKE 'B%'";
+
+    OTTER_CHECK_EQ(filter.column_count(), std::size_t{2});
+    OTTER_CHECK_EQ(std::string(filter.expression_for("uf")), std::string{"= 'SP'"});
+
+    const std::string where = filter.where_clause();
+    OTTER_CHECK(contains(where, "\"credito\" > 0"));
+    OTTER_CHECK(contains(where, "AND \"uf\" = 'SP'"));
+    // A condicao livre vai entre parenteses: o OR dela nao pode soltar os
+    // criterios das colunas.
+    OTTER_CHECK(contains(where, "AND (nome LIKE 'A%' OR nome LIKE 'B%')"));
+
+    const PagedQuery paged = make_paged_query("select * from cliente",
+                                              postgres_dialect(), 0, 200, {}, filter);
+    OTTER_CHECK(paged.rewritten);
+    OTTER_CHECK(contains(paged.sql, where));
+}
+
+OTTER_TEST(paging_filter_removing_a_column_keeps_the_others) {
+    ColumnFilter filter{"a", "> 1"};
+    filter.set_column("b", "IS NULL");
+    filter.set_column("c", "= 3");
+
+    // Tirar a PRIMEIRA promove a seguinte: `column` nunca fica vazio com
+    // criterios na fila.
+    filter.set_column("a", "");
+    OTTER_CHECK_EQ(filter.column, std::string{"b"});
+    OTTER_CHECK_EQ(filter.column_count(), std::size_t{2});
+    OTTER_CHECK(filter.expression_for("a").empty());
+
+    // Redefinir substitui, nao duplica.
+    filter.set_column("c", "= 4");
+    OTTER_CHECK_EQ(filter.column_count(), std::size_t{2});
+    OTTER_CHECK_EQ(std::string(filter.expression_for("c")), std::string{"= 4"});
+
+    filter.set_column("b", "");
+    filter.set_column("c", "");
+    OTTER_CHECK(filter.empty());
+    OTTER_CHECK(filter.where_clause().empty());
+}
+
+OTTER_TEST(paging_filter_with_only_a_free_condition) {
+    ColumnFilter filter;
+    filter.condition = "total > 100";
+    OTTER_CHECK(!filter.empty());
+
+    const PagedQuery counted =
+        make_count_query("select * from venda", postgres_dialect(), filter);
+    OTTER_CHECK(counted.rewritten);
+    OTTER_CHECK(contains(counted.sql, "WHERE (total > 100)"));
+}

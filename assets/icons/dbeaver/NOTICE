@@ -1,0 +1,128 @@
+Icons copied from DBeaver (https://github.com/dbeaver/dbeaver),
+Copyright (C) 2010-2025 DBeaver Corp and others.
+Licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0).
+
+The files are unmodified; only the names changed, to the name of the
+C-Otter icon each one is used for. Regenerate with tools/embed_icons.py.
+
+The PostgreSQL and MySQL icons are trademarks of their owners and are
+used only to identify the database a connection talks to.
+
+file <- original (under dbeaver/plugins)
+
+accept.svg <- org.jkiss.dbeaver.ui/icons/sql/accept.svg
+access_method.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+administer.svg <- org.jkiss.dbeaver.model/icons/tree/folder_admin.svg
+aggregate.svg <- org.jkiss.dbeaver.model/icons/tree/function.svg
+ai.svg <- org.jkiss.dbeaver.model.ai/icons/ai.svg
+chevron_left.svg <- org.jkiss.dbeaver.ui/icons/sql/resultset_previous.svg
+chevron_right.svg <- org.jkiss.dbeaver.ui/icons/sql/resultset_next.svg
+collation.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+column.svg <- org.jkiss.dbeaver.model/icons/tree/column.svg
+commit.svg <- org.jkiss.dbeaver.ui/icons/sql/commit.svg
+connect.svg <- org.jkiss.dbeaver.ui/icons/sql/connect.svg
+constraint.svg <- org.jkiss.dbeaver.model/icons/tree/unique_constraint.svg
+data_type.svg <- org.jkiss.dbeaver.model/icons/tree/data_type.svg
+database.svg <- org.jkiss.dbeaver.model/icons/tree/database.svg
+dependency.svg <- org.jkiss.dbeaver.model/icons/tree/reference.svg
+disconnect.svg <- org.jkiss.dbeaver.ui/icons/sql/disconnect.svg
+encoding.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+error.svg <- org.jkiss.dbeaver.model/icons/status/error.svg
+event.svg <- org.jkiss.dbeaver.model/icons/tree/event.svg
+event_trigger.svg <- org.jkiss.dbeaver.model/icons/tree/trigger.svg
+exec_log.svg <- org.jkiss.dbeaver.ui/icons/sql/page_error.svg
+extension.svg <- org.jkiss.dbeaver.model/icons/tree/package.svg
+extension_available.svg <- org.jkiss.dbeaver.model/icons/tree/package.svg
+filter.svg <- org.jkiss.dbeaver.ui/icons/misc/filter.svg
+filter_apply.svg <- org.jkiss.dbeaver.ui/icons/misc/filter_apply.svg
+filter_config.svg <- org.jkiss.dbeaver.ui/icons/misc/filter_config.svg
+filter_reset.svg <- org.jkiss.dbeaver.ui/icons/misc/filter_reset.svg
+filter_value.svg <- org.jkiss.dbeaver.ui/icons/misc/filter_value.svg
+first_page.svg <- org.jkiss.dbeaver.ui/icons/sql/resultset_first.svg
+folder.svg <- org.jkiss.dbeaver.model/icons/tree/folder.svg
+folder_admin.svg <- org.jkiss.dbeaver.model/icons/tree/folder_admin.svg
+folder_columns.svg <- org.jkiss.dbeaver.model/icons/tree/columns.svg
+folder_constraint.svg <- org.jkiss.dbeaver.model/icons/tree/folder_constraint.svg
+folder_database.svg <- org.jkiss.dbeaver.model/icons/tree/folder_database.svg
+folder_info.svg <- org.jkiss.dbeaver.model/icons/tree/folder_info.svg
+folder_link.svg <- org.jkiss.dbeaver.model/icons/tree/folder_link.svg
+folder_schema.svg <- org.jkiss.dbeaver.model/icons/tree/folder_schema.svg
+folder_table.svg <- org.jkiss.dbeaver.model/icons/tree/folder_table.svg
+folder_user.svg <- org.jkiss.dbeaver.model/icons/tree/folder_user.svg
+folder_view.svg <- org.jkiss.dbeaver.model/icons/tree/folder_view.svg
+foreign_key.svg <- org.jkiss.dbeaver.model/icons/tree/foreign_key.svg
+foreign_server.svg <- org.jkiss.dbeaver.model/icons/tree/server.svg
+foreign_table.svg <- org.jkiss.dbeaver.model/icons/tree/table.svg
+foreign_wrapper.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+function.svg <- org.jkiss.dbeaver.model/icons/tree/function.svg
+generic_server.svg <- org.jkiss.dbeaver.model/icons/tree/server.svg
+grant.svg <- org.jkiss.dbeaver.model/icons/tree/permissions.svg
+grid_mode.svg <- org.jkiss.dbeaver.ui/icons/sql/grid.svg
+index.svg <- org.jkiss.dbeaver.model/icons/tree/index.svg
+info.svg <- org.jkiss.dbeaver.model/icons/status/info.svg
+job.svg <- org.jkiss.dbeaver.model/icons/tree/job.svg
+job_schedule.svg <- org.jkiss.dbeaver.model/icons/tree/job_schedule.svg
+job_step.svg <- org.jkiss.dbeaver.model/icons/tree/job.svg
+key.svg <- org.jkiss.dbeaver.model/icons/tree/key.svg
+language.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+last_page.svg <- org.jkiss.dbeaver.ui/icons/sql/resultset_last.svg
+lock.svg <- org.jkiss.dbeaver.model/icons/tree/locked.svg
+locks.svg <- org.jkiss.dbeaver.model/icons/tree/locked.svg
+materialized_view.svg <- org.jkiss.dbeaver.model/icons/tree/view.svg
+ms_server.png <- org.jkiss.dbeaver.ext.mssql/icons/mssql_icon.png
+my_server.png <- org.jkiss.dbeaver.ext.mysql/icons/mysql_icon.png
+object_page.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+operator_class.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+operator_family.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+outline.svg <- org.jkiss.dbeaver.ui/icons/sql/toggle_outline.svg
+panel_calc.svg <- org.jkiss.dbeaver.ui.editors.data/icons/panel_aggregate.svg
+panel_grouping.svg <- org.jkiss.dbeaver.ui.editors.data/icons/panel_grouping.svg
+panel_metadata.svg <- org.jkiss.dbeaver.ui.editors.data/icons/panel_metadata.svg
+panel_references.svg <- org.jkiss.dbeaver.ui.editors.data/icons/panel_references.svg
+panels.svg <- org.jkiss.dbeaver.ui/icons/sql/panel_customize.svg
+parameter.svg <- org.jkiss.dbeaver.model/icons/tree/argument.svg
+partition.svg <- org.jkiss.dbeaver.model/icons/tree/partition.svg
+pg_server.png <- org.jkiss.dbeaver.ext.postgresql/icons/postgresql_icon.png
+pin.svg <- org.jkiss.dbeaver.ui.editors.data/icons/pin.svg
+plan.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_plan.svg
+play.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_exec.svg
+play_new.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_exec_new.svg
+play_script.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_script_exec.svg
+plus.svg <- org.jkiss.dbeaver.ui/icons/create.svg
+policy.svg <- org.jkiss.dbeaver.model/icons/tree/locked.svg
+procedure.svg <- org.jkiss.dbeaver.model/icons/tree/procedure.svg
+record.svg <- org.jkiss.dbeaver.ui/icons/sql/details.svg
+references.svg <- org.jkiss.dbeaver.model/icons/tree/reference.svg
+refresh.svg <- org.jkiss.dbeaver.ui/icons/refresh.svg
+reject.svg <- org.jkiss.dbeaver.ui/icons/misc/cancel.svg
+role.svg <- org.jkiss.dbeaver.model/icons/tree/user.svg
+role_group.svg <- org.jkiss.dbeaver.model/icons/tree/group.svg
+rollback.svg <- org.jkiss.dbeaver.ui/icons/sql/rollback.svg
+row_add.svg <- org.jkiss.dbeaver.ui/icons/sql/row_add.svg
+row_copy.svg <- org.jkiss.dbeaver.ui/icons/sql/row_copy.svg
+row_delete.svg <- org.jkiss.dbeaver.ui/icons/sql/row_delete.svg
+row_edit.svg <- org.jkiss.dbeaver.ui/icons/sql/row_edit.svg
+rule.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+sa_server.png <- org.jkiss.dbeaver.ext.mssql/icons/sybase_icon.png
+save.svg <- org.jkiss.dbeaver.ui/icons/file/save.svg
+schema.svg <- org.jkiss.dbeaver.model/icons/tree/schema.svg
+search.svg <- org.jkiss.dbeaver.ui/icons/misc/search.svg
+sequence.svg <- org.jkiss.dbeaver.model/icons/tree/sequence.svg
+server_output.svg <- org.jkiss.dbeaver.ui/icons/sql/page_output.svg
+sessions.svg <- org.jkiss.dbeaver.model/icons/tree/sessions.svg
+setting.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+settings.svg <- org.jkiss.dbeaver.ui/icons/configuration.svg
+stop.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_cancel.svg
+storage.svg <- org.jkiss.dbeaver.model/icons/tree/folder_info.svg
+synonym.svg <- org.jkiss.dbeaver.model/icons/tree/synonym.svg
+system_info.svg <- org.jkiss.dbeaver.model/icons/tree/folder_info.svg
+table.svg <- org.jkiss.dbeaver.model/icons/tree/table.svg
+tablespace.svg <- org.jkiss.dbeaver.model/icons/tree/tablespace.svg
+terminal.svg <- org.jkiss.dbeaver.ui/icons/sql/sql_console.svg
+trigger.svg <- org.jkiss.dbeaver.model/icons/tree/trigger.svg
+user.svg <- org.jkiss.dbeaver.model/icons/tree/user.svg
+user_mapping.svg <- org.jkiss.dbeaver.model/icons/tree/page.svg
+variables.svg <- org.jkiss.dbeaver.ui/icons/sql/variable.svg
+view.svg <- org.jkiss.dbeaver.model/icons/tree/view.svg
+warning.svg <- org.jkiss.dbeaver.model/icons/status/warning.svg

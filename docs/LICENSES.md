@@ -38,6 +38,45 @@ contraria o requisito de escrita única.
 
 ---
 
+## nanosvg
+
+Leitor e rasterizador de SVG, em dois cabeçalhos. `third_party/nanosvg/`
+Licença: **zlib** — Copyright (c) 2013-14 Mikko Mononen
+
+Fixado no commit `239e102ec2c691f2902e20ace2ed36ee4a35cfe6`. Rasteriza os ícones do
+DBeaver no tamanho em que aparecem (ADR 0019).
+
+Texto integral: `third_party/nanosvg/LICENSE.txt`
+
+---
+
+## Ícones do DBeaver
+
+`assets/icons/dbeaver/` — os ícones originais do DBeaver, **sem modificação** (só o nome
+do arquivo muda), embutidos no executável por `tools/embed_icons.py`.
+Licença: **Apache License 2.0** — Copyright (C) 2010-2025 DBeaver Corp and others
+
+`assets/icons/dbeaver/NOTICE` lista cada arquivo e o caminho de origem, e **acompanha
+qualquer distribuição** — é a exigência do Apache 2.0 para obra que redistribui partes.
+
+**Marcas.** Os ícones `pg_server`, `my_server`, `ms_server` e `sa_server` são os logotipos
+do PostgreSQL, do MySQL, do SQL Server e da Sybase (hoje SAP — é o que o DBeaver usa para o
+driver com que se chega a um SQL Anywhere).
+A licença do DBeaver cobre o arquivo, não a marca: o uso aqui é o nominativo — identificar
+o SGBD a que uma conexão fala —, o mesmo que o DBeaver faz. Antes de uma distribuição
+comercial, conferir a política de marca de cada um (a do MySQL, da Oracle, é a mais
+restritiva).
+
+---
+
+## Alteração local no ImGuiColorTextEdit
+
+`third_party/texteditor/C-OTTER-CHANGES.md` lista o que foi alterado no widget (hoje, um
+trecho de `handleCharacter`). A licença MIT permite; o registro existe para a alteração
+não se perder numa atualização.
+
+---
+
 ## Atribuição ao DBeaver
 
 O C-Otter é uma reescrita independente, **não** um port de código. Contudo, as consultas SQL
@@ -58,10 +97,14 @@ e ao Apache 2.0 para as porções derivadas.
 | Dear ImGui | MIT | **Sim** |
 | GLFW | zlib/libpng | **Sim** |
 | ImGuiColorTextEdit | MIT | **Sim** |
+| nanosvg | zlib | **Sim** |
+| Ícones do DBeaver | Apache 2.0 | **Sim**, com o `NOTICE` |
 | SQLite | Domínio público | **Sim** |
 | PostgreSQL (libpq) | PostgreSQL License | **Sim** |
 | ODBC | API do sistema | **Sim** |
 | MySQL (libmysqlclient) | GPL | **Não** — bloqueado |
+| FreeTDS | LGPL | **Não** com link estático — o TDS é próprio (`lib/tdswire`, ADR 0024) |
+| SSPI / Schannel (Windows) | API do sistema | **Sim** — nada é redistribuído |
 | MariaDB Connector/C | LGPL | **Não** com link estático |
 | Qt / QScintilla | LGPL / GPL | **Não** — rejeitado (ADR 0003) |
 | GTK | LGPL | **Não** com link estático — evitado pelo ADR 0007 |

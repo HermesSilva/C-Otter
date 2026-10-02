@@ -6,6 +6,7 @@
 #pragma once
 
 #include "base/error.hpp"
+#include "ui/window_placement.hpp"
 
 #include <functional>
 #include <memory>
@@ -26,6 +27,10 @@ struct WindowConfig {
     std::string title  = "C-Otter";
     int         width  = 1600;
     int         height = 980;
+
+    // Como a janela estava na ultima vez (settings.json). Sem nada gravado,
+    // abre com `width` x `height`, centrada no monitor principal.
+    WindowPlacement placement;
 };
 
 class AppWindow {
@@ -57,6 +62,11 @@ public:
     void clear_close_request() noexcept { close_requested_ = false; }
 
     [[nodiscard]] void* native_handle() const noexcept;
+
+    // Onde a janela esta' AGORA: o retangulo da janela normal (o que valia
+    // antes de maximizar ou minimizar, se for o caso) e se esta' maximizada.
+    // E' o que se grava para a proxima abertura.
+    [[nodiscard]] WindowPlacement placement() const noexcept;
 
 private:
     AppWindow() = default;

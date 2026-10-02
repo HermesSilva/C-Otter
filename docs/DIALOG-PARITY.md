@@ -122,6 +122,62 @@ A estrutura está; o conteúdo da maioria das páginas não:
 | Editor de dados (+ Editor binário, Formatos, Grade) | ⬜ avisado na tela |
 | Editor SQL (+ Editor de código, Completar, Formatação, Processamento) | ⬜ avisado na tela |
 
+### SSH e Proxy (2026-10-01)
+
+As duas abas deixaram de dizer "não implementado":
+
+| Aba | Estado |
+|---|---|
+| Proxy | ✅ SOCKS5, com usuário e senha opcionais; o nome do servidor é resolvido pelo proxy |
+| SSH | 🟡 túnel pelo `ssh` do sistema (ADR 0021). Chave pública e agente funcionam; "Password" e chave com frase secreta são recusados **na tela**, com a razão, antes de conectar |
+
+Os campos de certificado da aba SSL continuam gravados e não usados — a tela já diz.
+
+### SQL Server (2026-10-01)
+
+A página do driver (`SQLServerConnectionPage`), conferida por captura
+(`dialog edit <conexão>` no canal de comandos):
+
+| Campo do DBeaver | Estado |
+|---|---|
+| Host, Port, Database/Schema | ✅ no mesmo lugar |
+| Authentication | ✅ dois modelos: *SQL Server Authentication* e *Windows Authentication*. Os outros seis do DBeaver (NTLM, Active Directory…) não estão na lista: não conectam |
+| User name, Password, Save password | ✅ desabilitados com Windows Authentication |
+| Trust Server Certificate | ✅ abaixo do campo Database; decide o modo da aba SSL |
+| Show All Databases, Show All Schemas | ⬜ a árvore lista sempre todos |
+| Encrypt Password | ⬜ o login é sempre cifrado |
+
+Instância nomeada (`host\instância`): a página diz de onde a porta vem — do SQL Server
+Browser (UDP 1434), ou do campo Port quando ele não é 1433.
+
+### SQL Anywhere (2026-10-01)
+
+O DBeaver chega a um SQL Anywhere pelo driver "Sybase jConnect", que usa a mesma
+`SQLServerConnectionPage` (`configurator dataSource="sqlserver,mssql,sybase"`). Conferido
+por captura (`dialog url jdbc:sqlanywhere://...` e `dialog tab SSL` no canal de comandos),
+nos três temas:
+
+| Campo do DBeaver | Estado |
+|---|---|
+| Host, Port (2638), Database/Schema | ✅ no mesmo lugar. Abaixo do campo Database a página diz que ele é o nome de um banco **em execução no servidor** (não o arquivo) e que o servidor pessoal só aceita TCP com `-x tcpip` |
+| Authentication | ✅ só *Database Native* — os demais modelos da lista do DBeaver são do SQL Server |
+| User name, Password, Save password | ✅ |
+| Trust Server Certificate · Show All Schemas · Encrypt Password | ⬜ não se aplicam: sem TLS, e a árvore lista todos os donos |
+| Aba SSL | ⬜ desabilitada, com o motivo (o servidor não cifra o TDS) e a saída (túnel SSH) |
+| Abas SSH e Proxy | ✅ as mesmas dos outros drivers |
+| Internal parameters | ✅ a página diz que viram `SET TEMPORARY OPTION` |
+
+Divergência consciente: no catálogo o driver se chama **SQL Anywhere**, não "Sybase
+jConnect" — o nome do DBeaver é o do driver JDBC, que aqui não existe. O ícone é o mesmo.
+
+### Autenticação ao conectar (2026-10-01)
+
+Conexão sem senha salva abre `'<conexão>' Authentication` antes de conectar, como o
+`BaseAuthDialog` do DBeaver: grupo *User Credentials:*, *Username:*, *Password:*,
+*Save Password/Passphrase*, OK e Cancel. A senha digitada vale até fechar a conexão
+(inclusive para os outros bancos do servidor); se a conexão falhar, reconectar pergunta de
+novo.
+
 Também faltam, da árvore do DBeaver: `Client Identification`,
 `Connection Types`, `Drivers`, `Network Profiles`, `Dictionaries` e
 `GIS Viewer` — nem como página vazia, porque não há no C-Otter o conceito que
@@ -181,3 +237,15 @@ Divergência consciente: o DBeaver repete o nome da conexão **em cada aba de
 script**, porque lá elas são abas de topo do Eclipse. Aqui o nome fica na
 janela que as contém — repeti-lo em cada aba seria redundante, já que todas as
 abas de uma janela pertencem à mesma conexão.
+
+## Opções da árvore do PostgreSQL (2026-09-30)
+
+| Controle | DBeaver | C-Otter |
+|---|---|---|
+| Show all databases | página principal, abaixo do campo Database (`PostgreConnectionPage.java:159`) | ✅ mesmo lugar — estava na página Metadata |
+| Show template databases | página PostgreSQL (`PostgreConnectionPageAdvanced.java:119`) | ✅ Metadata; desabilitada sem "Show all databases", como lá |
+| Show databases not available for connection | idem | ✅ rótulo corrigido (era "Show inaccessible databases") |
+
+As três eram caixas sem efeito: o valor não era lido pela árvore nem gravado
+no perfil. Agora valem na hora — salvar o diálogo relê a lista de bancos — e
+são gravadas com as chaves do DBeaver (`provider-properties`).

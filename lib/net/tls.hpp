@@ -15,6 +15,7 @@
 #include "base/error.hpp"
 #include "net/socket.hpp"
 
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -38,6 +39,13 @@ struct TlsOptions {
     // porque são falhas diferentes: um certificado expirado é um problema de
     // manutenção; um certificado de outro domínio pode ser um ataque.
     bool allow_host_mismatch = false;
+
+    // Por onde os bytes do APERTO DE MÃO passam, quando não é direto no
+    // socket. O SQL Server embrulha cada registro do aperto de mão num pacote
+    // TDS (PRELOGIN); só depois dele o TLS corre cru sobre o socket. Vazios =
+    // direto no socket, como no PostgreSQL e no MySQL.
+    std::function<Status(std::span<const std::byte>)>          handshake_write;
+    std::function<Result<std::size_t>(std::span<std::byte>)>   handshake_read;
 };
 
 // Resultado da verificação, para a UI mostrar o que aceitou.

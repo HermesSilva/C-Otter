@@ -157,22 +157,45 @@ Result<std::vector<SchemaMeta>> PostgresCatalog::load_schemas() {
 }
 
 Result<std::vector<TableMeta>> PostgresCatalog::load_tables(std::string_view schema) {
-    // relkind: r=tabela, v=view, m=view materializada, p=tabela particionada.
+    // relkind: r=tabela, v=view, m=view materializada, p=tabela particionada,
+    // f=foreign table (pasta propria na arvore, como no DBeaver).
     //
     // 'p' (particionada) so' existe a partir do PostgreSQL 10; incluir a letra
     // na lista e' inofensivo em versoes antigas, que simplesmente nao a usam
     // (ADR 0010).
+    //
+    // Particoes ficam FORA: o DBeaver as mostra so' dentro da tabela-mae
+    // (PostgreSchema.getTables filtra isPartition), e lista-las aqui tambem
+    // repetiria cada particao na pasta Tables. `relispartition` nasceu no 10;
+    // em versao anterior a coluna nao existe e o filtro quebraria a consulta.
     const std::string sql =
         "SELECT c.relname,"
         "       c.relkind,"
         "       COALESCE(obj_description(c.oid, 'pg_class'), ''),"
         "       c.reltuples::bigint,"
-        "       pg_size_pretty(pg_total_relation_size(c.oid)),"
-        "       c.oid"
+        // Tamanho por tipo de relacao. A particionada nao guarda nada: os
+        // dados estao nas particoes, e pg_total_relation_size dela e' zero --
+        // a arvore mostrava "0 bytes" numa tabela com milhoes de linhas. View
+        // e foreign table nao ocupam espaco aqui, e "0 bytes" ao lado delas
+        // seria ruido.
+        //
+        // Em BYTES, e nao pg_size_pretty: o texto e' montado aqui, no mesmo
+        // formato da coluna de tamanho dos bancos ("24K", "209M"), e a arvore
+        // precisa do numero para a barra proporcional.
+        "       CASE c.relkind"
+        "         WHEN 'p' THEN COALESCE((SELECT"
+        "                 sum(pg_total_relation_size(i.inhrelid))::bigint"
+        "                 FROM pg_inherits i WHERE i.inhparent = c.oid), 0)"
+        "         WHEN 'v' THEN -1"
+        "         WHEN 'f' THEN -1"
+        "         ELSE pg_total_relation_size(c.oid) END,"
+        "       c.oid,"
+        "       c.relhassubclass"
         "  FROM pg_class c"
         "  JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = " + quote_literal(schema) +
-        "   AND c.relkind IN ('r', 'v', 'm', 'p')"
+        "   AND c.relkind IN ('r', 'v', 'm', 'p', 'f')" +
+        std::string(version_.at_least(10) ? "   AND NOT c.relispartition" : "") +
         " ORDER BY c.relname";
 
     OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query(sql));
@@ -195,8 +218,10 @@ Result<std::vector<TableMeta>> PostgresCatalog::load_tables(std::string_view sch
         // reltuples = -1 significa "nunca analisada", nao "vazia".
         const std::int64_t estimate = to_int64(rs.text(r, 3));
         table.estimated_rows = estimate < 0 ? 0 : estimate;
-        table.size_pretty    = std::string(rs.text(r, 4));
+        table.size_bytes     = to_int64(rs.text(r, 4));
+        table.size_pretty    = format_size(table.size_bytes);
         table.oid = static_cast<std::uint32_t>(to_int64(rs.text(r, 5)));
+        table.has_subclasses = rs.text(r, 6) == "t";
 
         tables.push_back(std::move(table));
     }
@@ -350,11 +375,20 @@ std::string foreign_key_query(std::string_view where_clause) {
     // confupdtype/confdeltype: a=NO ACTION, r=RESTRICT, c=CASCADE,
     // n=SET NULL, d=SET DEFAULT.
     return
+        // TODAS as colunas da chave, na ordem dela. So' `conkey[1]` dava a
+        // primeira: numa chave composta, navegar por ela trazia as linhas de
+        // outros pais tambem.
         "SELECT con.conname,"
         "       src.relname,"
-        "       sa.attname,"
+        "       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)"
+        "          FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)"
+        "          JOIN pg_attribute a ON a.attrelid = con.conrelid"
+        "                             AND a.attnum = k.attnum),"
         "       tgt.relname,"
-        "       ta.attname,"
+        "       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)"
+        "          FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)"
+        "          JOIN pg_attribute a ON a.attrelid = con.confrelid"
+        "                             AND a.attnum = k.attnum),"
         "       CASE con.confupdtype WHEN 'c' THEN 'CASCADE'"
         "                            WHEN 'n' THEN 'SET NULL'"
         "                            WHEN 'd' THEN 'SET DEFAULT'"
@@ -365,16 +399,14 @@ std::string foreign_key_query(std::string_view where_clause) {
         "                            WHEN 'd' THEN 'SET DEFAULT'"
         "                            WHEN 'r' THEN 'RESTRICT'"
         "                            ELSE 'NO ACTION' END,"
-        "       pg_get_constraintdef(con.oid)"
+        "       pg_get_constraintdef(con.oid),"
+        "       sn.nspname,"
+        "       tn.nspname"
         "  FROM pg_constraint con"
         "  JOIN pg_class src ON src.oid = con.conrelid"
         "  JOIN pg_class tgt ON tgt.oid = con.confrelid"
         "  JOIN pg_namespace sn ON sn.oid = src.relnamespace"
         "  JOIN pg_namespace tn ON tn.oid = tgt.relnamespace"
-        "  JOIN pg_attribute sa ON sa.attrelid = con.conrelid"
-        "                      AND sa.attnum = con.conkey[1]"
-        "  JOIN pg_attribute ta ON ta.attrelid = con.confrelid"
-        "                      AND ta.attnum = con.confkey[1]"
         " WHERE con.contype = 'f' AND " + std::string(where_clause) +
         " ORDER BY con.conname";
 }
@@ -393,6 +425,8 @@ std::vector<ForeignKeyMeta> read_foreign_keys(const ResultSet& rs) {
         key.on_update     = std::string(rs.text(r, 5));
         key.on_delete     = std::string(rs.text(r, 6));
         key.definition    = std::string(rs.text(r, 7));
+        key.source_schema = std::string(rs.text(r, 8));
+        key.target_schema = std::string(rs.text(r, 9));
         keys.push_back(std::move(key));
     }
     return keys;
@@ -705,7 +739,14 @@ Result<std::vector<RoutineMeta>> PostgresCatalog::load_routines(
         "       pg_get_function_arguments(p.oid),"
         "       pg_get_function_result(p.oid),"
         "       l.lanname,"
-        "       COALESCE(obj_description(p.oid, 'pg_proc'), '')"
+        "       COALESCE(obj_description(p.oid, 'pg_proc'), ''),"
+        // So' os TIPOS de entrada, na forma que ALTER/DROP FUNCTION e
+        // regprocedure aceitam. format_type qualifica o tipo que esta' fora do
+        // search_path; oidvectortypes nao, e a assinatura nao resolveria.
+        "       COALESCE((SELECT string_agg(format_type(a.t, NULL), ', '"
+        "                                   ORDER BY a.ord)"
+        "                   FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)),"
+        "                '')"
         "  FROM pg_proc p"
         "  JOIN pg_namespace n ON n.oid = p.pronamespace"
         "  JOIN pg_language l ON l.oid = p.prolang"
@@ -724,6 +765,8 @@ Result<std::vector<RoutineMeta>> PostgresCatalog::load_routines(
         routine.return_type = std::string(rs.text(r, 3));
         routine.language    = std::string(rs.text(r, 4));
         routine.comment     = std::string(rs.text(r, 5));
+        routine.signature   = std::string(rs.text(r, 6));
+        routine.aggregate   = rs.text(r, 1) == "a";
 
         // 'p' = procedure; 'f', 'a' (agregada) e 'w' (janela) sao funcoes.
         routine.kind = rs.text(r, 1) == "p" ? ObjKind::procedure
@@ -747,10 +790,27 @@ Result<std::string> PostgresCatalog::load_routine_definition(
     // Comparar a saida de pg_get_function_arguments com ela mesma dispensa
     // remontar a assinatura, e continua distinguindo sobrecargas: duas
     // funcoes de mesmo nome tem listas de argumentos diferentes por definicao.
+    //
+    // Funcao AGREGADA nao passa por pg_get_functiondef -- o servidor responde
+    // "is an aggregate function". O CREATE AGGREGATE e' montado a partir do
+    // pg_aggregate; o CASE garante que pg_get_functiondef so' e' avaliada
+    // para o que ela aceita.
     const std::string sql =
-        "SELECT pg_get_functiondef(p.oid)"
+        "SELECT CASE WHEN ag.aggfnoid IS NULL THEN pg_get_functiondef(p.oid)"
+        "       ELSE 'CREATE AGGREGATE ' || quote_ident(n.nspname) || '.' ||"
+        "            quote_ident(p.proname) || '(' ||"
+        "            pg_get_function_identity_arguments(p.oid) || E') (\\n' ||"
+        "            '    SFUNC = ' || ag.aggtransfn::regproc::text ||"
+        "            E',\\n    STYPE = ' || format_type(ag.aggtranstype, NULL) ||"
+        "            CASE WHEN ag.aggfinalfn::oid <> 0"
+        "                 THEN E',\\n    FINALFUNC = ' ||"
+        "                      ag.aggfinalfn::regproc::text ELSE '' END ||"
+        "            COALESCE(E',\\n    INITCOND = ' ||"
+        "                     quote_literal(ag.agginitval), '') ||"
+        "            E'\\n);' END"
         "  FROM pg_proc p"
         "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+        "  LEFT JOIN pg_aggregate ag ON ag.aggfnoid = p.oid"
         " WHERE n.nspname = " + quote_literal(schema) +
         "   AND p.proname = " + quote_literal(name) +
         "   AND pg_get_function_arguments(p.oid) = " + quote_literal(arguments) +
@@ -836,7 +896,7 @@ Result<std::vector<PartitionMeta>> PostgresCatalog::load_partitions(
             "       pg_get_expr(child.relpartbound, child.oid),"
             "       pg_get_partkeydef(parent.oid),"
             "       child.reltuples::bigint,"
-            "       pg_size_pretty(pg_total_relation_size(child.oid))"
+            "       pg_total_relation_size(child.oid)"
             "  FROM pg_class parent"
             "  JOIN pg_namespace ns ON ns.oid = parent.relnamespace"
             "  JOIN pg_inherits inh ON inh.inhparent = parent.oid"
@@ -868,7 +928,8 @@ Result<std::vector<PartitionMeta>> PostgresCatalog::load_partitions(
         }
 
         partition.estimated_rows = to_int64(rs.text(row, 3));
-        partition.size_pretty    = std::string(rs.text(row, 4));
+        partition.size_bytes     = to_int64(rs.text(row, 4));
+        partition.size_pretty    = format_size(partition.size_bytes);
 
         // No PostgreSQL a particao E' uma tabela: da' para consultar
         // `schema.particao` diretamente, o que o MySQL nao permite.

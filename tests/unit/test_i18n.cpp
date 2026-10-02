@@ -190,3 +190,26 @@ OTTER_TEST(i18n_builtin_pt_br_is_registered) {
     OTTER_CHECK_EQ(std::string(TR("Connection")), std::string{"Conexão"});
     i18n::set_language("en");
 }
+
+OTTER_TEST(i18n_normalizes_posix_and_windows_locales) {
+    // A deteccao do idioma do ambiente passa por aqui nas duas plataformas:
+    // "pt_BR.UTF-8" do Linux e "pt-BR" do Windows precisam dar o mesmo codigo,
+    // ou o catalogo nao casa e a tela cai em ingles.
+    OTTER_CHECK_EQ(i18n::normalize_locale("pt_BR.UTF-8"), std::string{"pt-BR"});
+    OTTER_CHECK_EQ(i18n::normalize_locale("de_DE@euro"),  std::string{"de-DE"});
+    OTTER_CHECK_EQ(i18n::normalize_locale("en-US"),       std::string{"en-US"});
+    OTTER_CHECK_EQ(i18n::normalize_locale("C"),           std::string{"en"});
+    OTTER_CHECK_EQ(i18n::normalize_locale("POSIX"),       std::string{"en"});
+    OTTER_CHECK_EQ(i18n::normalize_locale("C.UTF-8"),     std::string{"en"});
+}
+
+OTTER_TEST(i18n_english_environment_does_not_activate_a_catalog) {
+    // O defeito: Windows em en-US com formato regional pt-BR abria em
+    // portugues. Com o idioma de exibicao, "en-US" precisa resultar em ingles
+    // -- e nao num catalogo qualquer pelo fallback de idioma base.
+    i18n::load_builtin_catalogs();
+    i18n::set_language("en");
+    (void)i18n::set_language("en-US");
+    OTTER_CHECK_EQ(std::string(TR("Connection")), std::string{"Connection"});
+    i18n::set_language("en");
+}

@@ -32,7 +32,7 @@ public class OtterGrid {
 '@
 
 $root = Split-Path $PSScriptRoot -Parent
-Get-Process c-otter -ErrorAction SilentlyContinue | Stop-Process -Force
+& build\stop_app.ps1
 Start-Process "$root\build\win-release\bin\c-otter.exe"
 Start-Sleep -Seconds 4
 

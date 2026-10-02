@@ -25,6 +25,7 @@ enum class AuthModel : std::uint8_t {
     pg_ident,          // ident/peer do PostgreSQL
     kerberos,
     aws_iam,
+    windows,           // SQL Server: a conta do Windows, por SSPI
 };
 
 // Tipo de conexao -- controla a cor do ambiente e as travas de seguranca.
@@ -222,7 +223,10 @@ struct ConnectionProfile {
     // Inicializacao
     bool        auto_commit = true;
     std::string default_schema;         // search_path inicial
-    std::string bootstrap_queries;      // executadas ao conectar
+    std::string bootstrap_queries;      // executadas ao conectar, uma por linha
+    // "Ignore errors" do DBeaver: uma consulta de inicializacao que falha nao
+    // derruba a conexao.
+    bool        ignore_bootstrap_errors = false;
     bool        read_only = false;
 
     // Nivel de isolamento a aplicar AO CONECTAR.
@@ -241,6 +245,7 @@ struct ConnectionProfile {
     bool        keep_alive = false;
     std::chrono::seconds keep_alive_interval{60};
     bool        close_idle_connections = false;
+    std::chrono::seconds close_idle_interval{600};
 
     // Propriedades livres do driver
     std::map<std::string, std::string> driver_properties;

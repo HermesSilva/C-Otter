@@ -6,6 +6,7 @@
 
 #include "base/error.hpp"
 #include "net/socket.hpp"
+#include "net/socks.hpp"
 #include "net/tls.hpp"
 #include "pgwire/message.hpp"
 
@@ -43,6 +44,9 @@ struct ConnectParams {
     bool          use_tls = false;
     bool          require_tls = false;
     bool          allow_invalid_certificate = false;
+
+    // Proxy SOCKS5 (aba "Proxy" do dialogo). Vazio = conexao direta.
+    net::ProxyEndpoint proxy;
 };
 
 // Descricao de uma coluna, vinda de RowDescription.
@@ -102,6 +106,14 @@ public:
         return affected_rows_;
     }
 
+    // Os avisos do servidor desde a ultima chamada (NoticeResponse): RAISE
+    // NOTICE de uma funcao, "table does not exist, skipping" de um DROP IF
+    // EXISTS. Eram lidos e descartados -- e um RAISE NOTICE e' justamente
+    // como se depura PL/pgSQL. Esvazia a lista.
+    [[nodiscard]] std::vector<std::string> take_notices() {
+        return std::exchange(notices_, {});
+    }
+
     // A conexao esta' cifrada? A barra de status precisa dizer.
     [[nodiscard]] bool tls_active() const noexcept { return tls_active_; }
     [[nodiscard]] const net::TlsInfo& tls_info() const noexcept {
@@ -132,6 +144,7 @@ private:
     net::TlsChannel tls_;
     bool            tls_active_ = false;
     std::map<std::string, std::string> parameters_;
+    std::vector<std::string> notices_;
     TransactionStatus transaction_status_ = TransactionStatus::idle;
 
     std::int32_t backend_pid_    = 0;
@@ -141,6 +154,7 @@ private:
     // Guardados para abrir a conexao de cancelamento.
     std::string   host_;
     std::uint16_t port_ = 0;
+    net::ProxyEndpoint proxy_;   // para o cancelamento
 };
 
 } // namespace otter::pgwire

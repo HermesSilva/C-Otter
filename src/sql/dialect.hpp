@@ -38,6 +38,12 @@ struct Dialect {
     // Delimitador de statement. MySQL permite trocar com DELIMITER.
     char statement_separator = ';';
 
+    // `GO` sozinho numa linha separa LOTES (SQL Server). Nao e' T-SQL -- o
+    // servidor nem o conhece: e' convencao do sqlcmd e do SSMS, e quem a
+    // interpreta e' o cliente. Variaveis (DECLARE) valem dentro do lote, e
+    // CREATE PROCEDURE/FUNCTION/TRIGGER/VIEW precisa ser o lote inteiro.
+    bool go_batch_separator = false;
+
     // Corpo de funcao delimitado por tag: $$ ... $$ ou $tag$ ... $tag$.
     // Exclusivo do PostgreSQL, e a razao pela qual splitters ingenuos quebram.
     bool dollar_quoted_strings = false;
@@ -50,6 +56,11 @@ struct Dialect {
 
     // MySQL aceita # como comentario de linha, alem de --.
     bool hash_line_comments = false;
+
+    // SQL Anywhere aceita // como comentario de linha (os fontes do banco
+    // demo sao escritos assim). No MySQL "//" e' um DELIMITER comum, por isso
+    // nao vale para todos.
+    bool slash_line_comments = false;
 
     std::unordered_set<std::string_view> keywords;
     std::unordered_set<std::string_view> functions;
@@ -70,6 +81,7 @@ struct Dialect {
 [[nodiscard]] const Dialect& postgres_dialect();
 [[nodiscard]] const Dialect& mysql_dialect();
 [[nodiscard]] const Dialect& mssql_dialect();
+[[nodiscard]] const Dialect& sqlanywhere_dialect();
 [[nodiscard]] const Dialect& sqlite_dialect();
 [[nodiscard]] const Dialect& standard_dialect();
 

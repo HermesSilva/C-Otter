@@ -1,16 +1,18 @@
 // C-Otter -- db/export.hpp
 //
-// Escreve um ResultSet em CSV, JSON, Markdown ou INSERTs.
+// Escreve um ResultSet em CSV, JSON, Markdown, INSERTs, HTML, XML ou TXT.
 //
-// Formatos escolhidos entre os 11 do DBeaver por frequencia de uso real:
-// CSV para planilha, JSON para API, Markdown para documentacao e SQL para
-// mover dados entre bancos. XML, HTML, DbUnit e codigo-fonte ficam de fora --
-// cada um vale um exportador quando alguem precisar.
+// Sete dos formatos de texto do DBeaver: CSV para planilha, JSON para API,
+// Markdown para documentacao, SQL para mover dados entre bancos, HTML e TXT
+// para relatorio, XML para integracao. DbUnit, codigo-fonte e os binarios
+// (XLSX, Parquet) ficam de fora: cada um e' um formato inteiro, e o que eles
+// levam cabe num dos sete.
 #pragma once
 
 #include "base/error.hpp"
 #include "db/result_set.hpp"
 
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -21,6 +23,9 @@ enum class ExportFormat : std::uint8_t {
     json,
     markdown,
     sql_insert,
+    html,
+    xml,
+    txt,          // tabela de largura fixa, para colar em e-mail ou chamado
 };
 
 [[nodiscard]] std::string_view to_string(ExportFormat format) noexcept;
@@ -63,5 +68,33 @@ struct ExportOptions {
 [[nodiscard]] Status export_to_file(const ResultSet& rs,
                                     const ExportOptions& options,
                                     std::string_view path);
+
+// Exportacao em PEDACOS: o arquivo sai de varios ResultSets seguidos, todos
+// com as mesmas colunas.
+//
+// E' o que deixa exportar a consulta inteira, e nao so' a pagina carregada: o
+// resultado de dois milhoes de linhas e' lido do servidor aos poucos (cursor)
+// e cada pedaco e' escrito e descartado. O cabecalho sai com o primeiro
+// pedaco; o rodape' (o `]` do JSON, o `</table>` do HTML), em finish().
+class ExportStream {
+public:
+    explicit ExportStream(ExportOptions options);
+    ~ExportStream();
+
+    ExportStream(const ExportStream&)            = delete;
+    ExportStream& operator=(const ExportStream&) = delete;
+
+    // Cria os diretorios que faltarem.
+    [[nodiscard]] Status open(std::string_view path);
+    [[nodiscard]] Status write(const ResultSet& chunk);
+    [[nodiscard]] Status finish();
+
+    // Linhas escritas ate' agora.
+    [[nodiscard]] std::size_t rows() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 } // namespace otter::db

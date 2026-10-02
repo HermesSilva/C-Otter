@@ -225,6 +225,7 @@ const Dialect& mssql_dialect() {
         d.name = "SQL Server";
         d.unquoted_case     = Dialect::FoldCase::none;
         d.identifier_quotes = {QuoteStyle::brackets, QuoteStyle::double_quotes};
+        d.go_batch_separator = true;
 
         d.keywords = core_keywords();
         merge(d.keywords, {
@@ -243,6 +244,49 @@ const Dialect& mssql_dialect() {
                    "DECIMAL", "FLOAT", "INT", "MONEY", "NCHAR", "NVARCHAR",
                    "REAL", "SMALLINT", "TEXT", "TIME", "TINYINT",
                    "UNIQUEIDENTIFIER", "VARBINARY", "VARCHAR", "XML"};
+        return d;
+    }();
+    return dialect;
+}
+
+const Dialect& sqlanywhere_dialect() {
+    static const Dialect dialect = [] {
+        Dialect d;
+        d.name = "SQL Anywhere";
+        // Nomes sem distincao de maiusculas (o padrao de um banco criado sem
+        // -c), entre aspas ou nao.
+        d.unquoted_case         = Dialect::FoldCase::none;
+        d.quoted_case_sensitive = false;
+        d.identifier_quotes  = {QuoteStyle::double_quotes, QuoteStyle::brackets};
+        // `go` separa lotes, como no dbisql; um lote com CREATE PROCEDURE vai
+        // inteiro -- o corpo tem ';' dentro.
+        d.go_batch_separator  = true;
+        d.slash_line_comments = true;
+        // Sem escape por barra invertida: o protocolo TDS liga o servidor com
+        // escape_character desligado ('c:\new' tem seis caracteres).
+        d.backslash_escapes   = false;
+
+        d.keywords = core_keywords();
+        merge(d.keywords, {
+            "AT", "CALL", "CHECKPOINT", "COMMENT", "DECLARE", "ELSEIF", "ENDIF",
+            "EXEC", "EXECUTE", "FIRST", "FORWARD", "GO", "IF", "LOOP",
+            "MESSAGE", "OUTPUT", "PROCEDURE", "RESULT", "START", "TOP",
+            "TRIGGER", "TRUNCATE", "VALIDATE", "WHILE",
+        });
+
+        d.functions = core_functions();
+        merge(d.functions, {
+            "CHARINDEX", "CONNECTION_PROPERTY", "DATEADD", "DATEDIFF",
+            "DATEFORMAT", "DB_NAME", "DB_PROPERTY", "GETDATE", "IFNULL",
+            "ISNULL", "LEFT", "LIST", "LOCATE", "NEWID", "PROPERTY", "REPEAT",
+            "RIGHT", "STRING", "TODAY", "USER_NAME",
+        });
+
+        d.types = {"BIGINT", "BINARY", "BIT", "CHAR", "DATE", "DATETIME", "DECIMAL",
+                   "DOUBLE", "FLOAT", "INT", "INTEGER", "LONG BINARY", "LONG NVARCHAR",
+                   "LONG VARCHAR", "MONEY", "NCHAR", "NUMERIC", "NVARCHAR", "REAL",
+                   "SMALLINT", "TIME", "TIMESTAMP", "TINYINT", "UNIQUEIDENTIFIER",
+                   "VARBINARY", "VARCHAR", "XML"};
         return d;
     }();
     return dialect;
@@ -277,6 +321,7 @@ const Dialect& dialect_for(std::string_view driver_id) {
     if (driver_id == "postgresql") return postgres_dialect();
     if (driver_id == "mysql" || driver_id == "mariadb") return mysql_dialect();
     if (driver_id == "mssql" || driver_id == "sqlserver") return mssql_dialect();
+    if (driver_id == "sqlanywhere") return sqlanywhere_dialect();
     if (driver_id == "sqlite") return sqlite_dialect();
     return standard_dialect();
 }

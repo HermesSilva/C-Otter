@@ -4,10 +4,79 @@
 #include "db/catalog_reader.hpp"
 #include "db/ddl.hpp"
 #include "db/registry.hpp"
+#include "sql/dialect.hpp"
+#include "sql/paging.hpp"
 
 #include <utility>
 
 namespace otter::ui {
+namespace {
+
+// Chave de uma lista no mapa. O separador e' um caractere de controle, que
+// nao aparece em nome de objeto -- com '.', a lista (a="x.y", b="") colidiria
+// com (a="x", b="y").
+std::string list_key(db::CatalogList list, std::string_view a,
+                     std::string_view b, std::string_view c) {
+    std::string key = std::to_string(static_cast<int>(list));
+    for (std::string_view part : {a, b, c}) {
+        key.push_back('\x1f');
+        key.append(part);
+    }
+    return key;
+}
+
+// Schemas com as tabelas de cada um, e as FKs do schema padrao. Fator comum
+// da conexao e do "Refresh".
+struct CatalogSnapshot {
+    std::vector<db::SchemaMeta>     schemas;
+    std::vector<db::ForeignKeyMeta> keys;
+    std::vector<db::DatabaseMeta>   databases;
+    std::string                     error;
+    std::size_t                     table_count = 0;
+};
+
+CatalogSnapshot read_catalog(db::CatalogReader& catalog,
+                             const std::string& database, bool templates,
+                             bool unavailable) {
+    CatalogSnapshot snapshot;
+
+    auto loaded = catalog.load_schemas();
+    if (!loaded) {
+        snapshot.error = loaded.error().to_string();
+        return snapshot;
+    }
+    snapshot.schemas = std::move(*loaded);
+
+    for (db::SchemaMeta& schema : snapshot.schemas) {
+        auto tables = catalog.load_tables(schema.name);
+        if (tables) {
+            schema.tables = std::move(*tables);
+            schema.tables_loaded = true;
+            snapshot.table_count += schema.tables.size();
+        }
+    }
+
+    // As foreign keys alimentam a inferencia de JOIN do completion
+    // (ADR 0004, camada 4). O schema de onde le-las depende do SGBD:
+    // "public" no PostgreSQL, o banco da conexao no MySQL -- pedir
+    // "public" a um MySQL simplesmente nao acharia nada.
+    std::string fk_schema = catalog.default_schema();
+    if (fk_schema.empty()) fk_schema = database;
+
+    auto fks = catalog.load_foreign_keys(fk_schema);
+    if (fks) snapshot.keys = std::move(*fks);
+
+    // A lista de bancos vem junto: e' o segundo nivel da arvore, e ela
+    // vazia por meio segundo depois de conectar pareceria falha. Uma recusa
+    // aqui nao derruba a conexao -- a arvore mostra so' o banco conectado.
+    if (catalog.has_database_level()) {
+        auto databases = catalog.load_databases(templates, unavailable);
+        if (databases) snapshot.databases = std::move(*databases);
+    }
+    return snapshot;
+}
+
+} // namespace
 
 Session::Session() = default;
 
@@ -28,17 +97,35 @@ void Session::connect_async(const db::ConnConfig& config) {
     busy_.store(true, std::memory_order_release);
     state_.store(SessionState::connecting, std::memory_order_release);
 
+    // Copiadas sob o lock para o worker: ele nao pode ler os membros depois,
+    // com a UI podendo troca-los.
+    bool list_templates   = false;
+    bool list_unavailable = false;
     {
         const std::lock_guard<std::mutex> lock(mutex_);
         status_message_ = TRF("connecting to %s:%u...", config.host.c_str(),
                               static_cast<unsigned>(config.port));
         database_name_  = config.database;
         driver_id_      = config.driver_id;
+        engine_.store(config.driver_id == "mysql" || config.driver_id == "mariadb"
+                          ? Engine::mysql
+                      : config.driver_id == "sqlserver" || config.driver_id == "mssql"
+                          ? Engine::mssql
+                      : config.driver_id == "sqlanywhere"
+                          ? Engine::sqlanywhere
+                          : Engine::postgres,
+                      std::memory_order_release);
         schemas_.clear();
         foreign_keys_.clear();
+        databases_.clear();
+        lists_.clear();
+        list_templates   = list_templates_;
+        list_unavailable = list_unavailable_;
     }
 
-    worker_ = std::thread([this, config] {
+    worker_ = std::thread([this, profile_config = config, list_templates,
+                           list_unavailable] {
+        db::ConnConfig config = profile_config;
         db::Driver* driver = db::find_driver(config.driver_id);
         if (driver == nullptr) {
             // Driver desconhecido nao cai no padrao: conectar a um MySQL
@@ -51,10 +138,33 @@ void Session::connect_async(const db::ConnConfig& config) {
             return;
         }
 
-        // O SQL gerado (UPDATE da grade, DDL, agregacao no servidor) precisa
-        // do delimitador do SGBD certo: com aspas duplas num MySQL, o comando
-        // compara a coluna com uma STRING em vez de referencia-la.
+        // O dialeto do SQL gerado e' POR THREAD (db/ddl.cpp): este worker
+        // gera para o SGBD dele, e o thread de UI decide o seu a cada quadro,
+        // pela conexao em uso. Era um global so', que ficava com o da ultima
+        // conexao aberta.
         db::set_sql_dialect_for(config.driver_id);
+
+        // Tunel SSH: aberto ANTES da conexao, que entao vai para a ponta
+        // local dele. O nome do banco e o resto do perfil nao mudam.
+        std::unique_ptr<db::SshTunnel> tunnel;
+        if (config.ssh.enabled()) {
+            {
+                const std::lock_guard<std::mutex> lock(mutex_);
+                status_message_ = TRF("opening the SSH tunnel to %s...",
+                                      config.ssh.host.c_str());
+            }
+            auto opened = db::SshTunnel::open(config.ssh, config.host, config.port);
+            if (!opened) {
+                const std::lock_guard<std::mutex> lock(mutex_);
+                status_message_ = opened.error().to_string();
+                state_.store(SessionState::failed, std::memory_order_release);
+                busy_.store(false, std::memory_order_release);
+                return;
+            }
+            tunnel = std::make_unique<db::SshTunnel>(std::move(*opened));
+            config.host = "127.0.0.1";
+            config.port = tunnel->local_port();
+        }
 
         auto connection = driver->connect(config);
 
@@ -68,6 +178,18 @@ void Session::connect_async(const db::ConnConfig& config) {
 
         std::unique_ptr<db::Holt> holt = std::move(*connection);
 
+        // Role, schema padrao, consultas de inicializacao, somente leitura e
+        // auto-commit do perfil. Uma que falha derruba a conexao nomeando-se:
+        // uma sessao que ignorou "somente leitura" em silencio e' o pior
+        // resultado possivel.
+        if (Status setup = db::apply_session_setup(*holt, config); !setup) {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            status_message_ = setup.error().to_string();
+            state_.store(SessionState::failed, std::memory_order_release);
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
         // Ja' que estamos no worker, carrega o catalogo antes de liberar a UI:
         // uma arvore vazia por meio segundo pareceria falha de conexao.
         std::unique_ptr<db::CatalogReader> catalog =
@@ -76,6 +198,7 @@ void Session::connect_async(const db::ConnConfig& config) {
         if (catalog == nullptr) {
             const std::lock_guard<std::mutex> lock(mutex_);
             holt_           = std::move(holt);
+            tunnel_         = std::move(tunnel);
             status_message_ = TRF("connected, but there is no catalog reader for '%s'",
                                   config.driver_id.c_str());
             state_.store(SessionState::connected, std::memory_order_release);
@@ -88,50 +211,31 @@ void Session::connect_async(const db::ConnConfig& config) {
         const bool events      = catalog->has_events();
         const bool server_info = catalog->has_server_info();
         const bool users       = catalog->has_users();
+        const bool database_level = catalog->has_database_level();
         const db::Capabilities caps = holt->capabilities();
 
-        std::vector<db::SchemaMeta>     schemas;
-        std::vector<db::ForeignKeyMeta> keys;
-        std::string message;
+        CatalogSnapshot snapshot = read_catalog(*catalog, config.database,
+                                                list_templates, list_unavailable);
 
-        auto loaded = catalog->load_schemas();
-        if (loaded) {
-            schemas = std::move(*loaded);
-
-            for (db::SchemaMeta& schema : schemas) {
-                auto tables = catalog->load_tables(schema.name);
-                if (tables) {
-                    schema.tables = std::move(*tables);
-                    schema.tables_loaded = true;
-                }
-            }
-
-            // As foreign keys alimentam a inferencia de JOIN do completion
-            // (ADR 0004, camada 4). O schema de onde le-las depende do SGBD:
-            // "public" no PostgreSQL, o banco da conexao no MySQL -- pedir
-            // "public" a um MySQL simplesmente nao acharia nada.
-            std::string fk_schema = catalog->default_schema();
-            if (fk_schema.empty()) fk_schema = config.database;
-
-            auto fks = catalog->load_foreign_keys(fk_schema);
-            if (fks) keys = std::move(*fks);
-
-            std::size_t table_count = 0;
-            for (const db::SchemaMeta& schema : schemas) {
-                table_count += schema.tables.size();
-            }
-            message = TRF("connected | %zu schema(s), %zu table(s), %zu FK(s)",
-                          schemas.size(), table_count, keys.size());
-        } else {
-            message = std::string(TR("connected, but the catalog failed: ")) +
-                      loaded.error().to_string();
-        }
+        const std::string message =
+            snapshot.error.empty()
+                ? std::string(TRF("connected | %zu schema(s), %zu table(s), %zu FK(s)",
+                                  snapshot.schemas.size(), snapshot.table_count,
+                                  snapshot.keys.size()))
+                : std::string(TR("connected, but the catalog failed: ")) +
+                      snapshot.error;
 
         const std::lock_guard<std::mutex> lock(mutex_);
         holt_            = std::move(holt);
-        schemas_         = std::move(schemas);
-        foreign_keys_    = std::move(keys);
-        status_message_  = std::move(message);
+        // Perfil sem banco: vale o que o servidor escolheu.
+        if (database_name_.empty()) database_name_ = holt_->current_database();
+        tunnel_          = std::move(tunnel);
+        schemas_         = std::move(snapshot.schemas);
+        foreign_keys_    = std::move(snapshot.keys);
+        databases_       = std::move(snapshot.databases);
+        has_database_level_ = database_level;
+        reports_server_output_ = holt_->reports_server_output();
+        status_message_  = message;
         has_sequences_   = sequences;
         has_user_types_  = user_types;
         has_events_      = events;
@@ -165,6 +269,7 @@ void Session::execute_async(std::string sql) {
         auto result = holt->query(sql);
 
         const std::lock_guard<std::mutex> lock(mutex_);
+        collect_output_locked(*holt);
         if (result) {
             const std::size_t rows = result->row_count();
             const std::size_t cols = result->column_count();
@@ -236,7 +341,17 @@ void Session::execute_script_async(std::vector<std::string> statements,
             }
         }
 
+        // O script abriu a propria transacao e parou no meio: ela e' desfeita
+        // aqui. Sem isto a sessao ficava com a transacao aberta -- no SQL
+        // Server, com as alteracoes anteriores ao erro aplicadas e as travas
+        // presas ate' alguem notar; no PostgreSQL, no estado "abortada".
+        if (failed > 0 && stop_on_error && holt->auto_commit() &&
+            (statements.front() == "BEGIN" || statements.front() == "BEGIN TRANSACTION")) {
+            (void)holt->rollback();
+        }
+
         const std::lock_guard<std::mutex> lock(mutex_);
+        collect_output_locked(*holt);
         if (last_result) result_ = std::move(*last_result);
 
         if (failed > 0) {
@@ -324,6 +439,18 @@ std::optional<db::QueryPlan> Session::take_plan() {
     return out;
 }
 
+std::optional<db::TableMeta> Session::table(std::string_view schema,
+                                            std::string_view name) const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    for (const db::SchemaMeta& s : schemas_) {
+        if (s.name != schema) continue;
+        for (const db::TableMeta& t : s.tables) {
+            if (t.name == name) return t;
+        }
+    }
+    return std::nullopt;
+}
+
 db::SchemaMeta* Session::find_schema(std::string_view schema) {
     for (db::SchemaMeta& s : schemas_) {
         if (s.name == schema) return &s;
@@ -360,6 +487,9 @@ void Session::run_catalog_async(
             busy_.store(false, std::memory_order_release);
             return;
         }
+
+        // Thread novo, dialeto no padrao: o DDL de tabela e' montado aqui.
+        db::set_sql_dialect_for(driver_id_);
 
         // O leitor e' criado por chamada, e nao guardado: ele segura uma
         // referencia ao Holt, e o Holt pode ser trocado por uma reconexao
@@ -562,12 +692,301 @@ void Session::invalidate_table(std::string_view schema,
     t->triggers.clear();
     t->definition.clear();
 
+    t->partitions.clear();
+
     t->columns_loaded     = false;
     t->constraints_loaded = false;
     t->indexes_loaded     = false;
     t->keys_loaded        = false;
     t->triggers_loaded    = false;
+    t->partitions_loaded  = false;
     t->definition_loaded  = false;
+
+    // As listas da relacao (dependencias, regras, politicas, filhas) saem
+    // junto. A chave e' lista + schema + relacao + extra; casar o trecho do
+    // meio dispensa enumerar as listas, e uma nova entra sozinha.
+    std::string scope;
+    scope.push_back('\x1f');
+    scope.append(schema);
+    scope.push_back('\x1f');
+    scope.append(table);
+    scope.push_back('\x1f');
+    std::erase_if(lists_, [&scope](const auto& entry) {
+        return entry.first.find(scope) != std::string::npos;
+    });
+}
+
+// --- Arvore unica (ADR 0018) --------------------------------------------------------
+
+// --- Saida do servidor ------------------------------------------------------------
+
+void Session::collect_output_locked(db::Holt& holt) {
+    for (std::string& line : holt.take_server_output()) {
+        server_output_.push_back(std::move(line));
+    }
+
+    // Uma sessao longa nao cresce sem fim: fica o fim, que e' o que se le'.
+    constexpr std::size_t kMaxLines = 10000;
+    if (server_output_.size() > kMaxLines) {
+        server_output_.erase(server_output_.begin(),
+                             server_output_.begin() +
+                                 static_cast<std::ptrdiff_t>(server_output_.size() -
+                                                             kMaxLines));
+    }
+}
+
+std::vector<std::string> Session::server_output() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return server_output_;
+}
+
+void Session::append_output(std::string line) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    server_output_.push_back(std::move(line));
+}
+
+void Session::clear_server_output() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    server_output_.clear();
+}
+
+void Session::set_database_listing(bool templates, bool unavailable) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    list_templates_   = templates;
+    list_unavailable_ = unavailable;
+}
+
+std::vector<db::DatabaseMeta> Session::databases() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return databases_;
+}
+
+Session::ListState Session::list(db::CatalogList list, std::string_view a,
+                                 std::string_view b, std::string_view c) const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = lists_.find(list_key(list, a, b, c));
+    return it != lists_.end() ? it->second : ListState{};
+}
+
+void Session::load_list_async(db::CatalogList list, std::string a,
+                              std::string b, std::string c) {
+    run_catalog_async([this, list, a, b, c](db::CatalogReader& catalog) {
+        auto items = catalog.load_list(list, a, b, c);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        ListState& state = lists_[list_key(list, a, b, c)];
+        state.loaded = true;
+        if (items) {
+            state.items = std::move(*items);
+            state.error.clear();
+        } else {
+            state.items.clear();
+            state.error = items.error().to_string();
+        }
+    });
+}
+
+std::uint16_t Session::tunnel_port() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return tunnel_ ? tunnel_->local_port() : std::uint16_t{0};
+}
+
+// --- Exportar a consulta inteira ---------------------------------------------------
+
+Session::TransferState Session::transfer_state() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    TransferState state = transfer_;
+    state.rows = transfer_rows_.load(std::memory_order_acquire);
+    return state;
+}
+
+void Session::clear_transfer() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (!transfer_.running) transfer_ = {};
+}
+
+void Session::export_query_async(std::string sql, db::ExportOptions options,
+                                 std::string path) {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+    transfer_rows_.store(0, std::memory_order_release);
+    transfer_cancel_.store(false, std::memory_order_release);
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        transfer_         = {};
+        transfer_.running = true;
+        transfer_.path    = path;
+    }
+
+    worker_ = std::thread([this, sql = std::move(sql), options = std::move(options),
+                           path = std::move(path)] {
+        db::Holt* holt = nullptr;
+        std::string driver;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt   = holt_.get();
+            driver = driver_id_;
+        }
+        // Thread novo: o formato SQL exporta INSERTs com a citacao do SGBD.
+        db::set_sql_dialect_for(driver);
+
+        std::string error;
+        const auto run = [&]() -> Status {
+            if (holt == nullptr) return fail(Errc::io_error, "not connected");
+
+            db::ExportStream stream(options);
+            OTTER_RETURN_IF_ERROR(stream.open(path));
+
+            constexpr std::size_t kChunk = 5000;
+            const std::string body(db::strip_trailing_semicolon(sql));
+            const auto cancelled = [this] {
+                return transfer_cancel_.load(std::memory_order_acquire);
+            };
+
+            bool exported = false;
+
+            // --- Cursor de servidor (PostgreSQL) ---------------------------------
+            //
+            // Uma leitura so', consistente, com memoria limitada ao pedaco. O
+            // cursor so' vive dentro de transacao: em auto-commit abre-se uma
+            // para ele; em modo manual ele entra na do usuario, que fica como
+            // estava.
+            if (holt->capabilities().server_cursors) {
+                const bool own_transaction =
+                    holt->auto_commit() && holt->txn_state() == db::TxnState::idle;
+                if (own_transaction) OTTER_RETURN_IF_ERROR(holt->execute("BEGIN"));
+
+                // SAVEPOINT em modo manual: um DECLARE recusado (a consulta nao
+                // e' um SELECT) abortaria a transacao do usuario inteira.
+                if (!own_transaction) (void)holt->execute("SAVEPOINT otter_export");
+
+                auto declared = holt->execute(
+                    "DECLARE otter_export NO SCROLL CURSOR FOR " + body);
+                if (declared) {
+                    Status status;
+                    while (!cancelled()) {
+                        auto chunk = holt->query("FETCH FORWARD " +
+                                                 std::to_string(kChunk) +
+                                                 " FROM otter_export");
+                        if (!chunk) { status = std::unexpected(chunk.error()); break; }
+                        // O primeiro pedaco vai mesmo vazio: e' dele que sai
+                        // o cabecalho de um resultado sem linhas.
+                        if (chunk->row_count() == 0 && stream.rows() > 0) break;
+                        status = stream.write(*chunk);
+                        if (!status) break;
+                        transfer_rows_.store(stream.rows(), std::memory_order_release);
+                        if (chunk->row_count() < kChunk) break;
+                    }
+                    (void)holt->execute("CLOSE otter_export");
+                    if (own_transaction) {
+                        (void)holt->execute(status ? "COMMIT" : "ROLLBACK");
+                    } else {
+                        (void)holt->execute("RELEASE SAVEPOINT otter_export");
+                    }
+                    OTTER_RETURN_IF_ERROR(status);
+                    exported = true;
+                } else if (own_transaction) {
+                    (void)holt->execute("ROLLBACK");
+                } else {
+                    (void)holt->execute("ROLLBACK TO SAVEPOINT otter_export");
+                }
+            }
+
+            // --- LIMIT/OFFSET, ou a consulta de uma vez ---------------------------
+            if (!exported) {
+                const sql::Dialect& dialect = sql::dialect_for(driver);
+                for (std::size_t page = 0; !cancelled(); ++page) {
+                    const sql::PagedQuery paged =
+                        sql::make_paged_query(sql, dialect, page, kChunk);
+
+                    OTTER_ASSIGN_OR_RETURN(auto chunk, holt->query(paged.sql));
+                    // A linha a mais e' a sonda de "ha' proxima pagina".
+                    const bool more = paged.rewritten && chunk.row_count() > kChunk;
+                    if (more) chunk.hide_rows_beyond(kChunk);
+
+                    if (chunk.row_count() > 0 || page == 0) {
+                        OTTER_RETURN_IF_ERROR(stream.write(chunk));
+                    }
+                    transfer_rows_.store(stream.rows(), std::memory_order_release);
+                    if (!more) break;
+                }
+            }
+
+            return stream.finish();
+        };
+
+        const Status status = run();
+        if (!status) error = status.error().to_string();
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (holt != nullptr) collect_output_locked(*holt);
+        transfer_.running   = false;
+        transfer_.finished  = true;
+        transfer_.cancelled = transfer_cancel_.load(std::memory_order_acquire);
+        transfer_.error     = std::move(error);
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+Session::ObjectState Session::object_info(const db::ObjectRef& ref) const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = objects_.find(ref.key());
+    return it != objects_.end() ? it->second : ObjectState{};
+}
+
+void Session::load_object_info_async(db::ObjectRef ref) {
+    run_catalog_async([this, ref = std::move(ref)](db::CatalogReader& catalog) {
+        db::ObjectInfo info = catalog.load_object_info(ref);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        ObjectState& state = objects_[ref.key()];
+        // Carregado mesmo com erro: sem privilegio o servidor recusa sempre,
+        // e repetir a cada quadro so' repetiria a recusa.
+        state.loaded = true;
+        state.info   = std::move(info);
+    });
+}
+
+void Session::invalidate_object_info(const db::ObjectRef& ref) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    objects_.erase(ref.key());
+}
+
+void Session::reload_catalog_async() {
+    bool templates = false, unavailable = false;
+    std::string database;
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        templates   = list_templates_;
+        unavailable = list_unavailable_;
+        database    = database_name_;
+    }
+
+    run_catalog_async([this, templates, unavailable,
+                       database](db::CatalogReader& catalog) {
+        CatalogSnapshot snapshot =
+            read_catalog(catalog, database, templates, unavailable);
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (!snapshot.error.empty()) {
+            // Mantem a arvore que havia: trocar tudo por vazio porque UMA
+            // releitura falhou esconderia o banco inteiro.
+            status_message_ = snapshot.error;
+            return;
+        }
+        schemas_      = std::move(snapshot.schemas);
+        foreign_keys_ = std::move(snapshot.keys);
+        if (!snapshot.databases.empty()) {
+            databases_ = std::move(snapshot.databases);
+        }
+        lists_.clear();
+        // Um DDL pode ter mudado qualquer objeto aberto: os editores releem.
+        objects_.clear();
+        users_loaded_ = false;
+    });
 }
 
 bool Session::auto_commit() const {
@@ -638,12 +1057,98 @@ void Session::rollback_async() {
                   TR("transaction rolled back"));
 }
 
+void Session::run_statement_async(std::string sql, std::string success_message) {
+    run_txn_async(
+        [sql = std::move(sql)](db::Holt& holt) { return holt.execute(sql); },
+        std::move(success_message));
+}
+
+void Session::ping_async() {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+
+    worker_ = std::thread([this] {
+        db::Holt* holt = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt = holt_.get();
+        }
+        if (holt == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        const auto result = holt->query_internal("SELECT 1");
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        // Numa transacao abortada o servidor recusa qualquer consulta; a
+        // conexao esta' viva, e dizer "perdida" seria mentira.
+        if (!result && holt->txn_state() != db::TxnState::failed) {
+            status_message_ = std::string(TR("connection lost: ")) +
+                              result.error().to_string();
+            state_.store(SessionState::failed, std::memory_order_release);
+        }
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+void Session::sample_async(std::vector<std::pair<std::string, std::string>> queries) {
+    if (busy_.load(std::memory_order_acquire)) return;
+    if (state_.load(std::memory_order_acquire) != SessionState::connected) return;
+    if (queries.empty()) return;
+
+    join_worker();
+    busy_.store(true, std::memory_order_release);
+
+    worker_ = std::thread([this, queries = std::move(queries)] {
+        db::Holt* holt = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            holt = holt_.get();
+        }
+        if (holt == nullptr) {
+            busy_.store(false, std::memory_order_release);
+            return;
+        }
+
+        std::map<std::string, Sample> fresh;
+        for (const auto& [id, sql] : queries) {
+            Sample sample;
+            const auto result = holt->query_internal(sql);
+            if (!result) {
+                sample.error = result.error().to_string();
+            } else if (result->row_count() > 0) {
+                for (std::size_t c = 0; c < result->column_count(); ++c) {
+                    const std::string text(result->text(0, c));
+                    sample.values.emplace_back(result->column(c).info().name,
+                                               std::strtod(text.c_str(), nullptr));
+                }
+            }
+            fresh[id] = std::move(sample);
+        }
+
+        const std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& [id, sample] : fresh) samples_[id] = std::move(sample);
+        sample_serial_.fetch_add(1, std::memory_order_acq_rel);
+        busy_.store(false, std::memory_order_release);
+    });
+}
+
+std::map<std::string, Session::Sample> Session::samples() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return samples_;
+}
+
 void Session::disconnect() {
     join_worker();
 
     const std::lock_guard<std::mutex> lock(mutex_);
     if (holt_) holt_->close();
     holt_.reset();
+    tunnel_.reset();   // encerra o processo do ssh junto com a conexao
     schemas_.clear();
     foreign_keys_.clear();
     result_.reset();
@@ -761,6 +1266,18 @@ std::vector<db::ServerVariable> Session::session_variables() const {
 std::vector<db::ServerVariable> Session::global_variables() const {
     return locked_copy(mutex_, server_info_[3]);
 }
+std::vector<db::ServerVariable> Session::server_info(ServerInfo what) const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto index = static_cast<std::size_t>(what);
+    return index < kServerInfoCount ? server_info_[index]
+                                    : std::vector<db::ServerVariable>{};
+}
+
+bool Session::server_info_loaded(ServerInfo what) const noexcept {
+    const auto index = static_cast<std::size_t>(what);
+    return index < kServerInfoCount && server_info_loaded_[index];
+}
+
 std::vector<db::ServerVariable> Session::engines() const {
     return locked_copy(mutex_, server_info_[4]);
 }

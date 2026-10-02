@@ -159,15 +159,12 @@ Result<std::vector<TableMeta>> MysqlCatalog::load_tables(std::string_view schema
         table.comment        = std::string(rs.text(row, 2));
         table.estimated_rows = to_int64(rs.text(row, 3));
 
+        // View nao tem DATA_LENGTH (vem NULL): fica sem tamanho, em vez de
+        // um "0" que sugeriria tabela vazia.
         const std::int64_t bytes = to_int64(rs.text(row, 4));
         if (bytes > 0) {
-            if (bytes >= 1024 * 1024 * 1024) {
-                table.size_pretty = std::to_string(bytes / (1024 * 1024 * 1024)) + " GB";
-            } else if (bytes >= 1024 * 1024) {
-                table.size_pretty = std::to_string(bytes / (1024 * 1024)) + " MB";
-            } else {
-                table.size_pretty = std::to_string(bytes / 1024) + " kB";
-            }
+            table.size_bytes  = bytes;
+            table.size_pretty = format_size(bytes);
         }
         tables.push_back(std::move(table));
     }
@@ -598,9 +595,8 @@ Result<std::vector<PartitionMeta>> MysqlCatalog::load_partitions(
 
         const std::int64_t bytes = to_int64(rs.text(row, 5));
         if (bytes > 0) {
-            partition.size_pretty = bytes >= 1024 * 1024
-                ? std::to_string(bytes / (1024 * 1024)) + " MB"
-                : std::to_string(bytes / 1024) + " kB";
+            partition.size_bytes  = bytes;
+            partition.size_pretty = format_size(bytes);
         }
 
         if (!rs.is_null(row, 6)) {
@@ -720,6 +716,47 @@ Result<std::vector<ServerVariable>> MysqlCatalog::load_engines() {
         engine.detail = std::string(rs.text(row, 2));
 
         out.push_back(std::move(engine));
+    }
+    return out;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_privileges() {
+    // SHOW PRIVILEGES: Privilege, Context ("Tables,Indexes"), Comment.
+    OTTER_ASSIGN_OR_RETURN(auto rs, holt_.query("SHOW PRIVILEGES"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+    for (std::size_t row = 0; row < rs.row_count() && rs.column_count() >= 3; ++row) {
+        ServerVariable privilege;
+        privilege.name   = std::string(rs.text(row, 0));
+        privilege.value  = std::string(rs.text(row, 1));
+        privilege.detail = std::string(rs.text(row, 2));
+        out.push_back(std::move(privilege));
+    }
+    return out;
+}
+
+Result<std::vector<ServerVariable>> MysqlCatalog::load_plugins() {
+    OTTER_ASSIGN_OR_RETURN(
+        auto rs,
+        holt_.query("SELECT PLUGIN_NAME, PLUGIN_STATUS, PLUGIN_TYPE, "
+                    "       COALESCE(PLUGIN_DESCRIPTION, ''), "
+                    "       COALESCE(PLUGIN_LIBRARY, ''), PLUGIN_VERSION "
+                    "  FROM information_schema.PLUGINS ORDER BY PLUGIN_NAME"));
+
+    std::vector<ServerVariable> out;
+    out.reserve(rs.row_count());
+    for (std::size_t row = 0; row < rs.row_count(); ++row) {
+        ServerVariable plugin;
+        plugin.name  = std::string(rs.text(row, 0));
+        // "ACTIVE  STORAGE ENGINE": o estado e o tipo, que e' o que se procura.
+        plugin.value = std::string(rs.text(row, 1)) + "  " + std::string(rs.text(row, 2));
+        plugin.detail = std::string(rs.text(row, 3));
+        if (!rs.text(row, 4).empty()) {
+            plugin.detail += "\n" + std::string(rs.text(row, 4)) + "  " +
+                             std::string(rs.text(row, 5));
+        }
+        out.push_back(std::move(plugin));
     }
     return out;
 }

@@ -102,6 +102,9 @@ public:
 
     [[nodiscard]] Result<std::vector<ServerVariable>> load_engines();
     [[nodiscard]] Result<std::vector<ServerVariable>> load_charsets();
+    // "User privileges" e "Plugins" do System Info do DBeaver.
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_privileges();
+    [[nodiscard]] Result<std::vector<ServerVariable>> load_plugins();
 
     [[nodiscard]] ServerVersion version() const noexcept { return version_; }
     [[nodiscard]] bool is_mariadb() const noexcept { return mariadb_; }

@@ -23,6 +23,7 @@ using System;
 using System.Runtime.InteropServices;
 public class OtterType {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
@@ -37,6 +38,14 @@ $hwnd = $proc.MainWindowHandle
 [void][OtterType]::SetForegroundWindow($hwnd)
 Start-Sleep -Milliseconds 400
 
+# SendKeys vai para a janela em PRIMEIRO PLANO, seja ela qual for. O Windows
+# pode recusar a troca (quem esta' usando a maquina tem prioridade), e ai' as
+# teclas cairiam no programa do usuario -- um Ctrl+A, Ctrl+V no editor dele.
+# Sem o C-Otter na frente, nao digita.
+if ([OtterType]::GetForegroundWindow() -ne $hwnd) {
+    throw "o C-Otter nao esta' em primeiro plano; nada foi digitado"
+}
+
 if ($Text) {
     # Escapa os metacaracteres do SendKeys para que o texto chegue literal.
     $escaped = $Text -replace '([+^%~(){}\[\]])', '{$1}'
@@ -49,14 +58,8 @@ if ($Keys) {
 Start-Sleep -Milliseconds $WaitMs
 
 if ($Out) {
-    $rect = New-Object OtterType+RECT
-    [void][OtterType]::GetWindowRect($hwnd, [ref]$rect)
-    $w = $rect.Right - $rect.Left
-    $h = $rect.Bottom - $rect.Top
-    $bmp = New-Object System.Drawing.Bitmap $w, $h
-    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
-    $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
-    $gfx.Dispose(); $bmp.Dispose()
-    Write-Host "$Out (${w}x${h})"
+    # A captura e' a da JANELA (PrintWindow), nao a do retangulo da tela: com
+    # outra janela por cima, a tela mostraria a janela de quem esta' usando a
+    # maquina.
+    & (Join-Path $PSScriptRoot "screenshot.ps1") -Out $Out
 }

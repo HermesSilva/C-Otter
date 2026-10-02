@@ -200,8 +200,10 @@ void apply_theme(ImGuiStyle& style) {
     // Superfícies translúcidas: o fundo aparece por trás dos painéis, o que dá
     // profundidade sem sombra pintada.
     const ImVec4 window_bg = to_vec4(with_alpha(p.bg_dark, p.surface_alpha));
-    const ImVec4 popup_bg  = to_vec4(with_alpha(p.bg_darkest,
-                                                std::min(1.0f, p.surface_alpha + 0.04f)));
+    // O popup e' OPACO. Translucido, o texto da arvore aparecia atras dos
+    // itens de menu e se misturava aos atalhos ("F3" seguido de um "commit"
+    // fantasma da barra) -- visto na captura do menu "SQL Editor".
+    const ImVec4 popup_bg  = to_vec4(with_alpha(p.bg_darkest, 1.0f));
 
     c[ImGuiCol_Text]                  = to_vec4(p.text);
     c[ImGuiCol_TextDisabled]          = to_vec4(p.text_dim);

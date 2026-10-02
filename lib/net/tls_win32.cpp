@@ -186,9 +186,13 @@ Status TlsChannel::handshake(Socket& socket, const TlsOptions& options) {
         // Token para enviar: pode vir junto com qualquer status, inclusive de
         // erro (é o alerta TLS que explica a recusa ao servidor).
         if (out[0].pvBuffer != nullptr && out[0].cbBuffer > 0) {
-            const Status sent = socket.write_all(
-                {static_cast<const std::byte*>(out[0].pvBuffer),
-                 out[0].cbBuffer});
+            const std::span<const std::byte> token{
+                static_cast<const std::byte*>(out[0].pvBuffer), out[0].cbBuffer};
+            // O SQL Server embrulha o aperto de mão em pacotes TDS: quem
+            // chamou diz por onde os bytes vão.
+            const Status sent = options.handshake_write
+                                    ? options.handshake_write(token)
+                                    : socket.write_all(token);
             FreeContextBuffer(out[0].pvBuffer);
 
             if (!sent) return std::unexpected(sent.error());
@@ -256,8 +260,10 @@ Status TlsChannel::handshake(Socket& socket, const TlsOptions& options) {
             const std::size_t offset = buffer.size();
             buffer.resize(offset + 8192);
 
-            const Result<std::size_t> read =
-                socket.read_some(std::span(buffer).subspan(offset, 8192));
+            const std::span<std::byte> room = std::span(buffer).subspan(offset, 8192);
+            const Result<std::size_t> read = options.handshake_read
+                                                 ? options.handshake_read(room)
+                                                 : socket.read_some(room);
             if (!read) {
                 return std::unexpected(read.error().with_context("TLS handshake"));
             }

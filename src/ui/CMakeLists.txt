@@ -10,6 +10,22 @@ otter_add_library(otter_ui
         theme.cpp
         icons.cpp
         main_shell.cpp
+        navigator.cpp
+        commands.cpp
+        editor_commands.cpp
+        app_commands.cpp
+        app_windows.cpp
+        grid_commands.cpp
+        object_editor.cpp
+        data_transfer.cpp
+        app_settings.cpp
+        window_placement.cpp
+        script_store.cpp
+        script_session.cpp
+        platform_open.cpp
+        icon_images.cpp
+        hint.cpp
+        icon_assets.cpp
         connection_dialog.cpp
         ddl_dialog.cpp
         sql_document.cpp
@@ -26,6 +42,7 @@ otter_add_library(otter_ui
         otter::otter_sql
         imgui
         texteditor
+        nanosvg
 )
 
 

@@ -63,6 +63,12 @@ struct CellEdit {
     std::size_t column = 0;
     std::string value;
     bool        is_null = false;
+
+    // "Set to default" (`resultset.cell.setDefault`): o UPDATE grava
+    // `coluna = DEFAULT`, e quem decide o valor e' o servidor. Limpar a
+    // celula nao e' a mesma coisa -- numa coluna NOT NULL DEFAULT 0, vazio
+    // produz um comando recusado onde DEFAULT produz zero.
+    bool        is_default = false;
 };
 
 // Linha marcada para exclusao. Guarda os valores da chave, nao o indice: o
@@ -79,6 +85,13 @@ struct RowInsertion {
     // Coluna -> valor. Indices do ResultSet, para casar com o cabecalho.
     std::map<std::size_t, std::string> values;
     std::map<std::size_t, bool>        nulls;
+
+    // Onde a linha APARECE na grade: antes da linha `anchor` do resultado.
+    // `npos` = depois de todas. So' posicao de desenho -- numa tabela a ordem
+    // das linhas e' a do ORDER BY, nao a da insercao --, mas e' o que
+    // distingue "add row" de "add row (insert before)" na tela.
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+    std::size_t anchor = npos;
 };
 
 // Buffer de alteracoes pendentes de um resultado.
@@ -89,7 +102,11 @@ class EditBuffer {
 public:
     void set(std::size_t row, std::size_t column, std::string value);
     void set_null(std::size_t row, std::size_t column);
+    void set_default(std::size_t row, std::size_t column);
     void clear();
+
+    // Descarta as alteracoes de UMA linha (celulas e marca de exclusao).
+    void revert_row(std::size_t row);
 
     // Desfaz a alteracao de uma celula, se houver.
     void revert(std::size_t row, std::size_t column);
@@ -131,7 +148,7 @@ public:
     //
     // Devolve o indice da linha nova no vetor de insercoes; a grade a desenha
     // depois das linhas do resultado.
-    std::size_t add_row();
+    std::size_t add_row(std::size_t anchor = RowInsertion::npos);
     void remove_new_row(std::size_t index);
     void set_new_value(std::size_t index, std::size_t column,
                        std::string value);
@@ -155,6 +172,12 @@ private:
     std::set<std::size_t>      deleted_;
     std::vector<RowInsertion>  insertions_;
 };
+
+// Valor formatado para SQL: numeros e booleanos sem aspas, o resto citado, e
+// NULL para nulo. E' a regra dos UPDATE da grade, exposta para o que mais
+// gera SQL a partir de celulas (db/grid_ops.hpp).
+[[nodiscard]] std::string sql_literal(const ColumnInfo& info,
+                                      std::string_view value, bool is_null);
 
 // Gera um UPDATE por linha alterada.
 //

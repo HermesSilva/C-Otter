@@ -43,10 +43,14 @@ int main() {
 
     const otter::db::StoredProfile* mysql = nullptr;
     for (const auto& stored : *profiles) {
-        if (stored.profile.driver_id == "mysql") { mysql = &stored; break; }
+        // So' perfil LOCAL: este spike cria e altera tabelas, e os perfis
+        // salvos incluem servidores de outras maquinas.
+        const bool local = stored.profile.host == "localhost" ||
+                           stored.profile.host == "127.0.0.1";
+        if (stored.profile.driver_id == "mysql" && local) { mysql = &stored; break; }
     }
     if (mysql == nullptr) {
-        std::printf("sem perfil MySQL salvo\n");
+        std::printf("sem perfil MySQL LOCAL salvo\n");
         return 2;
     }
 

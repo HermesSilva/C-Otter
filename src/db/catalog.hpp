@@ -40,12 +40,22 @@ struct ColumnMeta {
 struct ForeignKeyMeta {
     std::string name;
     std::string source_table;
+    // Chave composta: os nomes separados por virgula, na ordem da chave, dos
+    // dois lados ("pedido_id,item" -> "id,numero").
     std::string source_column;
     std::string target_table;
     std::string target_column;
     std::string on_update;      // NO ACTION, CASCADE, SET NULL...
     std::string on_delete;
     std::string definition;     // texto completo, para tooltip e DDL
+
+    // Schema de cada lado. A chave pode cruzar schemas, e navegar por ela
+    // ("Navigate link", "References" da grade) com o schema da tabela de
+    // origem abriria uma tabela que nao existe la'. Vazio = o mesmo schema.
+    //
+    // No FIM do struct: load_foreign_keys o preenche por posicao.
+    std::string source_schema;
+    std::string target_schema;
 };
 
 // PRIMARY KEY, UNIQUE, CHECK e EXCLUDE. Foreign keys tem estrutura propria.
@@ -130,6 +140,11 @@ struct RoutineMeta {
     std::string name;
     ObjKind     kind = ObjKind::function;   // function ou procedure
     std::string arguments;       // assinatura formatada
+    // So' os tipos de entrada ("integer, text"): o que identifica a sobrecarga
+    // em ALTER/DROP/GRANT. `arguments` nao serve para isso -- traz nomes,
+    // parametros OUT e DEFAULT, que esses comandos recusam.
+    std::string signature;
+    bool        aggregate = false;
     std::string return_type;
     std::string language;        // sql, plpgsql, c...
     std::string comment;
@@ -159,6 +174,7 @@ struct PartitionMeta {
     std::string  expression;    // a coluna ou expressão que particiona
     std::string  description;   // o limite: "1000", "MAXVALUE", "'sul','norte'"
     std::int64_t estimated_rows = 0;
+    std::int64_t size_bytes = -1;
     std::string  size_pretty;
     bool         is_table = false;
 
@@ -217,6 +233,103 @@ struct UserMeta {
     }
 };
 
+// Um banco do servidor (`pg_database`). No PostgreSQL cada banco e' um
+// catalogo ISOLADO: navegar nele exige uma conexao propria (ADR 0018).
+struct DatabaseMeta {
+    std::string  name;
+    std::string  owner;
+    std::string  encoding;
+    std::string  comment;
+
+    // -1 quando o servidor nao deixa medir: pg_database_size exige o
+    // privilegio CONNECT no banco, e pedir o tamanho de um banco sem ele
+    // derrubaria a consulta inteira.
+    std::int64_t size_bytes = -1;
+    std::string  size_pretty;
+
+    bool is_template   = false;
+    bool allow_connect = true;
+};
+
+// "7.7M", "285M", "1.2G" -- o formato da coluna de tamanho do DBeaver. Vazio
+// para tamanho desconhecido (negativo).
+[[nodiscard]] std::string format_size(std::int64_t bytes);
+
+// Um item das pastas que so' LISTAM -- roles, extensoes, tablespaces,
+// encodings, politicas, dependencias... (ADR 0018).
+//
+// Todas tem a mesma forma na arvore: nome, um detalhe ao lado e uma
+// descricao no tooltip. Um struct por tipo seriam vinte e cinco copias do
+// mesmo carregador. Os tipos que a UI EDITA (tabela, coluna, indice,
+// constraint) continuam com struct proprio: la' os campos alimentam o gerador
+// de DDL, nao so' a tela.
+struct CatalogItem {
+    std::string name;
+    std::string detail;    // esmaecido, ao lado do nome
+    std::string tooltip;   // definicao ou descricao
+
+    // Significado por lista. Role: pode fazer login (usuario) ou nao (grupo).
+    // Extensao disponivel: ja' instalada. Evento/regra: habilitado.
+    bool flag = false;
+};
+
+// As listas. O escopo de cada uma (schema, objeto) vai nos argumentos de
+// load_list; o comentario diz o que cada uma espera.
+enum class CatalogList : std::uint8_t {
+    // --- por schema: (schema) -------------------------------------------------
+    schema_indexes,
+    aggregates,
+
+    // --- por relacao: (schema, relacao) ---------------------------------------
+    dependencies,
+    rules,
+    policies,
+    child_tables,
+
+    // --- por rotina: (schema, nome, argumentos) -------------------------------
+    routine_parameters,
+    routine_dependencies,
+
+    // --- por banco ------------------------------------------------------------
+    event_triggers,
+    extensions,
+    tablespaces,
+    foreign_data_wrappers,
+    foreign_servers,
+    user_mappings,        // (servidor)
+    settings,
+    roles,
+    role_members,         // (role)
+    role_belongs,         // (role)
+
+    // --- por servidor ---------------------------------------------------------
+    access_methods,
+    operator_classes,     // (metodo de acesso)
+    operator_families,    // (metodo de acesso)
+    encodings,
+    collations,
+    languages,
+    available_extensions,
+    jobs,
+    job_steps,            // (id do job)
+    job_schedules,        // (id do job)
+
+    // --- SQL Server (docs/MSSQL-MAP.md) ----------------------------------------
+    synonyms,             // (schema)
+    database_triggers,    // triggers de DDL do banco
+    logins,               // os logins do servidor
+
+    // --- SQL Anywhere (docs/SQLANYWHERE-MAP.md) --------------------------------
+    pure_roles,                // os papeis que nao entram no banco
+    web_services,
+    login_policies,
+    login_policy_options,      // (politica)
+    publications,
+    text_configurations,
+    external_environments,
+    spatial_reference_systems,
+};
+
 struct TableMeta {
     std::string  name;
     ObjKind      kind = ObjKind::table;
@@ -227,7 +340,17 @@ struct TableMeta {
 
     std::string  comment;
     std::int64_t estimated_rows = 0;
+
+    // Tamanho em disco. Os BYTES alem do texto: a arvore desenha a coluna de
+    // tamanho com uma barra proporcional a' maior tabela da pasta, e de
+    // "24 kB" nao se tira proporcao. -1 = nao se aplica (view, foreign table).
+    std::int64_t size_bytes = -1;
     std::string  size_pretty;
+
+    // Alguma tabela herda desta (`pg_class.relhassubclass`). Decide se a
+    // pasta "Child tables" aparece -- o `visibleIf="object.hasSubClasses()"`
+    // do DBeaver. Sem isto a pasta apareceria vazia em toda tabela.
+    bool has_subclasses = false;
 
     // Carregamento tardio por pasta: expandir "Colunas" nao deve consultar
     // indices, e navegar ate' a tabela nao deve ler o catalogo inteiro.
@@ -260,12 +383,23 @@ struct TableMeta {
 
     // Uma view nao tem constraints nem chaves estrangeiras -- o DBeaver nem
     // mostra as pastas. Uma materialized view tem indices, mas nao triggers.
+    //
+    // A foreign table guarda os dados em OUTRO servidor: aceita constraint
+    // (declarativa), mas nao indice, FK, particao nem trigger na arvore --
+    // o `<tree>` do DBeaver lhe da' so' Columns, Constraints e Dependencies.
+    [[nodiscard]] bool is_foreign() const noexcept {
+        return kind == ObjKind::foreign_table;
+    }
     [[nodiscard]] bool has_constraints() const noexcept { return !is_view(); }
     [[nodiscard]] bool has_indexes() const noexcept {
-        return kind != ObjKind::view;
+        return kind != ObjKind::view && !is_foreign();
     }
     [[nodiscard]] bool has_triggers() const noexcept {
-        return kind != ObjKind::materialized_view;
+        return kind != ObjKind::materialized_view && !is_foreign();
+    }
+    // FK, References, Partitions, Child tables e Policies: so' tabela real.
+    [[nodiscard]] bool is_real_table() const noexcept {
+        return kind == ObjKind::table || kind == ObjKind::partitioned_table;
     }
 };
 
@@ -370,6 +504,21 @@ public:
     // relatorio pode ter varios KB de SQL.
     [[nodiscard]] Result<std::string> load_view_definition(
         std::string_view schema, std::string_view name);
+
+    // --- Servidor e banco (ADR 0018) -------------------------------------------
+
+    // Os bancos do servidor, em ordem de nome -- o `PostgreDataSource` do
+    // DBeaver. `templates` inclui template0/template1; `unavailable`, os que
+    // nao aceitam conexao (datallowconn falso).
+    [[nodiscard]] Result<std::vector<DatabaseMeta>> load_databases(
+        bool templates, bool unavailable);
+
+    // Uma das listas da arvore. Os argumentos dependem da lista -- ver
+    // CatalogList. Lista que a versao do servidor nao tem devolve vazio, nao
+    // erro: a pasta aparece vazia em vez de quebrar a arvore.
+    [[nodiscard]] Result<std::vector<CatalogItem>> load_list(
+        CatalogList list, std::string_view a = {}, std::string_view b = {},
+        std::string_view c = {});
 
     [[nodiscard]] ServerVersion version() const noexcept { return version_; }
 

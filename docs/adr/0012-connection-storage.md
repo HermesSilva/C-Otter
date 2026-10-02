@@ -3,6 +3,10 @@
 **Data:** 2026-09-21
 **Status:** Aceito
 
+> **Local alterado pelo ADR 0020 (2026-09-30):** os arquivos passaram de
+> `%APPDATA%\C-Otter` para `.C-Otter/`, ao lado do executável. O formato e a cifra
+> descritos aqui continuam valendo.
+
 ## Contexto
 
 As conexões não sobrevivem ao fechamento do programa: host, porta, banco e usuário são

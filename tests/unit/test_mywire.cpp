@@ -14,6 +14,7 @@
 #include "mywire/connection.hpp"
 #include "mywire/packet.hpp"
 #include "db/catalog_mysql.hpp"
+#include "db/drivers/mysql.hpp"
 #include "db/registry.hpp"
 #include "net/crypto.hpp"
 
@@ -165,6 +166,23 @@ OTTER_TEST(mysql_version_parses_the_usual_shapes) {
 
     // Versao sem patch nao pode virar lixo.
     OTTER_CHECK_EQ(parse_server_version("8.0").number, std::uint32_t{80000});
+}
+
+// --- Banco corrente -------------------------------------------------------------
+
+OTTER_TEST(mysql_use_target_reads_the_database_of_a_use) {
+    // A aba da conexao mostra o banco corrente; sem ler o USE ela continuava
+    // com o do perfil depois de trocar de banco pelo icone dela.
+    OTTER_CHECK_EQ(otter::db::mysql_use_target("USE sakila"), std::string("sakila"));
+    OTTER_CHECK_EQ(otter::db::mysql_use_target("  use `my db`;\n"), std::string("my db"));
+    OTTER_CHECK_EQ(otter::db::mysql_use_target("USE `a``b`"), std::string("a`b"));
+    OTTER_CHECK_EQ(otter::db::mysql_use_target("Use\tshop ;"), std::string("shop"));
+
+    // Nao e' um USE (so'): nada muda.
+    OTTER_CHECK(otter::db::mysql_use_target("SELECT 1").empty());
+    OTTER_CHECK(otter::db::mysql_use_target("USER").empty());
+    OTTER_CHECK(otter::db::mysql_use_target("USE a; SELECT 1").empty());
+    OTTER_CHECK(otter::db::mysql_use_target("USE").empty());
 }
 
 // --- Pacote ---------------------------------------------------------------------

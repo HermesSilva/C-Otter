@@ -84,6 +84,15 @@ void DdlDialog::open(std::string title, db::AlterScript script,
     edited_       = as_text(script_);
 }
 
+bool DdlDialog::execute_now() {
+    if (!visible_ || !script_.error.empty() || script_.statements.empty()) return false;
+    if (!on_confirm_) return false;
+
+    on_confirm_(script_.statements);
+    visible_ = false;
+    return true;
+}
+
 bool DdlDialog::draw(bool can_execute, bool ddl_in_transaction) {
     if (!visible_) return false;
 
@@ -92,8 +101,14 @@ bool DdlDialog::draw(bool can_execute, bool ddl_in_transaction) {
 
     ImGui::SetNextWindowSize(ImVec2(760, 520), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin(TRW("Review SQL", "###DdlDialog"), &visible_,
-                     ImGuiWindowFlags_NoDocking)) {
+    // Fundo OPACO (diretiva 13): e' aqui que se le' o comando antes de um
+    // DROP -- o texto de tras nao pode atravessar.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,
+                          static_cast<ImU32>(with_alpha(p.bg_darkest, 1.0f)));
+    const bool shown = ImGui::Begin(TRW("Review SQL", "###DdlDialog"), &visible_,
+                                    ImGuiWindowFlags_NoDocking);
+    ImGui::PopStyleColor();
+    if (shown) {
 
         ImGui::TextColored(col4(p.accent_light), "%s", title_.c_str());
         ImGui::Separator();
@@ -157,9 +172,16 @@ bool DdlDialog::draw(bool can_execute, bool ddl_in_transaction) {
                               script_.destructive.end(),
                               i) != script_.destructive.end();
 
+                // Os geradores mais novos ja' terminam o comando com ';' (e o
+                // fonte de uma funcao termina com o dela): nao dobrar.
+                const std::string& statement = script_.statements[i];
+                std::size_t last = statement.find_last_not_of(" \t\r\n");
+                const bool terminated =
+                    last != std::string::npos && statement[last] == ';';
+
                 ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(col4(destructive ? p.error : p.data), "%s;",
-                                   script_.statements[i].c_str());
+                ImGui::TextColored(col4(destructive ? p.error : p.data),
+                                   terminated ? "%s" : "%s;", statement.c_str());
                 ImGui::PopTextWrapPos();
 
                 if (destructive) {

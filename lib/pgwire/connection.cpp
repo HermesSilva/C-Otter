@@ -133,12 +133,16 @@ Result<Connection::Incoming> Connection::receive() {
 
 Result<Connection> Connection::connect(const ConnectParams& params) {
     OTTER_ASSIGN_OR_RETURN(
-        auto socket, net::Socket::connect(params.host, params.port, params.timeout));
+        auto socket,
+        net::connect_to(params.proxy, params.host, params.port, params.timeout));
 
     Connection conn;
     conn.socket_ = std::move(socket);
     conn.host_   = params.host;
     conn.port_   = params.port;
+    // Guardado para o cancelamento, que abre uma conexao NOVA: sem o proxy
+    // ela nao alcancaria um servidor que so' se ve' atraves dele.
+    conn.proxy_  = params.proxy;
 
     if (params.use_tls) {
         OTTER_RETURN_IF_ERROR(conn.start_tls(params));
@@ -489,8 +493,22 @@ Status Connection::query(std::string_view sql, const RowCallback& on_row,
                 return {};
             }
 
+            case BackendType::notice_response: {
+                // "NOTICE: texto" -- a severidade e a mensagem, como o psql
+                // mostra. Limite defensivo: um laco com RAISE NOTICE pode
+                // emitir milhoes, e ninguem le' mais que os ultimos.
+                const ErrorInfo info = parse_error_response(message.body);
+                constexpr std::size_t kMaxNotices = 5000;
+                if (notices_.size() < kMaxNotices) {
+                    notices_.push_back(
+                        (info.severity.empty() ? std::string("NOTICE")
+                                               : info.severity) +
+                        ": " + info.message);
+                }
+                break;
+            }
+
             case BackendType::empty_query:
-            case BackendType::notice_response:
             case BackendType::parameter_status:
             case BackendType::notification:
                 break;   // informativas, nao alteram o fluxo
@@ -510,7 +528,7 @@ Status Connection::cancel_current_query() const {
     // a resposta da query que queremos interromper.
     OTTER_ASSIGN_OR_RETURN(
         auto socket,
-        net::Socket::connect(host_, port_, std::chrono::seconds(5)));
+        net::connect_to(proxy_, host_, port_, std::chrono::seconds(5)));
 
     MessageWriter writer(0);   // CancelRequest nao tem byte de tipo
     writer.put_int32(kCancelRequestCode);

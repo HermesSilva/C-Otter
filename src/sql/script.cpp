@@ -72,8 +72,199 @@ bool is_clause_boundary(std::string_view word) {
 
 bool Statement::empty() const noexcept { return trim(text).empty(); }
 
+namespace {
+
+// --- SQL Server: lotes -------------------------------------------------------------
+
+// O token e' um `GO` sozinho na linha (`GO` ou `GO 5`)?
+bool is_go_line(const std::vector<Token>& tokens, std::size_t index) {
+    const Token& token = tokens[index];
+    if (!iequals(token.text, "GO")) return false;
+    if (token.kind != TokenKind::keyword && token.kind != TokenKind::identifier) return false;
+
+    // Primeiro da linha...
+    if (index > 0 && tokens[index - 1].line == token.line) return false;
+
+    // ...e ultimo, salvo pelo numero de repeticoes ("GO 5").
+    std::size_t next = index + 1;
+    if (next < tokens.size() && tokens[next].kind == TokenKind::number &&
+        tokens[next].line == token.line) {
+        ++next;
+    }
+    return next >= tokens.size() || tokens[next].kind == TokenKind::end_of_input ||
+           tokens[next].line != token.line;
+}
+
+// O lote precisa ir inteiro para o servidor?
+bool is_atomic_batch(const std::vector<Token>& tokens, std::size_t first,
+                     std::size_t last) {
+    if (first >= last) return false;
+
+    // CREATE | ALTER [OR ALTER] PROC[EDURE] | FUNCTION | TRIGGER | VIEW: o
+    // corpo vai ate' o fim do lote, com ou sem BEGIN ... END.
+    if (iequals(tokens[first].text, "CREATE") || iequals(tokens[first].text, "ALTER")) {
+        std::size_t i = first + 1;
+        // CREATE OR ALTER (SQL Server), CREATE OR REPLACE (SQL Anywhere).
+        if (i + 1 < last && iequals(tokens[i].text, "OR") &&
+            (iequals(tokens[i + 1].text, "ALTER") || iequals(tokens[i + 1].text, "REPLACE"))) {
+            i += 2;
+        }
+        if (i < last) {
+            const std::string_view kind = tokens[i].text;
+            if (iequals(kind, "PROC") || iequals(kind, "PROCEDURE") ||
+                iequals(kind, "FUNCTION") || iequals(kind, "TRIGGER") ||
+                iequals(kind, "VIEW") ||
+                // SQL Anywhere: CREATE EVENT ... HANDLER BEGIN ... END.
+                iequals(kind, "EVENT")) {
+                return true;
+            }
+        }
+    }
+
+    // DECLARE: a variavel so' existe ate' o fim do lote. Partir no ';' faria
+    // o comando seguinte falhar com "Must declare the scalar variable".
+    for (std::size_t i = first; i < last; ++i) {
+        if (iequals(tokens[i].text, "DECLARE") &&
+            (tokens[i].kind == TokenKind::keyword || tokens[i].kind == TokenKind::identifier)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Ha' um BEGIN que abre bloco entre os tokens [first, last)?
+bool has_block(const std::vector<Token>& tokens, std::size_t first, std::size_t last) {
+    for (std::size_t i = first; i < last; ++i) {
+        if (tokens[i].kind != TokenKind::keyword || !iequals(tokens[i].text, "BEGIN")) continue;
+        const bool transaction =
+            i + 1 < last && (iequals(tokens[i + 1].text, "TRANSACTION") ||
+                             iequals(tokens[i + 1].text, "TRAN"));
+        if (!transaction) return true;
+    }
+    return false;
+}
+
+std::vector<Statement> split_batches(std::string_view script, const Dialect& dialect) {
+    std::vector<Statement> statements;
+
+    // Watcom SQL (SQL Anywhere): o corpo de procedure, funcao, trigger e
+    // evento e' SEMPRE um bloco BEGIN ... END, e o comando acaba no END dele --
+    // o que vem depois do ';' e' outro comando, como no dbisql. So' a forma
+    // T-SQL ("CREATE PROCEDURE p AS ..."), sem bloco, vai ate' o fim do lote.
+    //
+    // Mandar o lote inteiro, como no SQL Server, fazia "CREATE PROCEDURE ...
+    // END; SELECT 1;" chegar ao servidor como um comando so', que ele recusa.
+    const bool watcom = dialect.name == "SQL Anywhere";
+
+    Lexer lexer(script, dialect);
+    const std::vector<Token> tokens = lexer.tokenize_all(/*skip_trivia=*/true);
+
+    const auto emit = [&](std::size_t begin, std::size_t end, std::size_t line,
+                          bool atomic) {
+        Statement statement;
+        statement.text   = script.substr(begin, end - begin);
+        statement.offset = begin;
+        statement.line   = line;
+        statement.atomic = atomic;
+        if (!statement.empty()) statements.push_back(statement);
+    };
+
+    // Um lote: os tokens [first, last), o texto [begin, end).
+    const auto batch = [&](std::size_t first, std::size_t last, std::size_t begin,
+                           std::size_t end) {
+        if (first >= last) return;
+        const std::size_t line = tokens[first].line;
+
+        if (is_atomic_batch(tokens, first, last) &&
+            !(watcom && has_block(tokens, first, last))) {
+            emit(begin, end, line, /*atomic=*/true);
+            return;
+        }
+
+        // Como nos outros SGBDs: ';' fora de BEGIN ... END.
+        const std::size_t first_statement = statements.size();
+        std::size_t start = begin;
+        std::size_t start_line = line;
+        std::size_t start_token = first;
+        int block_depth = 0;
+
+        const auto piece = [&](std::size_t piece_end) {
+            // ELSE depois do ';' continua o IF de antes: "IF x SELECT 1; ELSE
+            // SELECT 2;" e' um comando so'.
+            if (start_token < last && iequals(tokens[start_token].text, "ELSE") &&
+                statements.size() > first_statement) {
+                Statement& previous = statements.back();
+                previous.text = script.substr(previous.offset, piece_end - previous.offset);
+                return;
+            }
+            emit(start, piece_end, start_line, /*atomic=*/false);
+        };
+
+        for (std::size_t i = first; i < last; ++i) {
+            const Token& token = tokens[i];
+            if (token.kind == TokenKind::keyword) {
+                if (iequals(token.text, "BEGIN") || iequals(token.text, "CASE")) {
+                    // BEGIN TRANSACTION nao abre bloco.
+                    const bool transaction =
+                        i + 1 < last && (iequals(tokens[i + 1].text, "TRANSACTION") ||
+                                         iequals(tokens[i + 1].text, "TRAN") ||
+                                         iequals(tokens[i + 1].text, "DISTRIBUTED"));
+                    if (!transaction) ++block_depth;
+                } else if (iequals(token.text, "END") && block_depth > 0) {
+                    // Watcom SQL: END IF, END LOOP, END FOR e END WHILE fecham
+                    // o que nao foi contado; END CASE fecha o CASE -- e o
+                    // CASE que o segue nao abre outro.
+                    const std::string_view after =
+                        i + 1 < last ? tokens[i + 1].text : std::string_view{};
+                    if (watcom && (iequals(after, "IF") || iequals(after, "LOOP") ||
+                                   iequals(after, "FOR") || iequals(after, "WHILE"))) {
+                        continue;
+                    }
+                    --block_depth;
+                    if (watcom && iequals(after, "CASE")) ++i;
+                }
+            }
+            if (token.kind != TokenKind::semicolon || block_depth != 0) continue;
+
+            piece(token.offset);
+            start       = token.offset + token.text.size();
+            start_line  = token.line;
+            start_token = i + 1;
+        }
+        if (start < end) piece(end);
+    };
+
+    std::size_t first = 0;
+    std::size_t begin = 0;
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].kind == TokenKind::end_of_input) break;
+        if (!is_go_line(tokens, i)) continue;
+
+        batch(first, i, begin, tokens[i].offset);
+
+        // Pula o numero de repeticoes, se houver.
+        std::size_t next = i + 1;
+        if (next < tokens.size() && tokens[next].kind == TokenKind::number &&
+            tokens[next].line == tokens[i].line) {
+            ++next;
+        }
+        begin = tokens[next - 1].offset + tokens[next - 1].text.size();
+        first = next;
+        i     = next - 1;
+    }
+
+    std::size_t last = tokens.size();
+    while (last > first && tokens[last - 1].kind == TokenKind::end_of_input) --last;
+    batch(first, last, begin, script.size());
+    return statements;
+}
+
+} // namespace
+
 std::vector<Statement> split_script(std::string_view script,
                                     const Dialect& dialect) {
+    if (dialect.go_batch_separator) return split_batches(script, dialect);
+
     std::vector<Statement> statements;
 
     Lexer lexer(script, dialect);

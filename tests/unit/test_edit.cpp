@@ -784,3 +784,50 @@ OTTER_TEST(edit_revert_on_an_untouched_cell_does_nothing) {
     OTTER_CHECK(buffer.empty());
     OTTER_CHECK(!buffer.has_changes());
 }
+
+OTTER_TEST(edit_set_default_writes_the_keyword_not_a_value) {
+    // "Set to default": quem decide o valor e' o servidor. Limpar a celula
+    // gravaria NULL (ou falharia num NOT NULL DEFAULT 0).
+    const ResultSet rs = make_result(
+        {{"cliente_id", DataKind::integer, 16400},
+         {"credito",    DataKind::numeric, 16400},
+         {"nome",       DataKind::string,  16400}},
+        {{"7", "100", "Lontra"}});
+
+    EditBuffer buffer;
+    buffer.set_default(0, 1);
+    buffer.set_default(0, 2);
+
+    const auto updates =
+        generate_updates(rs, find_edit_target(rs, catalog_with_pk()), buffer);
+    OTTER_CHECK(updates.has_value());
+    OTTER_CHECK(has((*updates)[0], "credito = DEFAULT"));
+    // Sem aspas tambem na coluna de texto: 'DEFAULT' seria o literal.
+    OTTER_CHECK(has((*updates)[0], "nome = DEFAULT"));
+    OTTER_CHECK(!has((*updates)[0], "'DEFAULT'"));
+}
+
+OTTER_TEST(edit_revert_row_drops_cells_and_the_delete_mark) {
+    EditBuffer buffer;
+    buffer.set(3, 0, "a");
+    buffer.set(3, 1, "b");
+    buffer.set(4, 0, "c");
+    buffer.mark_deleted(5);
+
+    buffer.revert_row(3);
+    OTTER_CHECK(buffer.find(3, 0) == nullptr);
+    OTTER_CHECK(buffer.find(3, 1) == nullptr);
+    OTTER_CHECK(buffer.find(4, 0) != nullptr);
+
+    buffer.revert_row(5);
+    OTTER_CHECK(!buffer.is_deleted(5));
+}
+
+OTTER_TEST(edit_new_row_remembers_where_it_is_drawn) {
+    EditBuffer buffer;
+    const std::size_t at_end = buffer.add_row();
+    const std::size_t before = buffer.add_row(2);
+
+    OTTER_CHECK(buffer.insertions()[at_end].anchor == RowInsertion::npos);
+    OTTER_CHECK_EQ(buffer.insertions()[before].anchor, std::size_t{2});
+}

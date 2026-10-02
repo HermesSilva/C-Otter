@@ -55,15 +55,26 @@ Medir o produto contra si mesmo produz número que sobe sem o produto se aproxim
 
 Cobertura é sempre contra o DBeaver.
 
-## 5. Ícone próprio por tipo de objeto
+## 5. Ícone: o original do DBeaver
 
-Cada nó da árvore e cada ação da barra precisa de um ícone **sugestivo, elegante e
-futurista**, distinguível de relance. Reaproveitar um desenho genérico para dois tipos
-diferentes é dívida — está mapeada em `docs/NAVIGATOR-TREE.md` §"Ícone próprio por tipo".
+**Cada nó da árvore e cada ação da barra usa o ícone que o DBeaver usa para aquilo.** Quem
+vem de lá reconhece o ícone antes de ler o rótulo — é a diretiva 12 aplicada ao desenho.
 
-Desenhar em `src/ui/icons.cpp`, com o traço fino dos existentes, na caixa normalizada
-−0.5..0.5 de `Canvas`. Nada de fonte de ícones nem atlas: vetorial escala com DPI e herda a
-cor do tema.
+Como acrescentar um:
+
+1. Achar o arquivo no DBeaver (`icon=` do `plugin.xml`, resolvido por `DBIcon.java` /
+   `UIIcon.java`).
+2. Pôr a linha no `MAP` de `tools/embed_icons.py` e rodar a ferramenta — ela copia o
+   original para `assets/icons/dbeaver/`, atualiza o `NOTICE` e gera `src/ui/icon_assets.cpp`.
+3. Para pasta, a regra fica em `folder_icon()` (`src/ui/icon_images.cpp`).
+
+Só se desenha em `src/ui/icons.cpp` (traço fino, caixa normalizada −0.5..0.5 de `Canvas`) o
+que o DBeaver **não tem**, e o equivalente vetorial de cada ícone novo: os vetoriais são o
+conjunto "C-Otter" (*Help → Icons*) e o que aparece sem textura. Nada de fonte de ícones.
+
+Os SVG são rasterizados no tamanho exato pelo nanosvg; um SVG que ele não lê sai vazio em
+silêncio, e o teste `icons_dbeaver_originals_all_rasterize` existe para isso. Decisão e
+alternativas rejeitadas no ADR 0019.
 
 ## 6. Nada de campo que finge funcionar
 
@@ -106,6 +117,25 @@ Se um teste falhou, dizer com a saída. Se um passo foi pulado, dizer. Se a auto
 errou o clique três vezes, dizer — e não apresentar como verificado o que não foi.
 
 
+## 11-A. Conferir na tela sem tomar a máquina de quem está usando
+
+O usuário trabalha na mesma máquina enquanto a conferência roda. **Nada de clique,
+tecla ou foco roubado** — já aconteceu de um clique direito cair na janela do navegador
+dele, e de uma captura fotografar a janela errada.
+
+| Para | Usar |
+|---|---|
+| Abrir o programa | `build\start_app.ps1` (`OTTER_NO_FOCUS`: a janela nasce sem foco) |
+| Acionar a tela | `tools\cmd.ps1 "<linha>" ...` — o canal `OTTER_COMMAND_FILE`, que executa pelo MESMO caminho do menu |
+| Clicar sem o mouse dele | `tools\postclick.ps1 -X -Y [-Hover]` (PostMessage só à janela de teste; coordenadas da captura) |
+| Ver a tela | `tools\screenshot.ps1` (PrintWindow: fotografa a janela mesmo coberta) |
+| Conferir o SQL de uma revisão | `ddl dump` grava o script em `<arquivo de comandos>.ddl` — texto, não pixels |
+| Conferir o efeito | `spike_qq.exe <perfil> --db <banco> "<sql>"` |
+
+Funcionalidade nova que só se alcança por clique ganha uma linha no canal de comandos
+(`poll_command_file`, `object_command`). O canal prova que o comando funciona; **não**
+prova que a tecla ou o clique chegam a ele — isso se diz no relato (diretiva 11).
+
 ## 12. Elemento de tela parecido com o do DBeaver — e validado como tal
 
 **Todo elemento de tela e de diálogo deve ser semelhante ao equivalente do DBeaver: o
@@ -147,3 +177,61 @@ perceber, não.
 
 Mapa do diálogo de conexão em `docs/DIALOG-PARITY.md`; da árvore, em
 `docs/NAVIGATOR-TREE.md`.
+
+## 13. Evoluir o DBeaver, não regredir — e com acabamento
+
+Nas palavras do usuário:
+
+> "Este projeto pode e deve evoluir o DBeaver, não regredir."
+
+> "Estamos numa era moderna que tudo deve ser elegante, suave, simples e funcional."
+
+Paridade (diretiva 12) é o piso, não o teto. Onde o DBeaver carrega uma herança ruim do
+Eclipse, o C-Otter oferece o caminho melhor **sem tirar o antigo**: é o que os perfis de
+atalho fazem (DBeaver e C-Otter, em *Help → Keymap*). Um comando novo entra na tabela de
+`src/ui/commands.cpp` com as teclas dos dois perfis, e `docs/EDITOR-COMMANDS.md` é gerado
+dela (`python tools/commands_doc.py`).
+
+Acabamento é requisito:
+
+- **Dica** passa por `src/ui/hint.hpp` (`Hint(...).row(...).show()` ou `hint(texto)`).
+  Nunca `ImGui::SetTooltip`: é o que mantém o cartão igual na interface inteira.
+- **Popup e janela flutuante são opacos.** Texto atrás de texto não se lê.
+- **Distâncias da árvore** saem de `tree_arrow_gap()` / `tree_label_gap()`, não de
+  literais em cada nó.
+- Capturar e **ampliar** antes de dar por pronto: sobreposição de dois pixels e atalho
+  colado no rótulo só aparecem no zoom (`tools/crop.py` faz o recorte ampliado).
+
+## 14. O produto é portátil — sempre
+
+Nas palavras do usuário:
+
+> "Este produto será sempre um modelo portátil."
+
+**Tudo o que o programa grava fica em `.C-Otter/`, ao lado do executável**: preferências
+(`settings.json`), disposição das janelas (`layout.ini`), conexões e senhas. Nada no perfil
+do usuário, nada no registro, nada no diretório de trabalho.
+
+- Caminho de dados se pede a `otter::data_directory()` (`src/base/paths.hpp`). Nunca
+  `getenv("APPDATA")`, `HOME` ou um caminho relativo ao diretório corrente.
+- Arquivo novo de configuração nasce **com os padrões gravados**, todas as opções — o
+  arquivo é também a lista do que se pode configurar. O tema padrão é o **âmbar**.
+- Teste não deixa arquivo fora da pasta temporária (um contexto ImGui de teste precisa de
+  `io.IniFilename = nullptr`).
+- O diálogo de conexão só abre sozinho quando não há conexão salva.
+- **Na primeira execução** (pasta ausente ou vazia) as conexões salvas do DBeaver, do
+  pgAdmin e do SSMS são copiadas para `.C-Otter/` — só leitura do lado delas, e só
+  dessa vez (ADR 0023). Nas palavras do usuário: "Ao abrir e a pasta não existir ou
+  estiver vazia deve copiar as conexões salvas, se existirem, do DBeaver, do pgAdmin e
+  do MS SQL Server Management Studio."
+- O que o programa gera por conta própria também fica lá: `exports/`, `scripts/`,
+  `diagnostics.txt`.
+- **Os scripts SQL do usuário ficam em `.script/`, também ao lado do executável**, e são
+  gravados sozinhos — sair nunca pergunta por eles (ADR 0025). Nas palavras do usuário:
+  "Todos script, deve ser salvo, na pasta '.script', referente ao exe, ao sair do app não
+  deve perguntar para salvar, porque o salvamento deve ser automático, alguns ms, após
+  parar a digitação." Caminho por `ui::scripts_directory()`; a conferência na tela usa
+  `OTTER_SCRIPT_DIR` (o `build\start_app.ps1` já põe) para não mexer nos scripts dele.
+
+Decisão, alternativas rejeitadas e o que isso custa (as senhas viajam com a pasta) no
+ADR 0020.
